@@ -1,147 +1,287 @@
 # PLAN.md — AYRA roadmap
 
-Work top to bottom. A task is done when its **Check** passes; then tick it `[x]` and add one line to
-[PROGRESS.md](PROGRESS.md). 🧑 = needs the owner (stop and give step-by-step instructions).
-Rules for how to work are in [CLAUDE.md](CLAUDE.md).
+Built around [docs/VISION.md](docs/VISION.md) (what the owner wants) and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (cloud core + laptop desk). Rules are in
+[CLAUDE.md](CLAUDE.md).
+
+**Every phase runs the same way:** intent check (restate the goal in 3–5 bullets, settle the open
+points, wait for "go") → tasks, each done when its **Check** passes (tick `[x]` + one PROGRESS.md
+line) → a short demo from the phone → merge after the owner's OK. 🧑 = the owner does this step;
+they get click-by-click instructions when it comes up.
 
 ---
 
-## Phase 0 — Setup ✅
+## Done
 
-- [x] 0.1 Clone adewaskar/jarvis into `E:\jarvis`; rename its remote to `upstream`.
-- [x] 0.2 Install dependencies (`npm ci`); record baseline build ✓ and lint (2 upstream warnings).
-- [x] 0.3 Baseline brain test: upstream bridge answers through the owner's Claude login on Windows.
+**Phase 0 — Setup** ✅
+- [x] 0.1 Clone adewaskar/jarvis into `E:\jarvis`; its remote renamed `upstream`.
+- [x] 0.2 Install dependencies; baseline build ✓, lint (2 upstream warnings).
+- [x] 0.3 The upstream bridge answers through the owner's Claude login on Windows.
 
-## Phase 1 — Foundation (AYRA identity + Windows) · branch `phase-1-foundation` ✅
+**Phase 1 — Foundation (AYRA identity + Windows)** ✅ merged to `main`
+- [x] 1.1 Identity in one file (`config/identity.json` + loaders).
+- [x] 1.2 AYRA persona prompt (`bridge/persona.mjs`).
+- [x] 1.3 Wake phrase "Hey AYRA" + mishearings, en-IN.
+- [x] 1.4 Rebrand: HUD, wordmark, title, `ayra_*` tool servers, `AYRA_*` settings.
+- [x] 1.5 Windows: Chrome named pipe, `--writes`, `.env.local`, no `/tmp`.
+- [x] 1.6 Voice chosen by identity (female, en-IN first); Kokoro voices; filler lines.
+- [x] 1.7 Windows-aware `npm run setup`; `npm run smoke`.
+- [x] 1.8 CLAUDE.md, PLAN.md, PROGRESS.md.
+- [x] 1.9 Agent SDK 0.3.287 (its Claude Code supports `claude-opus-5-5`).
+- [x] 1.10 Errors are errors (`is_error` honoured; smoke fails on them).
+- [x] 1.11 README + `.env.example` for AYRA.
+- [x] 1.12 Cleanup: honorific-aware errors, stale comments, LF line endings.
+- [x] 1.13 Verified end to end on Windows.
+- [x] 1.14 Organised commits, merged to `main`, pushed.
 
-Goal: AYRA runs on this laptop under its own name, Windows-correct, verified, pushed to GitHub.
+**Phase 2 — Core brain & safety** ✅ merged to `main`
+- [x] 2.1 Connector policy: Gmail/Calendar/Drive read-only; 7 other connectors removed.
+- [x] 2.2 `bridge/brain.mjs`: one reusable brain; the WebSocket became a channel adapter.
+- [x] 2.3 Local date and time on every question (prompt caching kept).
+- [x] 2.4 The conversation survives a reload (`data/state.json`).
+- [x] 2.5 Audit log `data/logs/YYYY-MM-DD.jsonl`.
+- [x] 2.6 `npm test` + tests for gate, wake phrase, identity, origin, state, audit, time.
 
-- [x] 1.1 Identity in one file — `config/identity.json` + loaders `bridge/identity.mjs`, `src/identity.ts`.
-- [x] 1.2 AYRA persona prompt — `bridge/persona.mjs`; honorific optional (none by default).
-- [x] 1.3 Wake phrase "Hey AYRA" + common mishearings — `src/lib/wake.ts`; speech recognition in en-IN.
-      Check: 17/17 sample transcripts behave (incl. "the era of AI" not waking).
-- [x] 1.4 Rebrand: HUD text, boot wordmark, tab title, tool servers `ayra_*`, `[ayra]` logs, `AYRA_*`
-      settings, package name.
-- [x] 1.5 Windows: Chrome control over the named pipe, `npm run bridge:writes` via `--writes`, bridge
-      loads `.env.local`, no `/tmp`, Claude config path normalised.
-- [x] 1.6 Voice by identity: female, en-IN → en-GB → en-US, Edge "Natural" voices first; Kokoro female
-      voices; honorific-aware filler lines.
-- [x] 1.7 Scripts: Windows-aware `npm run setup`; `npm run smoke` end-to-end test.
-- [x] 1.8 Project docs: CLAUDE.md (rules), PLAN.md (this roadmap), PROGRESS.md (log + resume point).
-- [x] 1.9 Update Claude Agent SDK 0.3.220 → 0.3.287 — its bundled Claude Code (2.1.220) is too old for
-      `claude-opus-5-5`. Check: `npm run smoke` passes on `claude-opus-5-5`.
-- [x] 1.10 Errors are errors: the bridge honours the SDK's `is_error` (never speaks "API Error…" as an
-      answer); smoke fails on error answers. Check: a bad model name → smoke FAIL, clean spoken line.
-- [x] 1.11 README for AYRA (what it is, quick start, what each file is for) + `.env.example` with
-      `AYRA_*` settings.
-- [x] 1.12 Cleanup: honorific-aware error lines (`src/lib/bridge.ts`, `src/lib/anthropic.ts`); stale
-      `JARVIS_*` comments; smoke reads `.env.local`.
-- [x] 1.13 Verify: build, lint 0 warnings, setup green, smoke on `claude-opus-5-5`, face loads as A.Y.R.A.
-- [x] 1.14 Git: organised commits on `phase-1-foundation`; bring in the owner's initial GitHub commit
-      (no force-push); merge to `main`; push.
-- [ ] 1.15 🧑 Owner test in a real Chrome/Edge window: say "Hey AYRA", ask something, judge the voice
-      (press V to cycle voices). Doesn't block Phase 2.
-
-## Phase 2 — Core brain & safety · branch `phase-2-core` ✅
-
-Goal: one reusable brain for every channel, safe defaults for the owner's connected accounts, the
-conversation survives reloads, an audit trail, and automated tests.
-
-- [x] 2.1 Connector policy. The brain inherits 10 claude.ai connectors (Gmail, Calendar, Drive, Figma,
-      Canva, Lucid, draw.io, Beautiful.ai, Wispr Flow, Claude Docs). Keep Gmail/Calendar/Drive reads;
-      keep the rest out of AYRA's sessions; deny every effectful connector tool even with writes on
-      until confirmations exist (3.3). Debug mode logs the tool names AYRA sees.
-      Check: unit test on `decideTool` + smoke.
-- [x] 2.2 Extract `bridge/brain.mjs` (session creation, gate, persona per channel) from `server.mjs`;
-      the WebSocket becomes one channel adapter. Check: smoke passes, behaviour unchanged.
-- [x] 2.3 Time & locale on every turn (local date, time, weekday in IST) without breaking prompt
-      caching. Check: "what is tomorrow's date?" is right.
-- [x] 2.4 Conversation survives a page reload: resume the SDK session (id kept in `data/state.json`).
-      Check: reload, AYRA remembers the previous question.
-- [x] 2.5 Audit log `data/logs/YYYY-MM-DD.jsonl`: turns, tools, allow/deny decisions, errors — no secrets.
-- [x] 2.6 Tests: `npm test` (node:test) for `decideTool`, wake phrase, identity, origin checks; added to
-      the Definition of Done.
-
-## Phase 3 — AYRA Anywhere (phone access) · branch `phase-3-anywhere`
-
-Goal: reach AYRA from the phone on any network, safely, while the laptop is at home.
-
-- [x] 3.0 Personality & voice (owner's request): excited and warm; a little playful roasting and
-      flirting at the right moments (kind, PG, never during bad news or stress; "AYRA, be serious"
-      turns it off); ElevenLabs voice Lily `pFZP5JQG7iQjIQuC4Bku` (Blondie needs a paid plan). 🧑 needs the owner's ElevenLabs API key
-      and approval of sample replies before merging.
-- [x] 3.1 🧑 Owner creates a Telegram bot with @BotFather and finds their Telegram user ID; both go into
-      `.env.local` (`AYRA_TELEGRAM_TOKEN`, `AYRA_TELEGRAM_OWNER_ID`).
-- [x] 3.2 Telegram channel `bridge/telegram.mjs`: long polling (no open ports), owner-only, text in/out,
-      Markdown persona variant, with emoji (owner's choice). Check: message from the phone on mobile data → answer.
-- [ ] 3.3 Confirmations: effectful tools pause and ask on Telegram with Approve / Deny buttons; no answer
-      in 2 minutes = deny. Check: "send an email to …" asks first; Deny cancels.
-- [ ] 3.4 Voice notes → text (decision Q5), replies as text.
-- [ ] 3.5 `notify()` — push a message to the owner's phone (used by reminders, watchers, health).
-- [ ] 3.6 🧑 Always-on: start at login (Task Scheduler), restart on crash, power settings (plugged in =
-      never sleep, lid closed = do nothing), `/status` command.
-- [ ] 3.7 🧑 HUD on the phone: Tailscale on laptop + phone, `tailscale serve` HTTPS, pairing token,
-      CSP and allowed origins updated.
-
-## Phase 4 — Memory · branch `phase-4-memory`
-
-- [ ] 4.1 `bridge/memory.mjs` + tools `remember`, `recall`, `forget`, `list`; files in `data/memory/`;
-      every write logged.
-- [ ] 4.2 Owner profile `data/memory/profile.md`, loaded into every session (stable, cache-friendly).
-- [ ] 4.3 🧑 College context: timetable, subjects, exam and assignment deadlines (owner provides once).
-- [ ] 4.4 Daily journal: end-of-day summary of what AYRA did and learned.
-- [ ] 4.5 Privacy: "forget X", export, a memory viewer blade.
-
-## Phase 5 — Automations · branch `phase-5-automations`
-
-- [ ] 5.1 Scheduler `bridge/scheduler.mjs`: one-shot reminders + recurring routines (cron), persisted in
-      `data/routines.json`, results via `notify()`. Check: "remind me at 6 pm to call home" fires on the phone.
-- [ ] 5.2 Manage routines by voice/text ("every weekday at 7:30 brief me").
-- [ ] 5.3 Morning brief: weather, today's classes, deadlines, calendar, important mail.
-- [ ] 5.4 Watchers: check a page or feed periodically; notify on change (e.g. results published).
-- [ ] 5.5 Automated runs are read-only by default; effectful steps need the owner's Approve (3.3).
-
-## Phase 6 — Integrations & PC control · branch `phase-6-integrations`
-
-- [ ] 6.1 Gmail / Calendar / Drive through the claude.ai connectors: reads (summaries, agenda, find
-      files) → drafts → sending only behind Approve.
-- [ ] 6.2 Windows PC control `bridge/pc.mjs`: open apps/URLs, volume/media, lock, screenshot,
-      battery/network status; effectful ones gated.
-- [ ] 6.3 Files: find a file on the laptop and send it to the phone.
-- [ ] 6.4 Optional: Android phone (adb), WhatsApp (official route only, or owner-accepted risk), GitHub,
-      Spotify.
-
-## Phase 7 — Hardening & polish · branch `phase-7-polish`
-
-- [ ] 7.1 Usage tracking per day; warning near plan limits.
-- [ ] 7.2 Kill switch: "AYRA, stand down" / Telegram `/stop` disables every effectful tool.
-- [ ] 7.3 Voice: ElevenLabs voice choice; a custom "AYRA" wake word (Porcupine keyword) instead of the
-      speech-based one.
-- [ ] 7.4 AYRA visual identity (colours, logo); replace upstream audio tracks with cleared ones.
-- [ ] 7.5 Encrypted backups of `data/` to an owner-chosen place.
-- [ ] 7.6 Security review of the whole system before writes are ever on by default.
+**Phase 3 — Phone via Telegram** ✅ on `phase-3-anywhere` — 🧑 merge to `main` after the owner's OK
+- [x] 3.0 Personality (excited, warm, a little roasting and flirting, calls the owner "boss") and
+      the ElevenLabs voice Lily.
+- [x] 3.1 🧑 Bot @Ayra_rehan_bot; owner ID saved — only the owner's account gets answers.
+- [x] 3.2 Telegram channel `bridge/telegram.mjs` (long polling, owner-only, batching, emoji).
 
 ---
 
-## Open decisions (owner)
+## Phase 4 — Always-on core: one real task with the laptop off · branch `phase-4-core`
 
-| ID | Question | Default until answered |
+**Goal:** with the laptop shut, the owner messages AYRA on Telegram and she does one real daily task:
+checks whether an idea already exists and replies with a short verdict and sources.
+
+**Why:** it proves the cloud home end to end (server, Claude login, Telegram, web research) before
+anything is built on it. Idea checking is the owner's own daily ask ("I want to know whether a
+solution already exists or not") and needs no account beyond the server.
+
+**Intent check — settle:** what a good idea-check answer looks like · the host (DigitalOcean
+Bangalore ≈ ₹1,050/month, my pick, or Hetzner ≈ ₹620) and paying for it · a Tailscale account
+(free) · three real ideas to test with.
+
+**🧑 Owner steps:** create the hosting account and server (paid) · install Tailscale on the laptop
+and phone and sign in · log in to Claude on the server (`claude` → `/login`, paste the code) · turn
+Telegram off on the laptop at cut-over.
+
+- [ ] 4.1 `deploy/`: server setup script and steps — `ayra` user, Node 24, 2 GB swap, closed
+      firewall, Tailscale, automatic security updates, `systemd` service `ayra-core`.
+      Check: the service runs and restarts after a forced crash; no public listening ports.
+- [ ] 4.2 🧑 Claude on the server through Anthropic's `/login`; the claude.ai connectors arrive.
+      Check: `npm run smoke` passes on the server; AYRA reads today's calendar from the server.
+- [ ] 4.3 `bridge/core.mjs` + `npm run core`: Telegram, brain, gate, audit — no HUD tools. The
+      laptop stops reading Telegram (cut-over); a `409` from Telegram alerts the owner.
+      Check: laptop shut → Telegram answers; a second reader → an alert, not a silent tug-of-war.
+- [ ] 4.4 The idea check: persona and tools tuned so "does this already exist?" returns a verdict,
+      3–5 real sources, how the owner's idea could differ, and a next step.
+      Check: three of the owner's real ideas answered with the laptop shut; the owner rates each.
+- [ ] 4.5 Health: `/status` (uptime, Claude login state, today's usage, laptop online?) and an alert
+      before the Claude login expires.
+      Check: `/status` from the phone shows the truth.
+- [ ] 4.6 Move in: copy the laptop's `data/` (state, logs) to the server; refresh README and
+      `.env.example` (voice Lily, "boss", cloud setup).
+      Check: `/log` shows today's entries; README matches what's real.
+
+**Demo:** phone only, laptop shut — check an idea, then `/status`. Until Phase 5 the HUD still runs
+its own brain on the laptop, with Telegram off there.
+
+## Phase 5 — Two homes: the laptop joins · branch `phase-5-desk`
+
+**Goal:** when the laptop is on, the same AYRA (same conversation, same memory) uses the laptop's
+Chrome, files and HUD; when it's off, she says so and queues the job.
+
+**Why:** "one assistant, two homes — she works out by herself whether the laptop is online and
+sends each job to the right place."
+
+**Intent check — settle:** which laptop jobs matter first (open a page in your Chrome, find a file,
+…) · how long a queued job may wait · HUD and Telegram as one shared conversation.
+
+**🧑 Owner steps:** turn the Windows page file back on and restart Chrome · let the desk start at
+login · voice test in Chrome.
+
+- [ ] 5.1 `bridge/link.mjs`: token, hello, heartbeat, tool calls, reconnect with back-off.
+      Check: unit tests; cut the network → offline within 45 s → back online by itself.
+- [ ] 5.2 `bridge/desk.mjs` + `npm run desk`: the HUD socket (localhost) and the desk tools, served
+      over the link; no Claude process on the laptop; `npm start` = desk + face.
+      Check: a HUD question is answered by the cloud core; the laptop uses clearly less memory.
+- [ ] 5.3 Routing: the desk tool catalogue in the core, the `[Laptop: online/offline]` stamp, the
+      `LAPTOP_OFFLINE` result.
+      Check: "open my college portal in Chrome" works when on; when off AYRA says so first.
+- [ ] 5.4 The laptop queue on SQLite (`bridge/db.mjs`, `bridge/jobs.mjs`): queued while off, runs on
+      reconnect, result to Telegram, 7-day expiry, `/jobs`.
+      Check: queue a job, open the laptop, the result arrives on the phone.
+- [ ] 5.5 One conversation: a single main session for HUD and Telegram, channel tags, one persona
+      with per-channel style.
+      Check: ask on the HUD, continue on Telegram — she remembers.
+- [ ] 5.6 🧑 The desk starts at login and restarts on crash; page file on.
+      Check: after a reboot the desk is online within a minute.
+- [ ] 5.7 🧑 Voice test in a real Chrome window (was 1.15).
+      Check: "Hey AYRA" wakes her and she answers in Lily's voice.
+
+## Phase 6 — Knows me: memory and personalisation · branch `phase-6-memory`
+
+**Goal:** AYRA remembers what matters about the owner (goals, schedule, people, preferences,
+progress) across days, channels and both homes, and uses it without being reminded.
+
+**Why:** "an intelligent central system which cares about my needs and wants and is personalized
+especially for me."
+
+**Intent check — settle:** what she remembers by herself vs only when told · what is off-limits ·
+the profile's shape · Notion's role (her notebook).
+
+**🧑 Owner steps:** approve the first profile · give the timetable, gym times and deadlines once ·
+connect Notion in claude.ai (a new integration).
+
+- [ ] 6.1 `bridge/memory.mjs`: remember / recall / forget / list on SQLite; every write audited.
+      Check: tell a fact on Telegram, ask about it a day later on the HUD.
+- [ ] 6.2 🧑 The owner profile in every session (stable, so it stays cached).
+      Check: answers use it unprompted.
+- [ ] 6.3 🧑 College timetable, gym, exam and assignment deadlines, kept current.
+      Check: "what's next today?" is right.
+- [ ] 6.4 Nightly reflection: the day's conversations become memory updates, sent as a short digest
+      the owner can veto.
+      Check: the digest arrives; a vetoed item is gone.
+- [ ] 6.5 Privacy controls: "forget X", export, view (`/memory`, a HUD blade).
+      Check: a forgotten item can't be recalled.
+- [ ] 6.6 🧑 Notion connected: an "AYRA notebook" page mirrors the profile and notes.
+      Check: the page exists and stays in step.
+- [ ] 6.7 Nightly encrypted backup of the core's `data/` to the laptop when it's online (was 7.5).
+      Check: a restore test on a copy.
+
+## Phase 7 — Acts and speaks first: approvals, reminders, voice notes · branch `phase-7-actions`
+
+**Goal:** AYRA takes real actions after one Approve tap, messages the owner first, and understands
+voice notes.
+
+**Why:** it turns AYRA from an answerer into an assistant, and makes the safety model real before
+any agent gets powers.
+
+**Intent check — settle:** which actions she may take at all (each behind Approve) · quiet hours ·
+reminder style · what the morning plan and night review contain.
+
+**🧑 Owner steps:** testing only.
+
+- [ ] 7.1 Approve/Deny buttons, `bridge/approvals.mjs` (was 3.3): effectful calls pause with the
+      exact details; 2 minutes without an answer = deny; the rules table lives in the gate;
+      background runs are read-only by default (was 5.5).
+      Check: "email X" asks first; Deny cancels; the audit log shows both.
+- [ ] 7.2 `notify()` with quiet hours (was 3.5).
+      Check: a test alert arrives; nothing comes during quiet hours.
+- [ ] 7.3 Scheduler: reminders and routines in SQLite, managed by text (was 5.1–5.2).
+      Check: "remind me at 6 pm to call home" fires on the phone.
+- [ ] 7.4 Morning plan and night review, offered, never forced (was 5.3).
+      Check: a week of real use; the owner keeps or changes them.
+- [ ] 7.5 Voice notes → text with ElevenLabs Scribe (was 3.4).
+      Check: a Hinglish voice note is understood and answered.
+- [ ] 7.6 Kill switch: `/stop` or "AYRA, stand down" turns off every effectful tool (was 7.2).
+      Check: an action after `/stop` is refused.
+- [ ] 7.7 Usage meter: today's usage in `/status`, a cap for background work, a warning near the
+      limits (was 7.1).
+      Check: the cap pauses a background job, never the chat.
+- [ ] 7.8 Security review of the core, link, gate and approvals before any agent can act (was 7.6).
+      Check: every finding fixed or accepted by the owner.
+
+## Phase 8 — Agents: the framework and the first agent · branch `phase-8-agents`
+
+**Goal:** the central AYRA can start, watch and judge agents, and the first agent is live.
+
+**Why:** "incrementally add specific agents for specific tasks" — with monitoring and evaluation
+from day one.
+
+**Intent check — settle:** which agent first (VISION's guess: the DSA mentor) · what "done" means
+for it · what it may do alone vs with Approve · its schedule · its Notion pages.
+
+**🧑 Owner steps:** take the mentor's level test · approve its first milestone plan.
+
+- [ ] 8.1 The agent registry (`agents/<name>/`) and the job runner: own sessions, statuses, `/jobs`.
+      Check: a test agent runs a job end to end.
+- [ ] 8.2 Monitoring and evaluation: checked against "done", the owner's 👍/👎, a score per agent,
+      a weekly report.
+      Check: the report arrives with real numbers.
+- [ ] 8.3 The first agent (the owner's pick at the intent check).
+      Check: its own "done" checks, agreed at the intent check.
+- [ ] 8.4 The research agent, deep version: a multi-source report plus a Notion page, growing out
+      of Phase 4's idea check.
+      Check: three reports the owner rates useful.
+
+## Phase 9 onwards — more agents, one per phase
+
+Ranked by VISION's hours saved. Each gets its own intent check, terms check and demo.
+
+- AI/ML mentor and Full-stack mentor, once the first mentor has proved the pattern.
+- General helper: messages and small tasks in connected apps; Gmail drafts and sends behind Approve
+  (was 6.1).
+- LinkedIn: post achievements through the official self-serve "Share on LinkedIn" API. Anything
+  beyond posting has no official API, so its route is decided with the risk written down.
+- WhatsApp: urgent-message alerts and replies. There is no official API for a personal account; the
+  options (for example an Android notification-forwarding app, or unofficial WhatsApp Web automation
+  with a ban risk) are decided at its intent check.
+- PC control (was 6.2), files to the phone (was 6.3), more apps through claude.ai connectors or MCP
+  (was 6.4), watchers (was 5.4).
+
+## Later — polish
+
+- HUD on the phone over Tailscale (was 3.7).
+- Custom "Hey AYRA" wake word and voice upgrades (was 7.3).
+- Visual identity; replace the upstream audio tracks (was 7.4).
+- Camera, hand gestures, music and clap-to-start keep working; no new work on them.
+
+---
+
+## Old tasks → new plan
+
+| Old | Task | Decision | Why |
+|---|---|---|---|
+| 1.15 | Owner voice test in Chrome | keep → 5.7 | Needs the page file and a Chrome restart first; then a real test |
+| 3.3 | Approve / Deny buttons | keep → 7.1 | Same design, now in the core, covering cloud and desk tools |
+| 3.4 | Voice notes | keep → 7.5 | ElevenLabs Scribe already works on the free tier, so Q5 is settled |
+| 3.5 | `notify()` | keep → 7.2 | Needed for reminders, queued jobs and alerts |
+| 3.6 | Always-on laptop | change → 5.6 | The cloud core is the always-on part; the laptop only auto-starts the desk |
+| 3.7 | HUD on the phone (Tailscale) | move → Later | Polish; Tailscale itself arrives in Phase 4 |
+| 4.1 | Memory tools | change → 6.1 | SQLite in the core instead of files on the laptop |
+| 4.2 | Owner profile | keep → 6.2 | The heart of personalisation |
+| 4.3 | College context | keep → 6.3 | Same |
+| 4.4 | Daily journal | change → 6.4 | Becomes a nightly reflection that updates memory, with a veto |
+| 4.5 | Forget / export / viewer | keep → 6.5 | Same |
+| 5.1 | Scheduler | keep → 7.3 | Runs in the core, stored in SQLite |
+| 5.2 | Routines by text | keep → 7.3 | Merged with the scheduler |
+| 5.3 | Morning brief | keep → 7.4 | Offered, never forced (owner's guess check) |
+| 5.4 | Watchers | move → Phase 9+ | Becomes an agent |
+| 5.5 | Automations read-only by default | keep → 7.1 | Part of the approval rules |
+| 6.1 | Gmail / Calendar / Drive flows | change → Phase 9+ | Reading already works; actions go to the general helper agent |
+| 6.2 | PC control | move → Phase 9+ | A desk ability, added when an agent or task needs it |
+| 6.3 | Files to the phone | move → Phase 9+ | Same |
+| 6.4 | adb, WhatsApp, GitHub, Spotify | change → Phase 9+ | WhatsApp and LinkedIn get their own intent checks; others through connectors |
+| 7.1 | Usage tracking | keep → 7.7 | More important now: Pro limits are shared with the owner's own use |
+| 7.2 | Kill switch | keep → 7.6 | Same |
+| 7.3 | Wake word, voice | move → Later | Polish |
+| 7.4 | Visual identity, audio tracks | move → Later | Polish; audio rights still needed before public use |
+| 7.5 | Encrypted backups | keep → 6.7 | Memory becomes precious in Phase 6 |
+| 7.6 | Security review | keep → 7.8 | Before any agent can act |
+
+Nothing is dropped.
+
+## Decisions
+
+| ID | Question | Status |
 |---|---|---|
 | Q1 | How should AYRA address you? | ✅ "boss" (owner, 2026-10-02) |
-| Q2 | AYRA's voice? | ✅ ElevenLabs Lily `pFZP5JQG7iQjIQuC4Bku` (free; Blondie needs a paid plan); excited, a little flirty (owner, 2026-10-02) |
-| Q3 | Model: Opus 5.5 (smartest) or Sonnet 5.5 (faster, lighter on plan limits)? | `claude-opus-5-5`, effort `medium` |
-| Q4 | Telegram as the first phone channel? | ✅ yes — @Ayra_rehan_bot, owner's account "Starboy" confirmed (owner, 2026-10-02) |
-| Q5 | Voice-note transcription: ElevenLabs (free tier, account needed) or local Whisper (free, slower)? | decide at 3.4 |
-| Q6 | OK to keep the laptop awake and plugged in while you're out? | decide at 3.6 |
-| Q7 | Which connectors may AYRA use? | Gmail, Calendar, Drive (read); others off (2.1) |
+| Q2 | AYRA's voice? | ✅ ElevenLabs Lily `pFZP5JQG7iQjIQuC4Bku`; excited, a little flirty (owner, 2026-10-02) |
+| Q3 | Model? | ✅ Main conversation stays `claude-opus-5-5`, effort `medium`; each agent's model is chosen at its intent check |
+| Q4 | Telegram as the phone channel? | ✅ yes — @Ayra_rehan_bot, account "Starboy" (owner, 2026-10-02) |
+| Q5 | Voice-note transcription? | ✅ ElevenLabs Scribe — already works, free tier; local Whisper would be slow on a 2 GB server |
+| Q6 | Keep the laptop awake while out? | ✅ No longer needed — the cloud core is always on |
+| Q7 | Which connectors? | Gmail, Calendar, Drive (read) now; Notion at 6.6; more as agents need them (each is a new integration → ask) |
+| D1 | Cloud host | Open — DigitalOcean Bangalore ≈ ₹1,050 (pick) or Hetzner ≈ ₹620; decided at Phase 4's intent check (costs money) |
+| D2 | Tailscale account | Open — free, new account; Phase 4's intent check |
+| D3 | What each agent may do alone | Open — at each agent's intent check |
+| D4 | LinkedIn beyond posting, WhatsApp | Open — at their intent checks, with the risks written down |
 
 ## Risks
 
-| Risk | Mitigation |
-|---|---|
-| Laptop asleep, off or offline while away | 3.6 always-on + `/status`; later, a dedicated always-on machine |
-| Prompt injection from web pages or mail | Default-deny gate, Approve buttons (3.3), audit log (2.5) |
-| Remote access abused | Telegram owner-ID allowlist, Tailscale only, pairing token, no public ports |
-| Claude plan limits | Effort tuning, Sonnet option (Q3), usage tracking (7.1) |
-| Chrome extension pipe is a private interface | Soft failures, WebFetch fallback, SDK pinned by lockfile |
-| Upstream audio rights | Replace before any public use (7.4) |
+The full table is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#risks). The ones to watch first:
+Pro limits shared with the owner's own Claude use (usage meter, 7.7), the Claude login expiring on
+the server (alert, 4.5), and prompt injection once AYRA can act (gate + Approve, 7.1).

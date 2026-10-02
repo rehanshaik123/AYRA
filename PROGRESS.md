@@ -2,11 +2,12 @@
 
 ## ▶ Continue here
 
-- **Phase:** 3 — AYRA Anywhere · branch `phase-3-anywhere` (Phases 1–2 ✅ on `main`)
-- **Next task:** 3.3 Approve / Deny buttons on Telegram before any action (needs the owner's OK on which actions to allow — ask first)
-- **Blockers:** none
-- **Waiting on owner:** which actions 3.3 may do after an Approve tap (asked 2026-10-02) · 1.15 voice test in Chrome · decisions Q3, Q5–Q7 (Q5 before 3.4, Q6 before 3.6)
-- **Health:** build ✓ · lint 0 · `npm test` 39/39 · smoke ✓ · Lily TTS ✓ · Telegram ✓ (live)
+- **Plan:** redesigned 2026-10-02 — goals in `docs/VISION.md`, design in `docs/ARCHITECTURE.md` (cloud core + laptop desk), working agreement in CLAUDE.md §2
+- **Phase:** 4 — Always-on core (thin slice: an idea check from the phone with the laptop shut) · not started · Phases 0–3 ✅; `phase-3-anywhere` (Telegram + the redesign docs) waits for the owner's OK to merge into `main`
+- **Next:** Phase 4 intent check — restate the goal, then settle the idea-check answer format, the host (D1), Tailscale (D2) and three test ideas → then 4.1
+- **Blockers:** none for Phase 4. Laptop only: page file off and Chrome's 3D off until it restarts — they affect the HUD, fixed in 5.6–5.7
+- **Waiting on owner:** merge OK for Phase 3 · "go" for Phase 4's intent check
+- **Health:** build ✓ · lint 0 · `npm test` 39/39 · smoke ✓ (test brain, 2026-10-02) · Telegram ✓ · HUD ✗ in Chrome (memory — see Findings)
 
 ## Log — one line per task (what changed — why)
 
@@ -38,6 +39,7 @@
 - 2026-10-02 · 3.1 Owner made @Ayra_rehan_bot; token in `.env.local`; owner id 1300190813 ("Starboy") read from their first message and saved — only that account can talk to AYRA.
 - 2026-10-02 · 3.2 New `bridge/telegram.mjs` + `TEXT_PROMPT`: AYRA answers the owner on Telegram (long polling, no open ports, typing indicator, late-message note); live test answered the owner's real messages. Bug found live — a burst of messages left "typing…" stuck — fixed by one-question-at-a-time batching, covered by tests (38/38).
 - 2026-10-02 · 3.2+ Owner confirmed "Starboy" is their account, and asked for emoji: `TEXT_PROMPT` now allows usually one, never more than two, none in serious moments; the voice prompt stays emoji-free (TTS would read them), guarded by a test (39/39). Live check: 🎉 on exam news, none on a stressed message.
+- 2026-10-02 · Redesign (docs only): new `docs/VISION.md` (the owner's goals in their words) and `docs/ARCHITECTURE.md` (cloud core + laptop desk; Anthropic terms and prices checked), CLAUDE.md's working agreement replaces "the owner decides everything", PLAN.md rebuilt (Phase 4 thin slice first, every old task mapped, nothing dropped) — the old plan was a generic feature list that stopped for small things and wasn't built around the owner's needs.
 
 ## Findings worth remembering
 
@@ -48,6 +50,10 @@
 - The Claude app's preview pane blocks the microphone — voice must be tested in a real Chrome/Edge window.
 - Keys tested 2026-10-02: ElevenLabs key OK (free plan, 0/10000 credits); voice si0svtk05vPEuvwAW93c = "Blondie - Intense Woman" (Voice Library, professional) → HTTP 402 "Free users cannot use library voices via the API". Premade voices work; Scribe speech-to-text works. Telegram token OK → bot AYRA (@Ayra_rehan_bot), no messages yet.
 - The owner's GitHub repo had one commit ("Initial commit", README `# my_own_jarvis`) with no shared history — merged in, never force-pushed.
+- Laptop power (read 2026-10-02): lid close = **Sleep** on charger and battery, idle sleep = never, Modern Standby (S0) — so closing the lid stops AYRA today; 3.6 needs lid = "Do nothing" on charger (owner changes it). Telegram keeps unread messages 24 h.
+- First owner test in Chrome (2026-10-02 16:39) failed: Claude Code exited 0xC0000409 on every HUD connect, and the reactor's WebGL context was lost (blank page). Cause: Windows hit its memory limit — no page file, 15.3 GB RAM, Chrome 5.5 GB + Claude app 2.5 GB, and Vite's dependency re-optimisation took 1.2 GB at start; System log "low virtual memory" at 16:38:58. The same code passes every probe once memory is free. C: has 417 GB free, so a page file costs nothing.
+- Retest 16:56 with memory freed (commit 8.8/15.3 GB): the brain starts cleanly ("14 MCP servers available"), but Chrome now reports `GL_VENDOR = Disabled` — its GPU process crashed in the low-memory events and Chrome keeps WebGL off until it is fully restarted.
+- The Claude app's Terminal panel can't run commands here (its shell-integration script is missing); start AYRA for the owner with a minimized `cmd /c title AYRA & npm start` window instead.
 
 ## Known issues
 
