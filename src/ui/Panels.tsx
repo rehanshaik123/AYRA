@@ -121,7 +121,7 @@ const Card = memo(function Card({ panel }: { panel: Panel }) {
   // In an effect, so it is one line in the console per bad panel rather than
   // one per frame for as long as the panel is up.
   useEffect(() => {
-    if (empty) console.warn('[jarvis] empty panel body', panel.title, panel.html)
+    if (empty) console.warn('[ayra] empty panel body', panel.title, panel.html)
   }, [panel, empty])
 
   // After the markup lands, and again only when the markup changes. As a

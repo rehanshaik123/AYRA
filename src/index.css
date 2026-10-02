@@ -285,7 +285,7 @@ body::after {
 }
 
 .log-user .log-text { opacity: 0.52; }
-.log-jarvis .log-text {
+.log-assistant .log-text {
   color: #eaf9ff;
   text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 45%, transparent);
 }

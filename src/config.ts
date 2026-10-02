@@ -1,9 +1,11 @@
 /**
- * JARVIS configuration.
+ * AYRA configuration (the face). Identity itself lives in config/identity.json.
  *
  * Everything here is read from Vite env vars (.env.local) so no secrets are
  * committed. See .env.example for the full list.
  */
+
+import { IDENTITY, withHonorific } from './identity'
 
 /**
  * Vite inlines a blank `.env` entry as an empty string, not as undefined, so
@@ -31,7 +33,7 @@ function choice<T extends string>(
   if (value === undefined) return fallback
   if ((allowed as readonly string[]).includes(value)) return value as T
   console.warn(
-    `[jarvis] ${name}="${value}" is not one of ${allowed.join(' | ')} — using "${fallback}".`,
+    `[ayra] ${name}="${value}" is not one of ${allowed.join(' | ')} — using "${fallback}".`,
   )
   return fallback
 }
@@ -42,7 +44,7 @@ function flag(name: string, raw: unknown, fallback: boolean): boolean {
   if (value === undefined) return fallback
   if (value === 'true' || value === '1') return true
   if (value === 'false' || value === '0') return false
-  console.warn(`[jarvis] ${name}="${value}" is not true or false — using ${fallback}.`)
+  console.warn(`[ayra] ${name}="${value}" is not true or false — using ${fallback}.`)
   return fallback
 }
 
@@ -115,17 +117,24 @@ export const TTS_ENGINE: 'kokoro' | 'system' = choice(
 )
 
 /**
- * Which Kokoro voice. All four are British male:
- *   bm_george — measured RP baritone, closest to the character
- *   bm_fable  — warmer
- *   bm_lewis  — lower
- *   bm_daniel — brighter
+ * Which Kokoro voice. The default follows the voice gender in
+ * config/identity.json; VITE_KOKORO_VOICE picks one explicitly.
+ *   bf_emma     — British female, the clearest of the British set (default)
+ *   bf_isabella, bf_alice, bf_lily — other British female voices
+ *   af_heart, af_bella — American female, the highest-rated Kokoro voices
+ *   bm_george   — measured RP baritone (the upstream JARVIS voice)
+ *   bm_fable    — warmer · bm_lewis — lower · bm_daniel — brighter
  */
+export const KOKORO_VOICES = [
+  'bf_emma', 'bf_isabella', 'bf_alice', 'bf_lily', 'af_heart', 'af_bella',
+  'bm_george', 'bm_fable', 'bm_lewis', 'bm_daniel',
+] as const
+
 export const KOKORO_VOICE = choice(
   'VITE_KOKORO_VOICE',
   import.meta.env.VITE_KOKORO_VOICE,
-  ['bm_george', 'bm_fable', 'bm_lewis', 'bm_daniel'] as const,
-  'bm_george',
+  KOKORO_VOICES,
+  IDENTITY.voice.gender === 'female' ? 'bf_emma' : 'bm_george',
 )
 
 export const env = {
@@ -136,24 +145,27 @@ export const env = {
   porcupineKey: str(import.meta.env.VITE_PICOVOICE_ACCESS_KEY) ?? '',
 }
 
-/** `claude-opus-5` is the strongest model; `claude-sonnet-5` trades a little
- *  quality for lower latency if you find responses feel slow on camera. */
-export const MODEL = 'claude-opus-5'
+/** Direct mode only (the bridge has its own, AYRA_MODEL). `claude-opus-5-5` is
+ *  the strongest Opus; `claude-sonnet-5-5` trades a little quality for lower
+ *  latency. */
+export const MODEL = 'claude-opus-5-5'
 
 /**
- * Fast mode runs the same Opus 5 at up to 2.5x output speed. It is a research
- * preview on the Claude API and costs $10/$50 per Mtok instead of $5/$25.
- * For a recorded demo the snappiness is worth it; flip to false to save money.
+ * Direct mode only. Fast mode runs the same Opus at up to 2.5x output speed. It
+ * is a research preview on the Claude API and, on Opus 5.5, costs $8/$40 per
+ * Mtok instead of $4/$20. Flip to false to save money.
  */
 export const FAST_MODE = true
 
 /**
- * Wake-word engine.
+ * Wake-word engine. Only 'speech' is wired up today.
  *   'speech'    — zero setup, uses the browser's SpeechRecognition to listen for
- *                 "hey jarvis". Chrome/Edge only, audio goes to Google.
- *   'porcupine' — recommended. Runs offline in WASM, "Jarvis" is a built-in
- *                 keyword, far fewer false triggers. Needs a free AccessKey
- *                 from console.picovoice.ai.
+ *                 the wake phrase in src/lib/wake.ts. Chrome/Edge only, audio
+ *                 goes to Google.
+ *   'porcupine' — offline WASM, far fewer false triggers, needs a free AccessKey
+ *                 from console.picovoice.ai. Not wired up, and its built-in
+ *                 keyword is "Jarvis": AYRA needs a custom keyword file first
+ *                 (plan.md P7.2).
  */
 export const WAKE_ENGINE: 'speech' | 'porcupine' = env.porcupineKey
   ? 'porcupine'
@@ -273,10 +285,12 @@ export const activeServers = () => MCP_SERVERS.filter((s) => s.enabled && s.url)
 
 /**
  * The persona for the browser-direct path only. The bridge carries its own,
- * fuller version in bridge/server.mjs — that's the one that gets used by
+ * fuller version in bridge/persona.mjs — that's the one that gets used by
  * default, and the one worth editing.
  */
-export const SYSTEM_PROMPT = `You are JARVIS, Tony Stark's assistant. You are speaking out loud.
+const HONORIFIC = IDENTITY.honorific.trim()
+
+export const SYSTEM_PROMPT = `You are ${IDENTITY.name}, a personal assistant. You are speaking out loud.
 
 THE HARD RULE: your entire reply must be under 60 words. This is not a style
 preference — every word is read aloud by a speech synthesiser and the user is
@@ -286,7 +300,11 @@ sentences and offer the detail: "There's more if you want it."
 
 Voice:
 - Dry, precise, quietly amused. Understated competence, never fawning.
-- Say "sir" at most once per exchange, and not in every exchange.
+- ${
+  HONORIFIC
+    ? `Say "${HONORIFIC}" at most once per exchange, and not in every exchange — as in "${withHonorific('Very good.')}"`
+    : 'Do not use a name, title or honorific for the user unless they ask you to.'
+}
 - Plain spoken prose only. No markdown, no bullet points, no headings, no code,
   no emoji, no asterisks, no numbered lists.
 - Write numbers, dates and times the way you'd say them: "eight fifteen",

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useStore } from '../store'
+import { IDENTITY } from '../identity'
 
 /**
  * The start-up sequence, rebuilt to the Iron Man boot it is quoting.
@@ -146,7 +147,7 @@ function Rings({ reduced }: { reduced: boolean }) {
         animate={{ opacity: 1, letterSpacing: '0.42em' }}
         transition={{ duration: 0.7, delay: 0.5, ease }}
       >
-        J.A.R.V.I.S
+        {IDENTITY.wordmark.replace(/\.$/, '')}
       </motion.text>
     </svg>
   )

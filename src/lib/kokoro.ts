@@ -15,7 +15,8 @@
  * isn't waiting on it, and anything that goes wrong falls back to Daniel.
  */
 
-import { KOKORO_VOICE } from '../config'
+import { KOKORO_VOICE, KOKORO_VOICES } from '../config'
+import { IDENTITY } from '../identity'
 
 type Kokoro = {
   generate: (
@@ -38,11 +39,13 @@ export const isUnavailable = () => failed
 export let lastError = ''
 
 /**
- * British male voices, in the order they suit the character. George is the
- * closest to a measured RP baritone; Fable is warmer, Lewis lower, Daniel
- * brighter.
+ * The voices this build knows, best-suited first for the configured gender —
+ * the list itself, with what each sounds like, lives in config.ts.
  */
-export const VOICES = ['bm_george', 'bm_fable', 'bm_lewis', 'bm_daniel'] as const
+export const VOICES: readonly string[] =
+  IDENTITY.voice.gender === 'female'
+    ? KOKORO_VOICES
+    : [...KOKORO_VOICES.filter((v) => v.startsWith('bm_')), ...KOKORO_VOICES.filter((v) => !v.startsWith('bm_'))]
 
 /**
  * A voice id the model doesn't carry throws inside generate(), once per
@@ -53,7 +56,7 @@ export const VOICES = ['bm_george', 'bm_fable', 'bm_lewis', 'bm_daniel'] as cons
 function resolveVoice(): string {
   if ((VOICES as readonly string[]).includes(KOKORO_VOICE)) return KOKORO_VOICE
   console.warn(
-    `[jarvis] VITE_KOKORO_VOICE="${KOKORO_VOICE}" is not one of ${VOICES.join(', ')} — using ${VOICES[0]}.`,
+    `[ayra] VITE_KOKORO_VOICE="${KOKORO_VOICE}" is not one of ${VOICES.join(', ')} — using ${VOICES[0]}.`,
   )
   return VOICES[0]
 }
@@ -97,7 +100,7 @@ export async function load(): Promise<Kokoro | null> {
       model = tts as unknown as Kokoro
       return model
     } catch (err) {
-      console.warn('[jarvis] kokoro unavailable, using the system voice:', err)
+      console.warn('[ayra] kokoro unavailable, using the system voice:', err)
       lastError = String((err as Error)?.message ?? err)
       failed = true
       return null
@@ -125,7 +128,7 @@ export async function speak(text: string): Promise<string | null> {
   } catch (err) {
     // Surfaced rather than swallowed: a silent null here just looks like the
     // voice quietly reverting to the system one with no explanation.
-    console.error('[jarvis] kokoro generation failed:', err)
+    console.error('[ayra] kokoro generation failed:', err)
     lastError = String((err as Error)?.message ?? err)
     failures++
     if (failures >= MAX_FAILURES) {
@@ -133,7 +136,7 @@ export async function speak(text: string): Promise<string | null> {
       // keeps routing every sentence here and every sentence keeps throwing.
       failed = true
       console.warn(
-        `[jarvis] kokoro failed ${failures} times running — the system voice from here on.`,
+        `[ayra] kokoro failed ${failures} times running — the system voice from here on.`,
       )
     }
     return null

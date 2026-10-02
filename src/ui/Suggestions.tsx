@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useStore } from '../store'
+import { IDENTITY } from '../identity'
 
 /**
  * Rotating example commands, shown only while idle.
@@ -13,14 +14,14 @@ import { useStore } from '../store'
  */
 const EXAMPLES = [
   'what happened in AI this week',
-  'generate an image of the Mark Seven suit',
-  'take a screenshot of my phone',
+  "look at what I'm holding",
+  'summarise the page open in my browser',
   "what's on my calendar tomorrow",
   'search for the best coffee near me',
   'read me the top story on Hacker News',
   'open my GitHub notifications',
   "summarise what's in my inbox",
-  'find me a loading animation',
+  'convert five hundred dollars to rupees',
   "what's the weather looking like",
 ]
 
@@ -52,7 +53,7 @@ export function Suggestions() {
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.35 }}
         >
-          “hey jarvis, {EXAMPLES[i]}”
+          “hey {IDENTITY.name.toLowerCase()}, {EXAMPLES[i]}”
         </motion.span>
       </AnimatePresence>
     </div>

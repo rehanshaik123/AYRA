@@ -128,7 +128,7 @@ export function Orbits() {
         // One line, once. A bad path is a fact about the request, not a reason
         // to take the scene down, so the entry simply never becomes visible.
         entry.dead = true
-        console.warn('[jarvis] orbit image failed to load', entry.def.id, src)
+        console.warn('[ayra] orbit image failed to load', entry.def.id, src)
       },
     )
   }

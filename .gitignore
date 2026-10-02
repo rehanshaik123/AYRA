@@ -25,3 +25,11 @@ dist-ssr
 
 # Copied out of node_modules by scripts/start.mjs — 34MB of build output.
 public/mediapipe/
+
+# AYRA runtime data — memory, logs, state. Personal; never committed.
+data/
+
+# Secrets. .env.example is the only env file that belongs in git.
+.env
+.env.*
+!.env.example
