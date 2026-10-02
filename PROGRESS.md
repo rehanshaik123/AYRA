@@ -3,10 +3,10 @@
 ## ▶ Continue here
 
 - **Phase:** 1 — Foundation · branch `phase-1-foundation`
-- **Next task:** 1.13 — full verification (build, lint, setup, smoke, face loads as A.Y.R.A.)
+- **Next task:** 1.14 — organised commits, merge owner's initial GitHub commit, merge to `main`, push
 - **Blockers:** none
 - **Waiting on owner:** 1.15 voice test (not blocking) · decisions Q1–Q7 in PLAN.md (none block Phases 1–2)
-- **Health:** build ✓ · lint 0 warnings · smoke ✓ on `claude-opus-5-5` (6.1 s)
+- **Health:** build ✓ · lint 0 · setup green · smoke ✓ 4.1 s on `claude-opus-5-5` · HUD verified
 
 ## Log — one line per task (what changed — why)
 
@@ -25,6 +25,7 @@
 - 2026-10-02 · 1.10 Bridge treats `is_error` results as errors and smoke rejects "API Error" answers — AYRA would have read raw API errors aloud as answers; verified with a bad model name (clean FAIL) and the real one (PASS 5.8 s).
 - 2026-10-02 · 1.11 Rewrote README (setup, controls, settings, safety, "what each file is for") and `.env.example` (`AYRA_*`) — the old ones described JARVIS and settings the bridge no longer reads.
 - 2026-10-02 · 1.12 Error lines use the configured honorific, stale `JARVIS_*` comment fixed, smoke reads `.env.local`, `.gitattributes` keeps LF — last hard-coded "sir"s gone; no more CRLF warnings on commits.
+- 2026-10-02 · 1.13 Verified via `npm start`: build ✓, lint 0, setup all green, smoke 4.1 s on `claude-opus-5-5`, HUD shows A.Y.R.A. / "SAY HEY AYRA", female voice picked — Phase 1 works end to end on Windows.
 
 ## Findings worth remembering
 

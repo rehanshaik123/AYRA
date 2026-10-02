@@ -36,7 +36,7 @@ Goal: AYRA runs on this laptop under its own name, Windows-correct, verified, pu
       `AYRA_*` settings.
 - [x] 1.12 Cleanup: honorific-aware error lines (`src/lib/bridge.ts`, `src/lib/anthropic.ts`); stale
       `JARVIS_*` comments; smoke reads `.env.local`.
-- [ ] 1.13 Verify: build, lint 0 warnings, setup green, smoke on `claude-opus-5-5`, face loads as A.Y.R.A.
+- [x] 1.13 Verify: build, lint 0 warnings, setup green, smoke on `claude-opus-5-5`, face loads as A.Y.R.A.
 - [ ] 1.14 Git: organised commits on `phase-1-foundation`; bring in the owner's initial GitHub commit
       (no force-push); merge to `main`; push.
 - [ ] 1.15 🧑 Owner test in a real Chrome/Edge window: say "Hey AYRA", ask something, judge the voice
