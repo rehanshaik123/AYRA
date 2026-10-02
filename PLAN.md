@@ -12,7 +12,7 @@ Rules for how to work are in [CLAUDE.md](CLAUDE.md).
 - [x] 0.2 Install dependencies (`npm ci`); record baseline build ✓ and lint (2 upstream warnings).
 - [x] 0.3 Baseline brain test: upstream bridge answers through the owner's Claude login on Windows.
 
-## Phase 1 — Foundation (AYRA identity + Windows) · branch `phase-1-foundation`
+## Phase 1 — Foundation (AYRA identity + Windows) · branch `phase-1-foundation` ✅
 
 Goal: AYRA runs on this laptop under its own name, Windows-correct, verified, pushed to GitHub.
 
@@ -42,7 +42,7 @@ Goal: AYRA runs on this laptop under its own name, Windows-correct, verified, pu
 - [ ] 1.15 🧑 Owner test in a real Chrome/Edge window: say "Hey AYRA", ask something, judge the voice
       (press V to cycle voices). Doesn't block Phase 2.
 
-## Phase 2 — Core brain & safety · branch `phase-2-core`
+## Phase 2 — Core brain & safety · branch `phase-2-core` ✅
 
 Goal: one reusable brain for every channel, safe defaults for the owner's connected accounts, the
 conversation survives reloads, an audit trail, and automated tests.
@@ -59,7 +59,7 @@ conversation survives reloads, an audit trail, and automated tests.
 - [x] 2.4 Conversation survives a page reload: resume the SDK session (id kept in `data/state.json`).
       Check: reload, AYRA remembers the previous question.
 - [x] 2.5 Audit log `data/logs/YYYY-MM-DD.jsonl`: turns, tools, allow/deny decisions, errors — no secrets.
-- [ ] 2.6 Tests: `npm test` (node:test) for `decideTool`, wake phrase, identity, origin checks; added to
+- [x] 2.6 Tests: `npm test` (node:test) for `decideTool`, wake phrase, identity, origin checks; added to
       the Definition of Done.
 
 ## Phase 3 — AYRA Anywhere (phone access) · branch `phase-3-anywhere`

@@ -113,6 +113,7 @@ bridge/                THE BRAIN (Node, port 8787)
   ui.mjs               Tools that restyle the interface: theme, reactor, orbit, effects, reset
   chrome.mjs           Tools that drive your own Chrome through the Claude extension
   vision.mjs           Tools that look through the camera: look, watch
+  origin.mjs           Which web pages may talk to the brain (local dev pages only, by default)
   net.mjs              Safe outbound fetching (blocks requests to private/internal addresses)
   page.mjs             Fetches web pages for reading on a blade
 src/                   THE FACE (React + Vite, port 5173)
@@ -139,7 +140,7 @@ scripts/
   start.mjs            npm start — runs brain + face together
   setup.mjs            npm run setup — friendly machine check
   smoke.mjs            npm run smoke — one real test question to the brain
-test/                  npm test — unit tests (safety gate, wake phrase, …)
+test/                  npm test — unit tests (safety gate, wake phrase, identity, origin, logs…)
 public/                Static files: start-up audio, favicon
 index.html             Page shell with a strict Content Security Policy
 vite.config.ts         Dev server; fills the page title from identity.json

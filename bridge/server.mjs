@@ -21,6 +21,7 @@ import { SYSTEM_PROMPT } from './persona.mjs'
 import { createGate, DEFAULT_CONNECTORS } from './gate.mjs'
 import { WebSocketServer } from 'ws'
 import { createBrain } from './brain.mjs'
+import { createOriginCheck } from './origin.mjs'
 import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
@@ -44,53 +45,11 @@ process.on('unhandledRejection', (err) => {
   console.error('[ayra] unhandled rejection:', err)
 })
 
-/**
- * Who is allowed to talk to this bridge.
- *
- * A WebSocket handshake is not subject to the same-origin policy: the browser
- * sends it on behalf of whatever page asked, no preflight stands in the way,
- * and the page reads every byte that comes back. Without a check here, any tab
- * the user happens to have open could open a socket to ws://localhost:8787,
- * drive the agent with every MCP server on this machine, and read back every
- * token and panel. The Origin header is the only thing that separates our own
- * dev server from someone else's page, so it is checked explicitly.
- *
- * A missing Origin means a non-browser client — curl, a script, a native app.
- * That is also exactly what local malware looks like, so it is refused on the
- * socket unless AYRA_ALLOW_NO_ORIGIN=1 says otherwise.
- */
-const EXTRA_ORIGINS = new Set(
-  env('ALLOWED_ORIGINS', '')
-    .split(',')
-    .map((s) => s.trim().replace(/\/+$/, ''))
-    .filter(Boolean),
-)
-const ALLOW_NO_ORIGIN = env('ALLOW_NO_ORIGIN') === '1'
-
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
-
-/**
- * Vite takes the next free port when 5173 is busy and `vite preview` starts at
- * 4173, so the dev ranges are allowed rather than two exact numbers. Anything
- * else — including localhost on a port some other app is serving — has to be
- * named in AYRA_ALLOWED_ORIGINS.
- */
-const isDevPort = (port) =>
-  (port >= 5173 && port <= 5199) || (port >= 4173 && port <= 4199)
-
-function originAllowed(origin) {
-  if (!origin) return ALLOW_NO_ORIGIN
-  if (EXTRA_ORIGINS.has(origin.replace(/\/+$/, ''))) return true
-  let url
-  try {
-    url = new URL(origin)
-  } catch {
-    return false
-  }
-  if (url.protocol !== 'http:') return false
-  if (!LOCAL_HOSTS.has(url.hostname)) return false
-  return isDevPort(Number(url.port))
-}
+/** Who may talk to this bridge — local dev pages by default; see origin.mjs. */
+const ORIGINS = createOriginCheck({
+  extraOrigins: env('ALLOWED_ORIGINS', ''),
+  allowNoOrigin: env('ALLOW_NO_ORIGIN') === '1',
+})
 
 /**
  * Voice is a bad interface for a confirmation dialog: there is no window to
@@ -424,7 +383,7 @@ const http = await import('node:http')
 
 const handleRequest = async (req, res) => {
   const origin = req.headers.origin
-  if (origin && !originAllowed(origin)) {
+  if (origin && !ORIGINS.allowed(origin)) {
     console.warn(`[ayra] refused http request from origin ${origin}`)
     res.writeHead(403, { vary: 'origin' })
     return res.end('forbidden')
@@ -748,7 +707,7 @@ const wss = new WebSocketServer({
       console.warn(`[ayra] rejected websocket on path ${path}`)
       return done(false, 403, 'Forbidden')
     }
-    if (!originAllowed(origin)) {
+    if (!ORIGINS.allowed(origin)) {
       console.warn(
         `[ayra] rejected websocket from origin ${origin ?? '(none)'}` +
           ' — set AYRA_ALLOWED_ORIGINS to permit it',
@@ -789,8 +748,8 @@ void chromeAvailable().then((ok) => {
 
 console.log(
   '[ayra] accepting local dev origins' +
-    (EXTRA_ORIGINS.size ? ` plus ${[...EXTRA_ORIGINS].join(', ')}` : '') +
-    (ALLOW_NO_ORIGIN ? ' and clients that send no origin' : ''),
+    (ORIGINS.extra.size ? ` plus ${[...ORIGINS.extra].join(', ')}` : '') +
+    (ORIGINS.allowNoOrigin ? ' and clients that send no origin' : ''),
 )
 
 /**

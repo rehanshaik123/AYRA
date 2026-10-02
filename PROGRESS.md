@@ -2,11 +2,11 @@
 
 ## ▶ Continue here
 
-- **Phase:** 2 — Core brain & safety · branch `phase-2-core` (Phase 1 ✅ merged to `main`)
-- **Next task:** 2.6 — tests for wake phrase, identity and origin checks; `npm test` in the Definition of Done
-- **Blockers:** none
-- **Waiting on owner:** 1.15 voice test (not blocking) · decisions Q1–Q7 in PLAN.md (none block Phases 1–2)
-- **Health:** build ✓ · lint 0 · `npm test` 15/15 · smoke ✓ on `claude-opus-5-5`
+- **Phase:** 3 — AYRA Anywhere · branch `phase-3-anywhere` (Phases 1–2 ✅ on `main`)
+- **Next task:** 3.1 🧑 owner creates the Telegram bot + finds their user ID (steps in chat), then 3.2 Telegram channel
+- **Blockers:** 3.1 needs the owner (Telegram bot token + user ID)
+- **Waiting on owner:** 3.1 Telegram bot · 1.15 voice test · decisions Q1–Q7 (Q5 needed before 3.4, Q6 before 3.6)
+- **Health:** build ✓ · lint 0 · `npm test` 27/27 · smoke ✓ on `claude-opus-5-5`
 
 ## Log — one line per task (what changed — why)
 
@@ -32,6 +32,8 @@
 - 2026-10-02 · 2.3 New `bridge/context.mjs` stamps each question "[Now: Friday, 2 October 2026, 14:05 (Asia/Kolkata)]" (not the system prompt, so caching holds); persona told not to read it — AYRA had no clock; "tomorrow" now answers "Saturday, the third of October".
 - 2026-10-02 · 2.4 New `bridge/state.mjs` (`data/state.json`); the HUD resumes its last Claude session after a reload if used within `AYRA_RESUME_HOURS` (6); a broken saved session is forgotten with a spoken "could not be restored" — a reload used to wipe the conversation. Verified: code word recalled across reconnects; bogus id → clean error → fresh session.
 - 2026-10-02 · 2.5 New `bridge/audit.mjs`: every question, tool run, gate decision, answer, failure and session event → `data/logs/YYYY-MM-DD.jsonl` (owner's local date; text clipped, never tool inputs); `open()` now takes `channel` + `resume` — so "what did AYRA do and why was it allowed?" always has an answer.
+- 2026-10-02 · 2.6 Origin check moved to `bridge/origin.mjs`; tests for wake phrase, identity + persona, origin, state, audit, time; `npm test` (tsx loader for .ts) = 27/27 and part of the Definition of Done — the core now has a safety net. Live: foreign page 403 (HTTP + WebSocket), own page 200.
+- 2026-10-02 · Phase 2 ✅ merged to `main` and pushed — one reusable brain, connector policy, time awareness, reload-proof conversations, audit log, tests.
 
 ## Findings worth remembering
 

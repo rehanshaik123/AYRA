@@ -77,6 +77,7 @@ The preview pane in the Claude app blocks the microphone — voice features need
 | `bridge/ui.mjs` | Tool server `ayra_ui`: theme, reactor, orbit, chrome, effect, screen, reset |
 | `bridge/chrome.mjs` | Tool server `ayra_chrome`: drives the owner's Chrome via the Claude extension (Windows named pipe `\\.\pipe\claude-mcp-browser-bridge-<user>`) |
 | `bridge/vision.mjs` | Tool server `ayra_eyes`: `look` / `watch` through the camera |
+| `bridge/origin.mjs` | Which web pages may talk to the bridge (local dev ports + `AYRA_ALLOWED_ORIGINS`) |
 | `bridge/net.mjs` · `bridge/page.mjs` | SSRF-safe outbound fetching (use for EVERY server-side fetch) · web pages for blades |
 | `src/App.tsx` | The face's conductor: boot, phases, voice loop, turns |
 | `src/identity.ts` · `src/config.ts` | Identity for the face · `VITE_*` settings (TTS engine, Kokoro voice, direct mode) |
@@ -88,7 +89,7 @@ The preview pane in the Claude app blocks the microphone — voice features need
 | `src/ui/*` | HUD (`Hud.tsx`), blades (`Blades.tsx`), boot animation (`Boot.tsx`), model-HTML sanitiser (`sanitise.ts`), diagnostics (press D) |
 | `src/scene/*` · `src/store.ts` · `src/index.css` | Three.js reactor · app state (zustand) · all styles incl. the `.hud-*` design system |
 | `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test |
-| `test/*.test.mjs` | Unit tests, run by `npm test` (node:test, no extra dependencies) |
+| `test/*.test.mjs` | Unit tests, run by `npm test`: gate, wake phrase, identity + persona, origin, state, audit, time stamp |
 | `index.html` · `vite.config.ts` | Page shell + strict CSP · dev server, `%AYRA_WORDMARK%` title |
 | `data/` | AYRA's runtime data (memory, logs, state) — gitignored, never committed |
 
@@ -166,7 +167,7 @@ Face ↔ brain protocol (WebSocket): face sends `ask {id,text}`, `interrupt`, `r
 1. `npm run build` passes and `npm run lint` shows 0 warnings.
 2. Bridge code changed → start the bridge and `npm run smoke` passes.
 3. UI changed → the face loads; voice/mic changes are marked "needs owner check in Chrome".
-4. Tests exist for it (from Phase 2) → `npm test` passes.
+4. `npm test` passes, and new logic gets a test in `test/` (node:test; `.ts` files load through tsx).
 5. PLAN.md ticked, one PROGRESS.md line added, "▶ Continue here" updated.
 
 ## 10. Ask the owner first
