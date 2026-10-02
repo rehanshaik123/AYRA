@@ -57,5 +57,5 @@ test("the persona's roasting and flirting keep their guardrails", () => {
 })
 
 test('the premium voice is the one the owner chose', () => {
-  assert.equal(raw.voice.elevenLabsId, 'si0svtk05vPEuvwAW93c')
+  assert.equal(raw.voice.elevenLabsId, 'pFZP5JQG7iQjIQuC4Bku') // Lily — the owner's pick
 })
