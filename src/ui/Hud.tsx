@@ -6,11 +6,12 @@ import { BladeSweep, Blades } from './Blades'
 import { Effects } from './Effects'
 import { Pointer } from './Pointer'
 import { GestureGuide } from './GestureGuide'
+import { IDENTITY } from '../identity'
 
 const statusText: Record<Phase, string> = {
   offline: 'OFFLINE',
   boot: 'INITIALISING',
-  dormant: 'STANDBY — SAY “HEY JARVIS”',
+  dormant: `STANDBY — SAY “HEY ${IDENTITY.name.toUpperCase()}”`,
   waking: 'ONLINE',
   listening: 'LISTENING',
   thinking: 'PROCESSING',
@@ -190,8 +191,8 @@ export function Hud() {
       <header className="hud-top">
         {ui.chrome.brand && (
           <div className="brand">
-            <span className="brand-mark">J.A.R.V.I.S.</span>
-            <span className="brand-sub">Just A Rather Very Intelligent System</span>
+            <span className="brand-mark">{IDENTITY.wordmark}</span>
+            <span className="brand-sub">{IDENTITY.tagline}</span>
           </div>
         )}
 
@@ -273,12 +274,12 @@ export function Hud() {
                 exit={{ opacity: 0 }}
                 transition={{ type: 'spring', stiffness: 320, damping: 32 }}
               >
-                <span className="log-who">{t.role === 'user' ? 'YOU' : 'JARVIS'}</span>
-                {/* Only his half decodes. What the user said was never
-                    transmitted from anywhere — dressing it up as machine
+                <span className="log-who">{t.role === 'user' ? 'YOU' : IDENTITY.name}</span>
+                {/* Only the assistant's half decodes. What the user said was
+                    never transmitted from anywhere — dressing it up as machine
                     output would be a lie about where the words came from. */}
                 <span className="log-text">
-                  {t.role === 'jarvis' ? <DecodeText text={t.text} /> : t.text}
+                  {t.role === 'assistant' ? <DecodeText text={t.text} /> : t.text}
                 </span>
               </motion.div>
             ))}
@@ -312,7 +313,7 @@ export function Hud() {
 
       <footer className="hud-bottom">
         <span className="hint">
-          say <b>“hey jarvis”</b> · <kbd>Space</kbd> to talk · <kbd>G</kbd> hands
+          say <b>“hey {IDENTITY.name.toLowerCase()}”</b> · <kbd>Space</kbd> to talk · <kbd>G</kbd> hands
           {voice && (
             <>
               {' · '}

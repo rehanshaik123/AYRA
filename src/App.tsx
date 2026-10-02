@@ -32,6 +32,8 @@ import {
 import { startAnalyser, micLevel } from './lib/audio'
 import { probeCapabilities } from './lib/capabilities'
 import { env } from './config'
+import { BARE_NAME, LEADING_NAME } from './lib/wake'
+import { withHonorific } from './identity'
 
 /**
  * The conversation.
@@ -61,13 +63,9 @@ const newId = () =>
   globalThis.crypto?.randomUUID?.() ??
   `id${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
 
-/** The same mishearings voice.ts accepts for the wake word — otherwise a turn
- *  that woke him as "travis" gets that word sent on to the model as a question. */
-const NAME = '(?:jarvis|jarvys|jervis|travis|jarviss|java\'s|jarv)'
-/** A bare vocative — "Jarvis", "hey jarvis" — with nothing asked. */
-const BARE_NAME = new RegExp(`^(?:hey|hi|ok|okay|yo)?\\s*${NAME}[\\s,.!?]*$`, 'i')
-/** A leading vocative on a real command: "Jarvis, what's the weather". */
-const LEADING_NAME = new RegExp(`^(?:hey|hi|ok|okay|yo)?\\s*${NAME}\\b[\\s,.:!?-]*`, 'i')
+// BARE_NAME and LEADING_NAME come from wake.ts — the same mishearings the voice
+// loop wakes on, so a turn that woke on "Aira" never sends that word on to the
+// model as a question.
 
 export default function App() {
   const store = useStore
@@ -157,7 +155,7 @@ export default function App() {
             // clear the readout while a slow tool was still running.
             store.getState().setActiveTool(null)
             music.working(false)
-            store.getState().pushTurn({ id: turnId, role: 'jarvis', text: '' })
+            store.getState().pushTurn({ id: turnId, role: 'assistant', text: '' })
           }
           store.getState().appendToLastTurn(delta)
           spk.push(delta)
@@ -334,7 +332,7 @@ export default function App() {
       // for the rest of the page, recoverable only by reloading. Reset it and
       // put the button back so the user can simply press it again.
       booting.current = false
-      console.error('[jarvis] power-up failed:', err)
+      console.error('[ayra] power-up failed:', err)
       store.getState().setPhase('offline')
       store
         .getState()
@@ -446,7 +444,7 @@ export default function App() {
           s.clearScreen(a.what ?? 'all')
           break
         default:
-          console.warn('[jarvis] unknown ui op:', op, args)
+          console.warn('[ayra] unknown ui op:', op, args)
       }
     })
     // In bridge mode the conversation lives in the agent session, which is tied
@@ -504,7 +502,7 @@ export default function App() {
       await startAnalyser()
     } catch {
       console.warn(
-        '[jarvis] no microphone stream — the reactor will not pulse with your ' +
+        '[ayra] no microphone stream — the reactor will not pulse with your ' +
           'voice. Speech recognition is unaffected.',
       )
     }
@@ -596,7 +594,7 @@ export default function App() {
         silence()
         const demo = createSpeaker()
         speaker.current = demo
-        demo.say(`Voice set to ${name.replace(/\(.*?\)/g, '').trim()}. At your service, sir.`)
+        demo.say(`Voice set to ${name.replace(/\(.*?\)/g, '').trim()}. ${withHonorific('At your service.')}`)
         void demo.end()
         return
       }
@@ -638,10 +636,10 @@ export default function App() {
         silence()
         const t = createSpeaker()
         speaker.current = t
-        t.say('Audio test. If you can hear this, speech output is working, sir.')
+        t.say(withHonorific('Audio test. If you can hear this, speech output is working.'))
         void t.end().then(() => {
           const d = (window as unknown as Record<string, Record<string, unknown>>).__tts
-          console.info('[jarvis] audio test →', d)
+          console.info('[ayra] audio test →', d)
           if (d && d.started === 0 && d.rescued === 0) {
             store.getState().setError(
               `No sound produced. engine=${d.engine} voice=${d.voice} error=${d.lastError || 'none'}`,
