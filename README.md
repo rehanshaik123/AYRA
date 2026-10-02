@@ -69,6 +69,7 @@ Only `VITE_*` values ever reach the browser. `.env.local` is gitignored.
 | `AYRA_EFFORT` | `medium` | Reasoning effort: `low` … `max` |
 | `AYRA_BRIDGE_PORT` | `8787` | Port for the brain (HTTP + WebSocket) |
 | `AYRA_ALLOW_WRITES` | off | `1` allows effectful tools — see Safety |
+| `AYRA_CONNECTORS` | `Gmail,Google Calendar,Google Drive` | claude.ai connectors AYRA may read, or `none` |
 | `AYRA_ALLOWED_ORIGINS` | local dev | Extra page origins allowed to connect |
 | `AYRA_FILE_ROOTS` | — | Extra folders the `/file` endpoint may serve images from |
 | `AYRA_VOICE_ID` | George | ElevenLabs voice id |
@@ -79,10 +80,14 @@ Only `VITE_*` values ever reach the browser. `.env.local` is gitignored.
 
 - **Read-only by default.** Search, reading and generation run freely; anything that writes files,
   runs a shell, sends, deletes, buys or posts is refused unless you start the brain with
-  `npm run bridge:writes`. Read `decideTool()` in `bridge/server.mjs` before you do.
-- **Your claude.ai connectors.** If your Claude account has connectors (Gmail, Google Calendar,
-  Drive…), AYRA's brain can see them. Reads work; anything that changes something is refused in the
-  default mode. A dedicated policy and Approve/Deny confirmations are on the roadmap (PLAN.md 2.1, 3.3).
+  `npm run bridge:writes`. Read `bridge/gate.mjs` before you do.
+- **Your claude.ai connectors.** Claude Code brings the connectors on your Claude account (Gmail,
+  Google Calendar, Drive, Figma…) into AYRA's sessions. AYRA keeps only the ones in
+  `AYRA_CONNECTORS` (default Gmail, Google Calendar, Google Drive) and only lets them **read** —
+  sending, replying, trashing, sharing and editing are refused even with writes on, until
+  Approve/Deny confirmations exist (PLAN.md 3.3). All other connectors are removed from the session.
+- **Few built-in tools.** AYRA gets only Read, Glob, Grep, WebFetch, WebSearch and ToolSearch (plus
+  Bash, PowerShell, Write and Edit when writes are on) — not the full Claude Code toolbox.
 - **Local only.** The brain and face listen on `localhost` and check the page's origin. Don't expose
   them to a network until the authenticated remote access in PLAN.md Phase 3 exists.
 - **Personal use.** AYRA runs on your own Claude login. Don't share it with others on that login; if
@@ -95,7 +100,8 @@ config/
   identity.json        Who AYRA is: name, wake words, honorific, language, voice. Edit here.
 bridge/                THE BRAIN (Node, port 8787)
   server.mjs           HTTP + WebSocket server; one Claude session per connection;
-                       decideTool() = the safety gate; image/video/page proxies; ElevenLabs speech
+                       image/video/page proxies; ElevenLabs speech
+  gate.mjs             The safety gate: which tools AYRA may run, connector policy
   persona.mjs          AYRA's personality — the system prompt
   identity.mjs         Loads identity.json and .env.local for the bridge
   panels.mjs           Tools that put things on screen: display, blade, probe_url
@@ -128,6 +134,7 @@ scripts/
   start.mjs            npm start — runs brain + face together
   setup.mjs            npm run setup — friendly machine check
   smoke.mjs            npm run smoke — one real test question to the brain
+test/                  npm test — unit tests (safety gate, wake phrase, …)
 public/                Static files: start-up audio, favicon
 index.html             Page shell with a strict Content Security Policy
 vite.config.ts         Dev server; fills the page title from identity.json
@@ -145,7 +152,7 @@ data/                  (created at runtime) AYRA's memory and logs — never com
   │  voice activity → speech to text   │   ws   │  Claude Agent SDK                │
   │  reactor UI (Three.js + GLSL)      │◄─────► │   = Claude Code, headless        │
   │  text to speech                    │  8787  │  tools: ayra_* + your MCP servers │
-  │  heads-up display, blades          │        │  safety gate: decideTool()       │
+  │  heads-up display, blades          │        │  safety gate: bridge/gate.mjs    │
   └────────────────────────────────────┘        └──────────────────────────────────┘
 ```
 

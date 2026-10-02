@@ -47,7 +47,7 @@ Goal: AYRA runs on this laptop under its own name, Windows-correct, verified, pu
 Goal: one reusable brain for every channel, safe defaults for the owner's connected accounts, the
 conversation survives reloads, an audit trail, and automated tests.
 
-- [ ] 2.1 Connector policy. The brain inherits 10 claude.ai connectors (Gmail, Calendar, Drive, Figma,
+- [x] 2.1 Connector policy. The brain inherits 10 claude.ai connectors (Gmail, Calendar, Drive, Figma,
       Canva, Lucid, draw.io, Beautiful.ai, Wispr Flow, Claude Docs). Keep Gmail/Calendar/Drive reads;
       keep the rest out of AYRA's sessions; deny every effectful connector tool even with writes on
       until confirmations exist (3.3). Debug mode logs the tool names AYRA sees.

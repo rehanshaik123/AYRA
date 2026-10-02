@@ -56,6 +56,7 @@ npm run build          # type-check + production build (must pass)
 npm run lint           # oxlint (must stay at 0 warnings)
 npm run setup          # preflight: login, SDK binary, Chrome extension, identity
 npm run smoke          # one real end-to-end turn; needs a running bridge
+npm test               # unit tests (gate, wake phrase, identity, …)
 ```
 
 The preview pane in the Claude app blocks the microphone — voice features need a real Chrome/Edge window.
@@ -65,7 +66,8 @@ The preview pane in the Claude app blocks the microphone — voice features need
 | Path | Purpose |
 |---|---|
 | `config/identity.json` | **Who AYRA is**: name, wordmark, tagline, honorific, language, timezone, voice, wake words. The only place identity is set. |
-| `bridge/server.mjs` | The brain: HTTP + WebSocket on :8787, one Claude session per connection, the tool gate `decideTool()`, image/media/page proxies, ElevenLabs `/tts` `/stt` |
+| `bridge/server.mjs` | The brain: HTTP + WebSocket on :8787, one Claude session per connection, image/media/page proxies, ElevenLabs `/tts` `/stt` |
+| `bridge/gate.mjs` | **The safety gate**: `createGate()` → `decide(tool)`, the built-in tool list, connector policy (claude.ai Gmail/Calendar/Drive read-only, others removed). Tested in `test/gate.test.mjs` |
 | `bridge/identity.mjs` | Loads identity + `.env.local`; `env('X')` reads `AYRA_X` |
 | `bridge/persona.mjs` | AYRA's spoken personality (system prompt) |
 | `bridge/panels.mjs` | Tool server `ayra`: `display`, `blade`, `probe_url` — what appears on the HUD |
@@ -83,6 +85,7 @@ The preview pane in the Claude app blocks the microphone — voice features need
 | `src/ui/*` | HUD (`Hud.tsx`), blades (`Blades.tsx`), boot animation (`Boot.tsx`), model-HTML sanitiser (`sanitise.ts`), diagnostics (press D) |
 | `src/scene/*` · `src/store.ts` · `src/index.css` | Three.js reactor · app state (zustand) · all styles incl. the `.hud-*` design system |
 | `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test |
+| `test/*.test.mjs` | Unit tests, run by `npm test` (node:test, no extra dependencies) |
 | `index.html` · `vite.config.ts` | Page shell + strict CSP · dev server, `%AYRA_WORDMARK%` title |
 | `data/` | AYRA's runtime data (memory, logs, state) — gitignored, never committed |
 
@@ -95,7 +98,8 @@ Face ↔ brain protocol (WebSocket): face sends `ask {id,text}`, `interrupt`, `r
 - **Identity:** `config/identity.json` only. Never hard-code the name, wake words or honorific.
 - **Settings and secrets:** `.env.local` (gitignored; template `.env.example`). Bridge reads `AYRA_*`
   (`MODEL` default `claude-opus-5-5`, `EFFORT` `medium`, `BRIDGE_PORT` 8787, `ALLOW_WRITES`,
-  `ALLOWED_ORIGINS`, `ALLOW_NO_ORIGIN`, `FILE_ROOTS`, `VOICE_ID`, `DEBUG`) plus `ELEVENLABS_API_KEY`.
+  `ALLOWED_ORIGINS`, `ALLOW_NO_ORIGIN`, `FILE_ROOTS`, `VOICE_ID`, `DEBUG`, `CONNECTORS` — default
+  `Gmail,Google Calendar,Google Drive`, or `none`) plus `ELEVENLABS_API_KEY`.
   The face reads `VITE_*` — only `VITE_*` values reach the browser, so never put a secret in one.
 - AYRA's own sessions never load this file: the bridge runs with `settingSources: []`.
 
@@ -104,7 +108,8 @@ Face ↔ brain protocol (WebSocket): face sends `ask {id,text}`, `interrupt`, `r
 **Safety (runtime)**
 - Read-only by default. Shell, file writes, sending, buying, deleting, posting and device control need
   writes enabled — and, from Phase 3, the owner's explicit Approve. Never make writes the default.
-- `decideTool()` is the single authority. Classify every new tool there explicitly; no blanket allows.
+- The gate in `bridge/gate.mjs` (`decide()`) is the single authority. Classify every new tool there
+  explicitly, add a test in `test/gate.test.mjs`; no blanket allows.
 - Keep `settingSources: []` and `permissionMode: 'default'`; never `bypassPermissions`.
 - New tool servers are named `ayra_<area>` and withhold effectful tools at construction unless
   writes are on (pattern: `chromeServer({ allowWrites })`).
