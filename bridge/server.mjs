@@ -72,7 +72,7 @@ const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
  * Vite takes the next free port when 5173 is busy and `vite preview` starts at
  * 4173, so the dev ranges are allowed rather than two exact numbers. Anything
  * else — including localhost on a port some other app is serving — has to be
- * named in JARVIS_ALLOWED_ORIGINS.
+ * named in AYRA_ALLOWED_ORIGINS.
  */
 const isDevPort = (port) =>
   (port >= 5173 && port <= 5199) || (port >= 4173 && port <= 4199)

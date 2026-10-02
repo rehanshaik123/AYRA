@@ -16,8 +16,11 @@
  */
 
 import WebSocket from 'ws'
+// Loads .env.local the same way the bridge does, so a port set there is the
+// port tested here.
+import { env } from '../bridge/identity.mjs'
 
-const PORT = Number(process.env.AYRA_BRIDGE_PORT ?? 8787)
+const PORT = Number(env('BRIDGE_PORT', 8787))
 const TIMEOUT_MS = 180_000
 const question =
   process.argv.slice(2).join(' ').trim() ||

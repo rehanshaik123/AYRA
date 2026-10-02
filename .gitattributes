@@ -1,0 +1,9 @@
+# Keep text files with LF line endings on every OS, so Windows checkouts match
+# the repository and git stops warning about CRLF conversions.
+* text=auto eol=lf
+
+# Binary assets — never touch their bytes.
+*.mp3 binary
+*.png binary
+*.jpg binary
+*.wasm binary

@@ -34,7 +34,7 @@ Goal: AYRA runs on this laptop under its own name, Windows-correct, verified, pu
       answer); smoke fails on error answers. Check: a bad model name → smoke FAIL, clean spoken line.
 - [x] 1.11 README for AYRA (what it is, quick start, what each file is for) + `.env.example` with
       `AYRA_*` settings.
-- [ ] 1.12 Cleanup: honorific-aware error lines (`src/lib/bridge.ts`, `src/lib/anthropic.ts`); stale
+- [x] 1.12 Cleanup: honorific-aware error lines (`src/lib/bridge.ts`, `src/lib/anthropic.ts`); stale
       `JARVIS_*` comments; smoke reads `.env.local`.
 - [ ] 1.13 Verify: build, lint 0 warnings, setup green, smoke on `claude-opus-5-5`, face loads as A.Y.R.A.
 - [ ] 1.14 Git: organised commits on `phase-1-foundation`; bring in the owner's initial GitHub commit
