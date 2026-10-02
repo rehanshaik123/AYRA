@@ -275,7 +275,7 @@ function Card({
     if (!el) return
     const frame = el.querySelector('iframe')
     if (frame?.contentWindow) {
-      frame.contentWindow.postMessage({ jarvis: 'scroll', dy }, '*')
+      frame.contentWindow.postMessage({ ayra: 'scroll', dy }, '*')
     } else {
       el.scrollTop += dy
     }

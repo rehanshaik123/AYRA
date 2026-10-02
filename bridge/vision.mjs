@@ -72,7 +72,7 @@ than listing them. The user knows what their own hands look like.`
  */
 export function visionServer(ask) {
   return createSdkMcpServer({
-    name: 'jarvis_eyes',
+    name: 'ayra_eyes',
     version: '1.0.0',
     instructions:
       "The camera on the user's machine, pointed at them. Use it when they ask " +
