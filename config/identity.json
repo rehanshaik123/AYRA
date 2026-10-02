@@ -1,0 +1,17 @@
+{
+  "_about": "Who AYRA is. Read by the bridge (bridge/identity.mjs) and the face (src/identity.ts). Change identity here and nowhere else.",
+  "name": "AYRA",
+  "wordmark": "A.Y.R.A.",
+  "tagline": "Personal Intelligence System",
+  "honorific": "",
+  "language": "en-IN",
+  "timezone": "Asia/Kolkata",
+  "voice": {
+    "gender": "female",
+    "prefer": []
+  },
+  "wake": {
+    "names": ["ayra", "ayrah", "aira", "airah", "eyra", "eira", "aiyra", "ayira", "ayera", "heyra", "haira", "hera"],
+    "prefixedOnly": ["ira", "irah", "era", "aria", "arya", "hira", "heera", "air", "ayr"]
+  }
+}
