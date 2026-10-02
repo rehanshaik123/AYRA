@@ -4,9 +4,9 @@
 
 - **Phase:** 3 — AYRA Anywhere · branch `phase-3-anywhere` (Phases 1–2 ✅ on `main`)
 - **Next task:** 3.3 Approve / Deny buttons on Telegram before any action (needs the owner's OK on which actions to allow — ask first)
-- **Blockers:** none (owner to confirm Telegram replies on the phone)
-- **Waiting on owner:** Telegram check on the phone · 1.15 voice test in Chrome · decisions Q3–Q7 (Q5 before 3.4, Q6 before 3.6)
-- **Health:** build ✓ · lint 0 · `npm test` 38/38 · smoke ✓ · Lily TTS ✓ · Telegram ✓ (live)
+- **Blockers:** none
+- **Waiting on owner:** which actions 3.3 may do after an Approve tap (asked 2026-10-02) · 1.15 voice test in Chrome · decisions Q3, Q5–Q7 (Q5 before 3.4, Q6 before 3.6)
+- **Health:** build ✓ · lint 0 · `npm test` 39/39 · smoke ✓ · Lily TTS ✓ · Telegram ✓ (live)
 
 ## Log — one line per task (what changed — why)
 
@@ -37,6 +37,7 @@
 - 2026-10-02 · 3.0 Excited personality with light roasting + flirting (owner: "a little more flirty", call me "boss"); voice = ElevenLabs Lily (owner's pick of free voices — Blondie is Voice Library = paid plan) — the owner wanted AYRA lively, not a dry butler.
 - 2026-10-02 · 3.1 Owner made @Ayra_rehan_bot; token in `.env.local`; owner id 1300190813 ("Starboy") read from their first message and saved — only that account can talk to AYRA.
 - 2026-10-02 · 3.2 New `bridge/telegram.mjs` + `TEXT_PROMPT`: AYRA answers the owner on Telegram (long polling, no open ports, typing indicator, late-message note); live test answered the owner's real messages. Bug found live — a burst of messages left "typing…" stuck — fixed by one-question-at-a-time batching, covered by tests (38/38).
+- 2026-10-02 · 3.2+ Owner confirmed "Starboy" is their account, and asked for emoji: `TEXT_PROMPT` now allows usually one, never more than two, none in serious moments; the voice prompt stays emoji-free (TTS would read them), guarded by a test (39/39). Live check: 🎉 on exam news, none on a stressed message.
 
 ## Findings worth remembering
 
@@ -52,4 +53,4 @@
 
 - `index.html` CSP hard-codes `localhost:8787` — must change for phone access (3.7).
 - `@picovoice/*` packages are installed but unused (wake word is speech-based) — revisit at 7.3.
-- AYRA sometimes offers reminders it cannot set yet (no scheduler until 5.1) — fix with 5.1 or a persona line if the owner wants it sooner.
+- AYRA sometimes offers things it cannot do yet — reminders (no scheduler until 5.1), drafting mail (read-only until 3.3) — fix with those tasks, or a persona line if the owner wants it sooner.

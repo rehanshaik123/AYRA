@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { chunk, fromOwner, startTelegram } from '../bridge/telegram.mjs'
-import { TEXT_PROMPT } from '../bridge/persona.mjs'
+import { SYSTEM_PROMPT, TEXT_PROMPT } from '../bridge/persona.mjs'
 
 const OWNER = '1300190813'
 
@@ -96,4 +96,10 @@ test('the text persona is for chat, not the HUD', () => {
   assert.ok(!/\bblade\b/.test(TEXT_PROMPT))
   assert.ok(TEXT_PROMPT.includes('ROASTING AND FLIRTING'))
   assert.ok(TEXT_PROMPT.includes('Always kind and PG'))
+})
+
+test('emoji when texting, never when speaking', () => {
+  assert.ok(TEXT_PROMPT.includes('EMOJI.'), 'the owner asked for emoji on Telegram')
+  assert.ok(!/no emoji/i.test(TEXT_PROMPT))
+  assert.ok(/no emoji/i.test(SYSTEM_PROMPT), 'the voice would read them out loud')
 })

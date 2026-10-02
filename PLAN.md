@@ -73,7 +73,7 @@ Goal: reach AYRA from the phone on any network, safely, while the laptop is at h
 - [x] 3.1 🧑 Owner creates a Telegram bot with @BotFather and finds their Telegram user ID; both go into
       `.env.local` (`AYRA_TELEGRAM_TOKEN`, `AYRA_TELEGRAM_OWNER_ID`).
 - [x] 3.2 Telegram channel `bridge/telegram.mjs`: long polling (no open ports), owner-only, text in/out,
-      Markdown persona variant. Check: message from the phone on mobile data → answer.
+      Markdown persona variant, with emoji (owner's choice). Check: message from the phone on mobile data → answer.
 - [ ] 3.3 Confirmations: effectful tools pause and ask on Telegram with Approve / Deny buttons; no answer
       in 2 minutes = deny. Check: "send an email to …" asks first; Deny cancels.
 - [ ] 3.4 Voice notes → text (decision Q5), replies as text.
@@ -130,7 +130,7 @@ Goal: reach AYRA from the phone on any network, safely, while the laptop is at h
 | Q1 | How should AYRA address you? | ✅ "boss" (owner, 2026-10-02) |
 | Q2 | AYRA's voice? | ✅ ElevenLabs Lily `pFZP5JQG7iQjIQuC4Bku` (free; Blondie needs a paid plan); excited, a little flirty (owner, 2026-10-02) |
 | Q3 | Model: Opus 5.5 (smartest) or Sonnet 5.5 (faster, lighter on plan limits)? | `claude-opus-5-5`, effort `medium` |
-| Q4 | Telegram as the first phone channel? | yes |
+| Q4 | Telegram as the first phone channel? | ✅ yes — @Ayra_rehan_bot, owner's account "Starboy" confirmed (owner, 2026-10-02) |
 | Q5 | Voice-note transcription: ElevenLabs (free tier, account needed) or local Whisper (free, slower)? | decide at 3.4 |
 | Q6 | OK to keep the laptop awake and plugged in while you're out? | decide at 3.6 |
 | Q7 | Which connectors may AYRA use? | Gmail, Calendar, Drive (read); others off (2.1) |

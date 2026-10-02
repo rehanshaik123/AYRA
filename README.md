@@ -58,7 +58,8 @@ npm run smoke     # sends one question and prints AYRA's answer
 With `AYRA_TELEGRAM_TOKEN` and `AYRA_TELEGRAM_OWNER_ID` in `.env.local`, the brain also answers
 your Telegram bot — from college, mobile data, anywhere — as long as AYRA is running on the laptop.
 It polls Telegram, so nothing on the laptop is opened to the internet, and it ignores everyone but
-you. Same personality, written instead of spoken; several messages in a row get one reply.
+you. Same personality, written instead of spoken (with the odd emoji); several messages in a row get
+one reply.
 
 ## Configuration
 
