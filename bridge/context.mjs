@@ -32,5 +32,16 @@ export function localTime(now = new Date(), timeZone = IDENTITY.timezone) {
   return `${parts.weekday}, ${parts.day} ${parts.month} ${parts.year}, ${parts.hour}:${parts.minute} (${timeZone})`
 }
 
+/** "2026-10-02" — the owner's local calendar date, for day-named files. */
+export function localDate(now = new Date(), timeZone = IDENTITY.timezone) {
+  // en-CA formats dates as YYYY-MM-DD.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now)
+}
+
 /** The line put in front of every question. The persona knows not to read it out. */
 export const stamp = (text, now = new Date()) => `[Now: ${localTime(now)}]\n${text}`

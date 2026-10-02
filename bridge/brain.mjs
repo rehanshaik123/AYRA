@@ -22,6 +22,7 @@ import { homedir } from 'node:os'
 import { IDENTITY, env } from './identity.mjs'
 import { stamp } from './context.mjs'
 import { createStore } from './state.mjs'
+import { clip, createAudit } from './audit.mjs'
 
 /**
  * What to tell the channel when a turn ends badly. Plain sentences, because
@@ -48,24 +49,29 @@ const SETTLE_CAP_MS = 400
 /**
  * @param {{ model: string, effort: string, gate: ReturnType<import('./gate.mjs').createGate>,
  *           mcpServers: Record<string, object>, store?: ReturnType<typeof createStore>,
- *           resumeHours?: number }} config
+ *           audit?: ReturnType<typeof createAudit>, resumeHours?: number }} config
  *   mcpServers  — the owner's own MCP servers, shared by every conversation
  *   store       — where each channel's last session id is kept (data/state.json)
+ *   audit       — where every question, tool decision and answer is logged
  *   resumeHours — a conversation idle longer than this starts fresh
  */
-export function createBrain({ model, effort, gate, mcpServers, store = createStore(), resumeHours = 6 }) {
+export function createBrain({
+  model, effort, gate, mcpServers,
+  store = createStore(), audit = createAudit(), resumeHours = 6,
+}) {
   /**
    * Open one conversation.
    *
    * @param {{ systemPrompt: string, servers?: Record<string, object>,
-   *           emit: (event: object) => void, onEnd?: () => void, resumeKey?: string }} options
-   *   servers   — the channel's own tool servers, merged over the shared ones
-   *   emit      — receives the events listed at the top of this file
-   *   onEnd     — called once if the session dies and can take no more turns
-   *   resumeKey — name of the channel ("hud"); when given, the conversation
-   *               picks up where that channel's last one left off
+   *           emit: (event: object) => void, onEnd?: () => void,
+   *           channel?: string, resume?: boolean }} options
+   *   servers — the channel's own tool servers, merged over the shared ones
+   *   emit    — receives the events listed at the top of this file
+   *   onEnd   — called once if the session dies and can take no more turns
+   *   channel — the channel's name ("hud", "telegram"), for logs and state
+   *   resume  — pick up where this channel's last conversation left off
    */
-  function open({ systemPrompt, servers = {}, emit, onEnd, resumeKey }) {
+  function open({ systemPrompt, servers = {}, emit, onEnd, channel = 'default', resume: wantResume = false }) {
     /**
      * Carrying on the last conversation, so a page reload doesn't wipe what
      * was just said. The SDK keeps each session on disk; all we keep is its id
@@ -73,13 +79,14 @@ export function createBrain({ model, effort, gate, mcpServers, store = createSto
      * resumeHours starts fresh — yesterday's half-finished topic is noise, and
      * an ever-growing history costs time and usage on every turn.
      */
-    const stateKey = resumeKey ? `session.${resumeKey}` : null
+    const stateKey = wantResume ? `session.${channel}` : null
     const saved = stateKey ? store.get(stateKey) : null
     const resume =
       saved?.id && Date.now() - Date.parse(saved.updatedAt) < resumeHours * 3_600_000
         ? saved.id
         : undefined
-    if (resume) console.log(`[ayra] resuming the ${resumeKey} conversation (${resume.slice(0, 8)}…)`)
+    if (resume) console.log(`[ayra] resuming the ${channel} conversation (${resume.slice(0, 8)}…)`)
+    audit.log({ type: 'session', channel, event: resume ? 'resume' : 'open', session: resume ?? null })
     let started = false
     const remember = (sessionId) => {
       if (stateKey && sessionId) {
@@ -94,7 +101,8 @@ export function createBrain({ model, effort, gate, mcpServers, store = createSto
     const forget = () => {
       if (!stateKey) return
       store.delete(stateKey)
-      console.warn(`[ayra] could not resume the ${resumeKey} conversation; the next one starts fresh`)
+      console.warn(`[ayra] could not resume the ${channel} conversation; the next one starts fresh`)
+      audit.log({ type: 'session', channel, event: 'resume_failed', session: resume })
     }
 
     /** Resolves the pending user message into the SDK's input generator. */
@@ -130,7 +138,18 @@ export function createBrain({ model, effort, gate, mcpServers, store = createSto
      * listener over there has already heard.
      */
     let answering = null
-    const emitTurn = (event) => emit({ ...event, ask: answering })
+    let askedAt = 0
+    const emitTurn = (event) => {
+      emit({ ...event, ask: answering })
+      if (event.type === 'tool') audit.log({ type: 'tool', channel, ask: answering, name: event.name })
+      if (event.type === 'done') {
+        audit.log({
+          type: 'answer', channel, ask: answering, text: clip(event.text),
+          ms: askedAt ? Date.now() - askedAt : null, costUsd: event.costUsd,
+        })
+      }
+      if (event.type === 'error') audit.log({ type: 'error', channel, ask: answering, message: event.message })
+    }
 
     /**
      * Announcing a tool, once, and only if it actually runs.
@@ -257,6 +276,7 @@ export function createBrain({ model, effort, gate, mcpServers, store = createSto
         // reliable; an absence of a call here is not proof nothing ran.
         canUseTool: async (toolName) => {
           const ok = gate.decide(toolName)
+          audit.log({ type: 'decision', channel, tool: toolName, allowed: ok })
           console.log(`[ayra] tool ${toolName} -> ${ok ? 'allow' : 'deny'}`)
           return ok
             ? { behavior: 'allow' }
@@ -279,6 +299,7 @@ export function createBrain({ model, effort, gate, mcpServers, store = createSto
       closed = true
       deliver?.(null)
       session.close?.()
+      audit.log({ type: 'session', channel, event: 'ended' })
       onEnd?.()
     }
 
@@ -368,6 +389,11 @@ export function createBrain({ model, effort, gate, mcpServers, store = createSto
                   `[ayra] turn failed: ${apiError ? 'api error' : msg.subtype}`,
                   apiError ? (msg.result ?? '') : (msg.errors ?? ''),
                 )
+                audit.log({
+                  type: 'failure', channel, ask: answering,
+                  subtype: apiError ? 'api_error' : msg.subtype,
+                  detail: clip(apiError ? msg.result : JSON.stringify(msg.errors ?? '')),
+                })
                 emitTurn({
                   type: 'error',
                   message: resumeFailed
@@ -399,6 +425,7 @@ export function createBrain({ model, effort, gate, mcpServers, store = createSto
             case 'system':
               if (msg.subtype === 'init') {
                 started = true
+                audit.log({ type: 'session', channel, event: 'started', session: msg.session_id ?? null, model })
                 remember(msg.session_id)
                 // Servers report 'pending' until first use — they connect
                 // lazily — so only drop the ones that are actually unusable.
@@ -422,6 +449,7 @@ export function createBrain({ model, effort, gate, mcpServers, store = createSto
         end()
       } catch (err) {
         console.error('[ayra] session error:', err)
+        audit.log({ type: 'error', channel, message: 'session error', detail: clip(err?.message ?? err) })
         // Died before it ever started: most likely the resume itself.
         if (resume && !started) forget()
         emit({ type: 'error', message: String(err?.message ?? err) })
@@ -450,6 +478,8 @@ export function createBrain({ model, effort, gate, mcpServers, store = createSto
       ask(text, id = null) {
         void settling.then(() => {
           answering = id
+          askedAt = Date.now()
+          audit.log({ type: 'question', channel, ask: id, text: clip(text) })
           if (deliver) {
             const resolve = deliver
             deliver = null
@@ -477,6 +507,7 @@ export function createBrain({ model, effort, gate, mcpServers, store = createSto
       close() {
         if (closed) return
         closed = true
+        audit.log({ type: 'session', channel, event: 'closed' })
         deliver?.(null)
         session.close?.()
       },

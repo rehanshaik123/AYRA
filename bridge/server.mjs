@@ -868,7 +868,8 @@ wss.on('connection', (socket) => {
     },
     emit: send,
     // Reloading the page carries on the same conversation (see brain.mjs).
-    resumeKey: 'hud',
+    channel: 'hud',
+    resume: true,
     // A dead session can answer nothing more. Leaving the socket open would
     // leave the face believing it has a working brain; closing it makes the
     // face reconnect, which opens a fresh conversation.

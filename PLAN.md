@@ -58,7 +58,7 @@ conversation survives reloads, an audit trail, and automated tests.
       caching. Check: "what is tomorrow's date?" is right.
 - [x] 2.4 Conversation survives a page reload: resume the SDK session (id kept in `data/state.json`).
       Check: reload, AYRA remembers the previous question.
-- [ ] 2.5 Audit log `data/logs/YYYY-MM-DD.jsonl`: turns, tools, allow/deny decisions, errors — no secrets.
+- [x] 2.5 Audit log `data/logs/YYYY-MM-DD.jsonl`: turns, tools, allow/deny decisions, errors — no secrets.
 - [ ] 2.6 Tests: `npm test` (node:test) for `decideTool`, wake phrase, identity, origin checks; added to
       the Definition of Done.
 

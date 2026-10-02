@@ -107,6 +107,7 @@ bridge/                THE BRAIN (Node, port 8787)
   persona.mjs          AYRA's personality — the system prompt
   context.mjs          Stamps every question with the local date and time
   state.mjs            data/state.json — e.g. which conversation to continue after a reload
+  audit.mjs            data/logs/<date>.jsonl — what AYRA was asked, what it ran, what was allowed
   identity.mjs         Loads identity.json and .env.local for the bridge
   panels.mjs           Tools that put things on screen: display, blade, probe_url
   ui.mjs               Tools that restyle the interface: theme, reactor, orbit, effects, reset
@@ -145,7 +146,7 @@ vite.config.ts         Dev server; fills the page title from identity.json
 CLAUDE.md              Rules for AI-assisted development of this repo
 PLAN.md                The roadmap, phase by phase, with tick boxes
 PROGRESS.md            What has been done, and where to continue
-data/                  (created at runtime) AYRA's memory and logs — never committed
+data/                  (created at runtime) state.json, logs/ (audit log), later memory — never committed
 ```
 
 ## How it works
