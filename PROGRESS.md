@@ -2,8 +2,8 @@
 
 ## ▶ Continue here
 
-- **Phase:** 1 — Foundation · branch `phase-1-foundation`
-- **Next task:** 1.14 — organised commits, merge owner's initial GitHub commit, merge to `main`, push
+- **Phase:** 2 — Core brain & safety · branch `phase-2-core` (Phase 1 ✅ merged to `main`)
+- **Next task:** 2.1 — connector policy (keep Gmail/Calendar/Drive reads, keep other connectors out, deny effectful connector tools)
 - **Blockers:** none
 - **Waiting on owner:** 1.15 voice test (not blocking) · decisions Q1–Q7 in PLAN.md (none block Phases 1–2)
 - **Health:** build ✓ · lint 0 · setup green · smoke ✓ 4.1 s on `claude-opus-5-5` · HUD verified
@@ -26,6 +26,7 @@
 - 2026-10-02 · 1.11 Rewrote README (setup, controls, settings, safety, "what each file is for") and `.env.example` (`AYRA_*`) — the old ones described JARVIS and settings the bridge no longer reads.
 - 2026-10-02 · 1.12 Error lines use the configured honorific, stale `JARVIS_*` comment fixed, smoke reads `.env.local`, `.gitattributes` keeps LF — last hard-coded "sir"s gone; no more CRLF warnings on commits.
 - 2026-10-02 · 1.13 Verified via `npm start`: build ✓, lint 0, setup all green, smoke 4.1 s on `claude-opus-5-5`, HUD shows A.Y.R.A. / "SAY HEY AYRA", female voice picked — Phase 1 works end to end on Windows.
+- 2026-10-02 · 1.14 Phase 1 merged into `main` (with the owner's GitHub "Initial commit" merged in, no force-push) and pushed to rehanshaik123/AYRA — the project is now on GitHub with a readable history.
 
 ## Findings worth remembering
 
