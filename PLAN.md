@@ -127,8 +127,8 @@ Goal: reach AYRA from the phone on any network, safely, while the laptop is at h
 
 | ID | Question | Default until answered |
 |---|---|---|
-| Q1 | How should AYRA address you — nothing, "sir", "boss", your name? | nothing |
-| Q2 | AYRA's voice: female or male? | female |
+| Q1 | How should AYRA address you? | ✅ "boss" (owner, 2026-10-02) |
+| Q2 | AYRA's voice? | ✅ ElevenLabs `si0svtk05vPEuvwAW93c`; excited, a little flirty (owner, 2026-10-02) |
 | Q3 | Model: Opus 5.5 (smartest) or Sonnet 5.5 (faster, lighter on plan limits)? | `claude-opus-5-5`, effort `medium` |
 | Q4 | Telegram as the first phone channel? | yes |
 | Q5 | Voice-note transcription: ElevenLabs (free tier, account needed) or local Whisper (free, slower)? | decide at 3.4 |

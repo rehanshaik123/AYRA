@@ -3,10 +3,10 @@
 ## ▶ Continue here
 
 - **Phase:** 3 — AYRA Anywhere · branch `phase-3-anywhere` (Phases 1–2 ✅ on `main`)
-- **Next task:** 3.0 personality & voice — code done (29/29 tests, sample replies OK); waiting on the owner's ElevenLabs key + approval. Then 3.1 Telegram.
-- **Blockers:** owner: ElevenLabs API key (3.0), approval of the new personality, Telegram bot (3.1)
-- **Waiting on owner:** 3.1 Telegram bot · 1.15 voice test · decisions Q1–Q7 (Q5 needed before 3.4, Q6 before 3.6)
-- **Health:** build ✓ · lint 0 · `npm test` 29/29 · smoke ✓ on `claude-opus-5-5`
+- **Next task:** 3.0 voice check — personality approved (flirtier, "boss"); waiting for the owner to put the ElevenLabs key + Telegram token in `.env.local`. Then 3.1 owner ID → 3.2 Telegram.
+- **Blockers:** owner: keys into `.env.local` (ElevenLabs + Telegram token)
+- **Waiting on owner:** keys in `.env.local` · 1.15 voice test · decisions Q3–Q7 (Q1 = "boss", Q2 = ElevenLabs voice; Q5 before 3.4, Q6 before 3.6)
+- **Health:** build ✓ · lint 0 · `npm test` 32/32 · smoke ✓ on `claude-opus-5-5`
 
 ## Log — one line per task (what changed — why)
 
@@ -48,3 +48,4 @@
 
 - `index.html` CSP hard-codes `localhost:8787` — must change for phone access (3.7).
 - `@picovoice/*` packages are installed but unused (wake word is speech-based) — revisit at 7.3.
+- AYRA sometimes offers reminders it cannot set yet (no scheduler until 5.1) — fix with 5.1 or a persona line if the owner wants it sooner.

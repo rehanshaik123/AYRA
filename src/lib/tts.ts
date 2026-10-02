@@ -9,6 +9,7 @@ import {
 import * as kokoro from './kokoro'
 import { caps } from './capabilities'
 import { IDENTITY } from '../identity'
+import { setOffHonorific } from './vocative'
 
 /**
  * Speech output.
@@ -316,19 +317,6 @@ function outputContext(): AudioContext | null {
 // ---------------------------------------------------------------------------
 
 /**
- * The configured honorific as a vocative: preceded by a word, followed by a
- * pause or the end of the line. Anchored that way so a title is left alone —
- * "Sir Isaac Newton" is not a vocative. Null when there is no honorific.
- */
-const HONORIFIC = IDENTITY.honorific.trim()
-const VOCATIVE = HONORIFIC
-  ? new RegExp(
-      `([^,\\s])\\s+(${HONORIFIC.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(\\s*[.,!?;:]|\\s*$)`,
-      'gi',
-    )
-  : null
-
-/**
  * Nudge the delivery toward the character's cadence.
  *
  * speechSynthesis ignores SSML, so punctuation is the only prosody control
@@ -348,8 +336,8 @@ function shape(text: string): string {
     .replace(/https?:\/\/[^\s]*[^\s.,;:!?)\]]/g, '')
     .replace(/[*_`#>]+/g, '')
     .replace(/^\s*[-•]\s+/gm, '')
-  if (VOCATIVE) out = out.replace(VOCATIVE, '$1, $2$3')
-  return out.replace(/\s+/g, ' ').trim()
+  // The honorific gets its comma — see vocative.ts.
+  return setOffHonorific(out, IDENTITY.honorific).replace(/\s+/g, ' ').trim()
 }
 
 type Item = {
