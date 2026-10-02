@@ -21,6 +21,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import { homedir } from 'node:os'
 import { IDENTITY, env } from './identity.mjs'
 import { stamp } from './context.mjs'
+import { createStore } from './state.mjs'
 
 /**
  * What to tell the channel when a turn ends badly. Plain sentences, because
@@ -32,6 +33,7 @@ const RESULT_FAILURES = {
   error_max_budget_usd: 'The budget for this turn ran out.',
   error_max_structured_output_retries: 'The answer could not be assembled.',
   api_error: 'The model could not be reached. The details are in the bridge log.',
+  resume_failed: 'The previous conversation could not be restored. Ask me again.',
   default: 'The turn ended without an answer.',
 }
 
@@ -45,20 +47,56 @@ const SETTLE_CAP_MS = 400
 
 /**
  * @param {{ model: string, effort: string, gate: ReturnType<import('./gate.mjs').createGate>,
- *           mcpServers: Record<string, object> }} config
- *   mcpServers — the owner's own MCP servers, shared by every conversation
+ *           mcpServers: Record<string, object>, store?: ReturnType<typeof createStore>,
+ *           resumeHours?: number }} config
+ *   mcpServers  — the owner's own MCP servers, shared by every conversation
+ *   store       — where each channel's last session id is kept (data/state.json)
+ *   resumeHours — a conversation idle longer than this starts fresh
  */
-export function createBrain({ model, effort, gate, mcpServers }) {
+export function createBrain({ model, effort, gate, mcpServers, store = createStore(), resumeHours = 6 }) {
   /**
    * Open one conversation.
    *
    * @param {{ systemPrompt: string, servers?: Record<string, object>,
-   *           emit: (event: object) => void, onEnd?: () => void }} options
-   *   servers — the channel's own tool servers, merged over the shared ones
-   *   emit    — receives the events listed at the top of this file
-   *   onEnd   — called once if the session dies and can take no more turns
+   *           emit: (event: object) => void, onEnd?: () => void, resumeKey?: string }} options
+   *   servers   — the channel's own tool servers, merged over the shared ones
+   *   emit      — receives the events listed at the top of this file
+   *   onEnd     — called once if the session dies and can take no more turns
+   *   resumeKey — name of the channel ("hud"); when given, the conversation
+   *               picks up where that channel's last one left off
    */
-  function open({ systemPrompt, servers = {}, emit, onEnd }) {
+  function open({ systemPrompt, servers = {}, emit, onEnd, resumeKey }) {
+    /**
+     * Carrying on the last conversation, so a page reload doesn't wipe what
+     * was just said. The SDK keeps each session on disk; all we keep is its id
+     * and when it was last used. A conversation idle for longer than
+     * resumeHours starts fresh — yesterday's half-finished topic is noise, and
+     * an ever-growing history costs time and usage on every turn.
+     */
+    const stateKey = resumeKey ? `session.${resumeKey}` : null
+    const saved = stateKey ? store.get(stateKey) : null
+    const resume =
+      saved?.id && Date.now() - Date.parse(saved.updatedAt) < resumeHours * 3_600_000
+        ? saved.id
+        : undefined
+    if (resume) console.log(`[ayra] resuming the ${resumeKey} conversation (${resume.slice(0, 8)}…)`)
+    let started = false
+    const remember = (sessionId) => {
+      if (stateKey && sessionId) {
+        store.set(stateKey, { id: sessionId, updatedAt: new Date().toISOString() })
+      }
+    }
+    /**
+     * A saved session that cannot be resumed — its transcript deleted,
+     * unreadable or expired — must be forgotten, or every reconnect would try
+     * the same id and fail the same way.
+     */
+    const forget = () => {
+      if (!stateKey) return
+      store.delete(stateKey)
+      console.warn(`[ayra] could not resume the ${resumeKey} conversation; the next one starts fresh`)
+    }
+
     /** Resolves the pending user message into the SDK's input generator. */
     let deliver = null
     let closed = false
@@ -166,6 +204,8 @@ export function createBrain({ model, effort, gate, mcpServers }) {
     const session = query({
       prompt: userMessages(),
       options: {
+        // Continue the channel's last conversation, when there is a recent one.
+        ...(resume ? { resume } : {}),
         // The owner's MCP servers plus the channel's own, which close over
         // the channel (the HUD's `display` lands on that socket) — which is
         // why this object is built per conversation rather than once.
@@ -300,7 +340,11 @@ export function createBrain({ model, effort, gate, mcpServers }) {
               break
             }
 
-            case 'result':
+            case 'result': {
+              // A resume whose session is gone fails here, before the session
+              // ever starts — "No conversation found with session ID" — as an
+              // error result, not an exception.
+              const resumeFailed = Boolean(resume) && !started && msg.subtype !== 'success'
               // A result is not automatically a success. The error subtypes
               // carry no `result` field at all, so reporting them as 'done'
               // with empty text is indistinguishable from a turn that simply
@@ -326,9 +370,11 @@ export function createBrain({ model, effort, gate, mcpServers }) {
                 )
                 emitTurn({
                   type: 'error',
-                  message: apiError
-                    ? RESULT_FAILURES.api_error
-                    : (RESULT_FAILURES[msg.subtype] ?? RESULT_FAILURES.default),
+                  message: resumeFailed
+                    ? RESULT_FAILURES.resume_failed
+                    : apiError
+                      ? RESULT_FAILURES.api_error
+                      : (RESULT_FAILURES[msg.subtype] ?? RESULT_FAILURES.default),
                 })
               }
               // Whatever was waiting on this turn to finish can go now. This is
@@ -339,10 +385,21 @@ export function createBrain({ model, effort, gate, mcpServers }) {
               // otherwise grow for as long as the conversation is open.
               seenTools.clear()
               heldTools.clear()
+              if (resumeFailed) {
+                // Nothing more can happen in this session. Forget it and end,
+                // so the channel reconnects into a fresh conversation.
+                forget()
+                end()
+              } else {
+                remember(msg.session_id)
+              }
               break
+            }
 
             case 'system':
               if (msg.subtype === 'init') {
+                started = true
+                remember(msg.session_id)
                 // Servers report 'pending' until first use — they connect
                 // lazily — so only drop the ones that are actually unusable.
                 const usable = (msg.mcp_servers ?? [])
@@ -360,8 +417,13 @@ export function createBrain({ model, effort, gate, mcpServers }) {
               break
           }
         }
+        // The stream ended on its own. Same as a crash, as far as the channel
+        // is concerned: this conversation can take no more questions.
+        end()
       } catch (err) {
         console.error('[ayra] session error:', err)
+        // Died before it ever started: most likely the resume itself.
+        if (resume && !started) forget()
         emit({ type: 'error', message: String(err?.message ?? err) })
         // The stream is finished either way — nothing will ever be read from
         // it again. Leaving the channel open would leave the client believing

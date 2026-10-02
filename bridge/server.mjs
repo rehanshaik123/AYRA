@@ -802,6 +802,8 @@ const BRAIN = createBrain({
   effort: EFFORT,
   gate: GATE,
   mcpServers: MCP_SERVERS,
+  // How long an idle conversation is worth continuing after a reload.
+  resumeHours: Number(env('RESUME_HOURS', 6)),
 })
 
 // The HUD channel: one WebSocket, one conversation.
@@ -865,6 +867,8 @@ wss.on('connection', (socket) => {
       ayra_eyes: visionServer(ask),
     },
     emit: send,
+    // Reloading the page carries on the same conversation (see brain.mjs).
+    resumeKey: 'hud',
     // A dead session can answer nothing more. Leaving the socket open would
     // leave the face believing it has a working brain; closing it makes the
     // face reconnect, which opens a fresh conversation.

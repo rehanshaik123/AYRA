@@ -56,7 +56,7 @@ conversation survives reloads, an audit trail, and automated tests.
       the WebSocket becomes one channel adapter. Check: smoke passes, behaviour unchanged.
 - [x] 2.3 Time & locale on every turn (local date, time, weekday in IST) without breaking prompt
       caching. Check: "what is tomorrow's date?" is right.
-- [ ] 2.4 Conversation survives a page reload: resume the SDK session (id kept in `data/state.json`).
+- [x] 2.4 Conversation survives a page reload: resume the SDK session (id kept in `data/state.json`).
       Check: reload, AYRA remembers the previous question.
 - [ ] 2.5 Audit log `data/logs/YYYY-MM-DD.jsonl`: turns, tools, allow/deny decisions, errors — no secrets.
 - [ ] 2.6 Tests: `npm test` (node:test) for `decideTool`, wake phrase, identity, origin checks; added to

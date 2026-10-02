@@ -3,10 +3,10 @@
 ## ▶ Continue here
 
 - **Phase:** 2 — Core brain & safety · branch `phase-2-core` (Phase 1 ✅ merged to `main`)
-- **Next task:** 2.4 — conversation survives a page reload (resume the SDK session)
+- **Next task:** 2.5 — audit log `data/logs/YYYY-MM-DD.jsonl` (turns, tools, allow/deny, errors; no secrets)
 - **Blockers:** none
 - **Waiting on owner:** 1.15 voice test (not blocking) · decisions Q1–Q7 in PLAN.md (none block Phases 1–2)
-- **Health:** build ✓ · lint 0 · `npm test` 10/10 · smoke ✓ on `claude-opus-5-5`
+- **Health:** build ✓ · lint 0 · `npm test` 12/12 · smoke ✓ on `claude-opus-5-5`
 
 ## Log — one line per task (what changed — why)
 
@@ -30,6 +30,7 @@
 - 2026-10-02 · 2.1 New `bridge/gate.mjs` (policy moved out of server.mjs): model gets 6 read built-ins (not 32), Gmail/Calendar/Drive read-only even with writes, 7 other connectors removed (`AYRA_CONNECTORS`), `npm test` 7/7 — the brain had the full Claude Code toolbox and could have sent mail unconfirmed with writes on.
 - 2026-10-02 · 2.2 Session logic moved from server.mjs (1249 → 902 lines) into `bridge/brain.mjs` (`createBrain().open()`); WebSocket is now a thin HUD adapter. Verified: plain turn, tool turn, barge-in — Telegram (3.2) can reuse the same brain.
 - 2026-10-02 · 2.3 New `bridge/context.mjs` stamps each question "[Now: Friday, 2 October 2026, 14:05 (Asia/Kolkata)]" (not the system prompt, so caching holds); persona told not to read it — AYRA had no clock; "tomorrow" now answers "Saturday, the third of October".
+- 2026-10-02 · 2.4 New `bridge/state.mjs` (`data/state.json`); the HUD resumes its last Claude session after a reload if used within `AYRA_RESUME_HOURS` (6); a broken saved session is forgotten with a spoken "could not be restored" — a reload used to wipe the conversation. Verified: code word recalled across reconnects; bogus id → clean error → fresh session.
 
 ## Findings worth remembering
 

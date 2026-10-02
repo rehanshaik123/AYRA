@@ -69,6 +69,7 @@ Only `VITE_*` values ever reach the browser. `.env.local` is gitignored.
 | `AYRA_EFFORT` | `medium` | Reasoning effort: `low` … `max` |
 | `AYRA_BRIDGE_PORT` | `8787` | Port for the brain (HTTP + WebSocket) |
 | `AYRA_ALLOW_WRITES` | off | `1` allows effectful tools — see Safety |
+| `AYRA_RESUME_HOURS` | `6` | A reload continues the last conversation if it was used within this many hours |
 | `AYRA_CONNECTORS` | `Gmail,Google Calendar,Google Drive` | claude.ai connectors AYRA may read, or `none` |
 | `AYRA_ALLOWED_ORIGINS` | local dev | Extra page origins allowed to connect |
 | `AYRA_FILE_ROOTS` | — | Extra folders the `/file` endpoint may serve images from |
@@ -105,6 +106,7 @@ bridge/                THE BRAIN (Node, port 8787)
   gate.mjs             The safety gate: which tools AYRA may run, connector policy
   persona.mjs          AYRA's personality — the system prompt
   context.mjs          Stamps every question with the local date and time
+  state.mjs            data/state.json — e.g. which conversation to continue after a reload
   identity.mjs         Loads identity.json and .env.local for the bridge
   panels.mjs           Tools that put things on screen: display, blade, probe_url
   ui.mjs               Tools that restyle the interface: theme, reactor, orbit, effects, reset

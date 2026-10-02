@@ -68,6 +68,7 @@ The preview pane in the Claude app blocks the microphone — voice features need
 | `config/identity.json` | **Who AYRA is**: name, wordmark, tagline, honorific, language, timezone, voice, wake words. The only place identity is set. |
 | `bridge/server.mjs` | The bridge process: HTTP + WebSocket on :8787 (the HUD channel), image/media/page proxies, ElevenLabs `/tts` `/stt`, startup banner |
 | `bridge/brain.mjs` | **The brain**, channel-independent: `createBrain().open({ systemPrompt, servers, emit })` → one Claude session with `ask / interrupt / close`; emits `ready text tool done error` |
+| `bridge/state.mjs` | `data/state.json` — small state that survives restarts (each channel's last session id) |
 | `bridge/gate.mjs` | **The safety gate**: `createGate()` → `decide(tool)`, the built-in tool list, connector policy (claude.ai Gmail/Calendar/Drive read-only, others removed). Tested in `test/gate.test.mjs` |
 | `bridge/identity.mjs` | Loads identity + `.env.local`; `env('X')` reads `AYRA_X` |
 | `bridge/persona.mjs` · `bridge/context.mjs` | AYRA's spoken personality (system prompt) · the "[Now: …]" local-time stamp on every question |
@@ -99,7 +100,7 @@ Face ↔ brain protocol (WebSocket): face sends `ask {id,text}`, `interrupt`, `r
 - **Identity:** `config/identity.json` only. Never hard-code the name, wake words or honorific.
 - **Settings and secrets:** `.env.local` (gitignored; template `.env.example`). Bridge reads `AYRA_*`
   (`MODEL` default `claude-opus-5-5`, `EFFORT` `medium`, `BRIDGE_PORT` 8787, `ALLOW_WRITES`,
-  `ALLOWED_ORIGINS`, `ALLOW_NO_ORIGIN`, `FILE_ROOTS`, `VOICE_ID`, `DEBUG`, `CONNECTORS` — default
+  `ALLOWED_ORIGINS`, `ALLOW_NO_ORIGIN`, `FILE_ROOTS`, `VOICE_ID`, `DEBUG`, `RESUME_HOURS` — default 6, `CONNECTORS` — default
   `Gmail,Google Calendar,Google Drive`, or `none`) plus `ELEVENLABS_API_KEY`.
   The face reads `VITE_*` — only `VITE_*` values reach the browser, so never put a secret in one.
 - AYRA's own sessions never load this file: the bridge runs with `settingSources: []`.
