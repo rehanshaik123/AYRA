@@ -1,8 +1,8 @@
 {
-  "name": "jarvis",
+  "name": "ayra",
   "private": true,
   "version": "0.0.0",
-  "description": "A browser voice assistant with an Iron Man holographic interface, driven by Claude Code through a small Node bridge.",
+  "description": "AYRA — a personal voice assistant with a holographic interface, driven by Claude Code through a small Node bridge. Forked from adewaskar/jarvis.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -15,8 +15,9 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "bridge": "node bridge/server.mjs",
-    "bridge:writes": "JARVIS_ALLOW_WRITES=1 node bridge/server.mjs",
-    "setup": "node scripts/setup.mjs"
+    "bridge:writes": "node bridge/server.mjs --writes",
+    "setup": "node scripts/setup.mjs",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.220",

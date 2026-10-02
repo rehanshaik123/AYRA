@@ -1,5 +1,5 @@
 /**
- * One command to run JARVIS: the bridge (brain) and the Vite dev server (face)
+ * One command to run AYRA: the bridge (brain) and the Vite dev server (face)
  * together, so a student types `npm start` and nothing else.
  *
  * Two long-running processes normally mean two terminals. This launcher spawns
@@ -12,7 +12,9 @@
 
 import { spawn } from 'node:child_process'
 import process from 'node:process'
-import { cpSync, existsSync, mkdirSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+
+const IDENTITY = JSON.parse(readFileSync('config/identity.json', 'utf8'))
 
 /**
  * Put MediaPipe's WebAssembly where the page can actually load it.
@@ -105,21 +107,21 @@ process.on('SIGTERM', () => shutdown(0))
  * without widening what the bridge trusts by default.
  */
 const port = process.env.PORT
-const bridgeEnv = writes ? { JARVIS_ALLOW_WRITES: '1' } : {}
+const bridgeEnv = writes ? { AYRA_ALLOW_WRITES: '1' } : {}
 if (port) {
-  bridgeEnv.JARVIS_ALLOWED_ORIGINS = `http://localhost:${port},http://127.0.0.1:${port}`
+  bridgeEnv.AYRA_ALLOWED_ORIGINS = `http://localhost:${port},http://127.0.0.1:${port}`
   console.log(`  serving the face on port ${port}; the bridge will accept it.\n`)
 }
 
 vendorWasm()
 
-console.log('\nJ.A.R.V.I.S. starting — the brain and the face.\n')
-run('bridge', 'node', ['bridge/server.mjs'], '36', bridgeEnv)
+console.log(`\n${IDENTITY.wordmark} starting — the brain and the face.\n`)
+run('bridge', process.execPath, ['bridge/server.mjs'], '36', bridgeEnv)
 // npm is a shell script on most systems; call the vite binary directly so we do
 // not need shell:true (which would break the argument handling above).
 run('face', process.execPath, ['node_modules/vite/bin/vite.js'], '35', {})
 
 console.log(
   '\nWhen it says the dev server is ready, open the URL it prints in Chrome,\n' +
-    'click INITIALISE, and say "Hey Jarvis". Ctrl-C stops everything.\n',
+    `click INITIALISE, and say "Hey ${IDENTITY.name}". Ctrl-C stops everything.\n`,
 )
