@@ -32,6 +32,10 @@ headless through the Claude Agent SDK on the owner's own Claude login — no API
 
 ## 3. How to work (the owner's rules — always)
 
+0. **The owner decides.** Never settle a choice yourself — personality, features, defaults, voices,
+   dependencies, architecture, priorities or task order. Present the options with a short
+   recommendation and wait for the owner's opinion and permission. Routine steps inside an approved
+   task (tests, a failing build, a typo) need no extra ask.
 1. **Read little.** Before a phase or task, read only the files it needs — use the map in §5.
    Never re-scan the whole repo. Big files (`bridge/server.mjs`, `src/App.tsx`, `src/lib/voice.ts`,
    `src/lib/tts.ts`, `src/index.css`) are read by line range around the symbol you need.
