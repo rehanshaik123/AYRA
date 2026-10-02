@@ -3,7 +3,7 @@
 ## ▶ Continue here
 
 - **Phase:** 2 — Core brain & safety · branch `phase-2-core` (Phase 1 ✅ merged to `main`)
-- **Next task:** 2.2 — extract `bridge/brain.mjs` (session, gate, persona per channel) from `server.mjs`
+- **Next task:** 2.3 — local date, time and weekday (IST) on every turn, without breaking prompt caching
 - **Blockers:** none
 - **Waiting on owner:** 1.15 voice test (not blocking) · decisions Q1–Q7 in PLAN.md (none block Phases 1–2)
 - **Health:** build ✓ · lint 0 · `npm test` 7/7 · smoke ✓ 4.7 s on `claude-opus-5-5`
@@ -28,6 +28,7 @@
 - 2026-10-02 · 1.13 Verified via `npm start`: build ✓, lint 0, setup all green, smoke 4.1 s on `claude-opus-5-5`, HUD shows A.Y.R.A. / "SAY HEY AYRA", female voice picked — Phase 1 works end to end on Windows.
 - 2026-10-02 · 1.14 Phase 1 merged into `main` (with the owner's GitHub "Initial commit" merged in, no force-push) and pushed to rehanshaik123/AYRA — the project is now on GitHub with a readable history.
 - 2026-10-02 · 2.1 New `bridge/gate.mjs` (policy moved out of server.mjs): model gets 6 read built-ins (not 32), Gmail/Calendar/Drive read-only even with writes, 7 other connectors removed (`AYRA_CONNECTORS`), `npm test` 7/7 — the brain had the full Claude Code toolbox and could have sent mail unconfirmed with writes on.
+- 2026-10-02 · 2.2 Session logic moved from server.mjs (1249 → 902 lines) into `bridge/brain.mjs` (`createBrain().open()`); WebSocket is now a thin HUD adapter. Verified: plain turn, tool turn, barge-in — Telegram (3.2) can reuse the same brain.
 
 ## Findings worth remembering
 

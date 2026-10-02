@@ -66,7 +66,8 @@ The preview pane in the Claude app blocks the microphone — voice features need
 | Path | Purpose |
 |---|---|
 | `config/identity.json` | **Who AYRA is**: name, wordmark, tagline, honorific, language, timezone, voice, wake words. The only place identity is set. |
-| `bridge/server.mjs` | The brain: HTTP + WebSocket on :8787, one Claude session per connection, image/media/page proxies, ElevenLabs `/tts` `/stt` |
+| `bridge/server.mjs` | The bridge process: HTTP + WebSocket on :8787 (the HUD channel), image/media/page proxies, ElevenLabs `/tts` `/stt`, startup banner |
+| `bridge/brain.mjs` | **The brain**, channel-independent: `createBrain().open({ systemPrompt, servers, emit })` → one Claude session with `ask / interrupt / close`; emits `ready text tool done error` |
 | `bridge/gate.mjs` | **The safety gate**: `createGate()` → `decide(tool)`, the built-in tool list, connector policy (claude.ai Gmail/Calendar/Drive read-only, others removed). Tested in `test/gate.test.mjs` |
 | `bridge/identity.mjs` | Loads identity + `.env.local`; `env('X')` reads `AYRA_X` |
 | `bridge/persona.mjs` | AYRA's spoken personality (system prompt) |

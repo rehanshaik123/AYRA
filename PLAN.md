@@ -52,7 +52,7 @@ conversation survives reloads, an audit trail, and automated tests.
       keep the rest out of AYRA's sessions; deny every effectful connector tool even with writes on
       until confirmations exist (3.3). Debug mode logs the tool names AYRA sees.
       Check: unit test on `decideTool` + smoke.
-- [ ] 2.2 Extract `bridge/brain.mjs` (session creation, gate, persona per channel) from `server.mjs`;
+- [x] 2.2 Extract `bridge/brain.mjs` (session creation, gate, persona per channel) from `server.mjs`;
       the WebSocket becomes one channel adapter. Check: smoke passes, behaviour unchanged.
 - [ ] 2.3 Time & locale on every turn (local date, time, weekday in IST) without breaking prompt
       caching. Check: "what is tomorrow's date?" is right.

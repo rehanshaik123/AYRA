@@ -99,8 +99,9 @@ Only `VITE_*` values ever reach the browser. `.env.local` is gitignored.
 config/
   identity.json        Who AYRA is: name, wake words, honorific, language, voice. Edit here.
 bridge/                THE BRAIN (Node, port 8787)
-  server.mjs           HTTP + WebSocket server; one Claude session per connection;
+  server.mjs           The bridge process: HTTP + WebSocket server for the HUD;
                        image/video/page proxies; ElevenLabs speech
+  brain.mjs            One conversation with Claude — used by every channel (HUD, Telegram…)
   gate.mjs             The safety gate: which tools AYRA may run, connector policy
   persona.mjs          AYRA's personality — the system prompt
   identity.mjs         Loads identity.json and .env.local for the bridge
