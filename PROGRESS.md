@@ -3,8 +3,8 @@
 ## ▶ Continue here
 
 - **Phase:** 3 — AYRA Anywhere · branch `phase-3-anywhere` (Phases 1–2 ✅ on `main`)
-- **Next task:** 3.0 voice check — personality approved (flirtier, "boss"); waiting for the owner to put the ElevenLabs key + Telegram token in `.env.local`. Then 3.1 owner ID → 3.2 Telegram.
-- **Blockers:** owner: keys into `.env.local` (ElevenLabs + Telegram token)
+- **Next task:** 3.0 owner picks a voice (Blondie needs a paid ElevenLabs plan; free samples Jessica / Laura / Lily sent) → 3.1 owner sends a message to @Ayra_rehan_bot, then I save their user ID → 3.2 Telegram.
+- **Blockers:** owner: voice choice (paid Blondie vs a free voice) · a message to the bot
 - **Waiting on owner:** keys in `.env.local` · 1.15 voice test · decisions Q3–Q7 (Q1 = "boss", Q2 = ElevenLabs voice; Q5 before 3.4, Q6 before 3.6)
 - **Health:** build ✓ · lint 0 · `npm test` 32/32 · smoke ✓ on `claude-opus-5-5`
 
@@ -42,6 +42,7 @@
 - AYRA's brain session inherits 10 claude.ai connectors (Gmail, Google Calendar, Google Drive, Figma, Canva, Lucid, draw.io, Beautiful.ai, Wispr Flow, Claude Docs). Default-deny blocks their effectful tools today; with writes on, mail could be sent unconfirmed → task 2.1.
 - Windows Chrome control = named pipe `\\.\pipe\claude-mcp-browser-bridge-<user>`; discovery + connect verified, no tool call sent yet.
 - The Claude app's preview pane blocks the microphone — voice must be tested in a real Chrome/Edge window.
+- Keys tested 2026-10-02: ElevenLabs key OK (free plan, 0/10000 credits); voice si0svtk05vPEuvwAW93c = "Blondie - Intense Woman" (Voice Library, professional) → HTTP 402 "Free users cannot use library voices via the API". Premade voices work; Scribe speech-to-text works. Telegram token OK → bot AYRA (@Ayra_rehan_bot), no messages yet.
 - The owner's GitHub repo had one commit ("Initial commit", README `# my_own_jarvis`) with no shared history — merged in, never force-pushed.
 
 ## Known issues

@@ -722,7 +722,7 @@ server.listen(PORT)
 
 console.log(`[ayra] ${IDENTITY.name} bridge listening on ws://localhost:${PORT}`)
 console.log(
-  `[ayra] speech ${elevenKey() ? 'via ElevenLabs (key from MCP config)' : 'using browser fallback voice'}`,
+  `[ayra] speech ${elevenKey() ? `via ElevenLabs, voice ${VOICE_ID}` : 'using browser fallback voice'}`,
 )
 console.log(`[ayra] model ${MODEL} · effort ${EFFORT}`)
 console.log(
