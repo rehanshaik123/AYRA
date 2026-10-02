@@ -3,10 +3,10 @@
 ## ▶ Continue here
 
 - **Phase:** 1 — Foundation · branch `phase-1-foundation`
-- **Next task:** 1.9 — update Claude Agent SDK 0.3.220 → 0.3.287
+- **Next task:** 1.10 — bridge honours `is_error`; smoke fails on error answers
 - **Blockers:** none
 - **Waiting on owner:** 1.15 voice test (not blocking) · decisions Q1–Q7 in PLAN.md (none block Phases 1–2)
-- **Health:** build ✓ · lint 0 warnings · smoke ✗ on `claude-opus-5-5` (fixed by 1.9), ✓ on `claude-opus-5`
+- **Health:** build ✓ · lint 0 warnings · smoke ✓ on `claude-opus-5-5` (6.1 s)
 
 ## Log — one line per task (what changed — why)
 
@@ -21,6 +21,7 @@
 - 2026-10-01 · 1.6 Voice ranking by identity (Edge Natural / Google / SAPI names), Kokoro female voices, honorific-aware fillers — AYRA's voice matches its identity on Windows.
 - 2026-10-01 · 1.7 Rewrote `scripts/setup.mjs` for Windows, added `scripts/smoke.mjs` — a preflight that tells the truth on Windows and a one-command brain test.
 - 2026-10-02 · 1.8 Wrote CLAUDE.md, PLAN.md, PROGRESS.md — rules, roadmap and this log so any session can resume without re-reading the repo.
+- 2026-10-02 · 1.9 Agent SDK 0.3.220 → 0.3.287 (bundled Claude Code 2.1.287) — the old one rejected `claude-opus-5-5`; smoke now answers "AYRA is online." in 6.1 s.
 
 ## Findings worth remembering
 
