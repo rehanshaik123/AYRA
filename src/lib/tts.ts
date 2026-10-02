@@ -8,6 +8,7 @@ import {
 } from '../config'
 import * as kokoro from './kokoro'
 import { caps } from './capabilities'
+import { IDENTITY } from '../identity'
 
 /**
  * Speech output.
@@ -162,50 +163,65 @@ const MAX_UNSPOKEN = 220
 // Voice selection
 // ---------------------------------------------------------------------------
 
-const VOICE_PREF_KEY = 'jarvis.voice'
+const VOICE_PREF_KEY = 'ayra.voice'
 
 /**
- * Rank installed voices by how close they are to the character: a British
- * male, low and level, not a novelty voice.
+ * Voice names are the only way a voice reveals its gender — the Web Speech API
+ * has no field for it. These cover what actually ships: Edge's online
+ * "Natural" voices and the SAPI desktop set on Windows, Chrome's Google voices,
+ * and the macOS English voices. "Google US English" is female but says so
+ * nowhere in its name, so it is named outright.
+ */
+const FEMALE_NAMES =
+  /\b(female|neerja|swara|heera|kalpana|sonia|libby|hazel|susan|aria|jenny|michelle|emma|ava|zira|serena|kate|stephanie|veena|samantha|moira|karen|tessa|fiona|flo|sandy|shelley|zoe|allison)\b|^google us english$/
+const MALE_NAMES =
+  /\b(male|prabhat|ravi|hemant|ryan|thomas|george|oliver|guy|davis|andrew|brian|christopher|eric|roger|steffan|david|mark|daniel|arthur|jamie|malcolm|rishi|reed|rocko|eddy|alex|fred)\b/
+
+/** Child voices and novelty voices: never the assistant. */
+const NOT_THE_ASSISTANT =
+  /\b(ana|maisie)\b|grandma|grandpa|bubbles|jester|bells|boing|whisper|zarvox|superstar|trinoids|wobble|bahh|organ|cellos|bad news|good news/
+
+/**
+ * Rank installed voices by how close they are to the character set in
+ * config/identity.json: the configured gender, the owner's own English first,
+ * natural quality over the old compact voices, never a novelty voice.
  *
- * The big win on macOS is the Enhanced/Premium variant of Daniel. The stock
- * "Daniel" is a compact voice from a decade ago and sounds it; the Enhanced
- * download is free (System Settings → Accessibility → Spoken Content → System
- * Voice → Manage Voices) and once installed it appears here automatically.
+ * The cheap upgrade on Windows is Edge: its "Online (Natural)" neural voices
+ * appear here automatically and sound far better than the SAPI desktop set.
+ * On macOS the Enhanced/Premium downloads do the same job (System Settings →
+ * Accessibility → Spoken Content → System Voice → Manage Voices).
  */
 function score(v: SpeechSynthesisVoice): number {
   const n = v.name.toLowerCase()
+  const lang = v.lang.toLowerCase().replace('_', '-')
   let s = 0
 
-  // The macOS British male, and the closest thing to the character available
-  // without leaving the machine.
-  if (n.startsWith('daniel')) s += 100
-  else if (n.includes('google uk english male')) s += 85
-  else if (/\b(oliver|arthur|jamie|malcolm)\b/.test(n)) s += 80
-  // Newer macOS en-GB male voices — casual, but serviceable.
-  else if (/\b(reed|rocko|eddy)\b/.test(n)) s += 40
+  // An explicit pick in identity.json beats every heuristic below.
+  if (IDENTITY.voice.prefer.some((p) => p && n.includes(p.toLowerCase()))) s += 500
 
-  // Higher-quality variants of whatever matched above.
-  if (n.includes('premium')) s += 30
+  const female = FEMALE_NAMES.test(n)
+  const male = MALE_NAMES.test(n)
+  const wantFemale = IDENTITY.voice.gender === 'female'
+  if (wantFemale ? female : male) s += 50
+  else if (wantFemale ? male : female) s -= 80
+
+  // Neural voices first, then the better variants of the older engines.
+  if (/natural|neural/.test(n)) s += 35
+  else if (n.includes('premium')) s += 30
   else if (n.includes('enhanced')) s += 20
+  else if (n.startsWith('google')) s += 15
 
-  if (/en[-_]gb/i.test(v.lang)) s += 25
-  else if (/^en/i.test(v.lang)) s += 5
+  if (lang === IDENTITY.language.toLowerCase()) s += 40
+  else if (lang === 'en-gb') s += 25
+  else if (lang.startsWith('en')) s += 10
 
-  // Voices that clearly aren't a butler.
-  if (/grandma|grandpa|bubbles|jester|bells|boing|whisper|zarvox|superstar|trinoids|wobble|bahh|organ|cellos|bad news|good news/.test(n)) {
-    s -= 200
-  }
-  // Female-presenting names across the English sets.
-  if (/\b(flo|sandy|shelley|kate|serena|fiona|moira|karen|tessa|samantha|zoe|allison|ava|susan)\b/.test(n)) {
-    s -= 60
-  }
+  if (NOT_THE_ASSISTANT.test(n)) s -= 200
 
   return s
 }
 
-/** Only voices that scored on a name match, not merely on being English —
- *  otherwise the picker cycles through a dozen US novelty voices. */
+/** Only voices that matched on gender (or were picked by name), not merely on
+ *  being English — otherwise the picker cycles through a dozen novelty voices. */
 const USABLE = 40
 
 /** Best-first list of usable voices — also what the voice picker cycles. */
@@ -246,7 +262,7 @@ function pickVoice(): SpeechSynthesisVoice | null {
 export function currentVoiceName(): string {
   if (USE_ELEVENLABS || caps().tts) return 'ElevenLabs'
   if (TTS_ENGINE === 'kokoro' && !kokoro.isUnavailable()) {
-    return KOKORO_VOICE.replace(/^bm_/, '')
+    return KOKORO_VOICE.replace(/^[ab][mf]_/, '')
   }
   return pickVoice()?.name ?? 'default'
 }
@@ -300,33 +316,40 @@ function outputContext(): AudioContext | null {
 // ---------------------------------------------------------------------------
 
 /**
- * Nudge the delivery toward JARVIS's cadence.
+ * The configured honorific as a vocative: preceded by a word, followed by a
+ * pause or the end of the line. Anchored that way so a title is left alone —
+ * "Sir Isaac Newton" is not a vocative. Null when there is no honorific.
+ */
+const HONORIFIC = IDENTITY.honorific.trim()
+const VOCATIVE = HONORIFIC
+  ? new RegExp(
+      `([^,\\s])\\s+(${HONORIFIC.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(\\s*[.,!?;:]|\\s*$)`,
+      'gi',
+    )
+  : null
+
+/**
+ * Nudge the delivery toward the character's cadence.
  *
  * speechSynthesis ignores SSML, so punctuation is the only prosody control
  * available — the engine pauses on commas and full stops. Making sure the
- * vocative "sir" is always set off by a comma buys the small beat before it
- * that does most of the characterisation.
+ * vocative honorific is always set off by a comma buys the small beat before
+ * it that does most of the characterisation.
  */
 function shape(text: string): string {
-  return (
-    text
-      // Models leak markdown even when told not to, and a synthesiser will
-      // happily read "https colon slash slash" out loud. Strip the syntax and
-      // keep the words.
-      .replace(/^\s*Sources?:.*$/gim, '')
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // [label](url) -> label
-      // Stop before trailing punctuation, so "See https://x.com." keeps the
-      // full stop that ends the sentence rather than having it eaten.
-      .replace(/https?:\/\/[^\s]*[^\s.,;:!?)\]]/g, '')
-      .replace(/[*_`#>]+/g, '')
-      .replace(/^\s*[-•]\s+/gm, '')
-      // The vocative wants its comma — that small beat before "sir" does most
-      // of the characterisation. Anchored to a following pause or end of line
-      // so the honorific is left alone: "Sir Isaac Newton" is not a vocative.
-      .replace(/([^,\s])\s+(sir)(\s*[.,!?;:]|\s*$)/gi, '$1, $2$3')
-      .replace(/\s+/g, ' ')
-      .trim()
-  )
+  let out = text
+    // Models leak markdown even when told not to, and a synthesiser will
+    // happily read "https colon slash slash" out loud. Strip the syntax and
+    // keep the words.
+    .replace(/^\s*Sources?:.*$/gim, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // [label](url) -> label
+    // Stop before trailing punctuation, so "See https://x.com." keeps the
+    // full stop that ends the sentence rather than having it eaten.
+    .replace(/https?:\/\/[^\s]*[^\s.,;:!?)\]]/g, '')
+    .replace(/[*_`#>]+/g, '')
+    .replace(/^\s*[-•]\s+/gm, '')
+  if (VOCATIVE) out = out.replace(VOCATIVE, '$1, $2$3')
+  return out.replace(/\s+/g, ' ').trim()
 }
 
 type Item = {
@@ -447,7 +470,7 @@ export function createSpeaker(): Speaker {
         nativeBroken = true
         diag.nativeBroken = true
         diag.engine = 'elevenlabs'
-        console.warn('[jarvis] system voice is not producing sound — using the bridge speech proxy from here on')
+        console.warn('[ayra] system voice is not producing sound — using the bridge speech proxy from here on')
       }
       const rescue = await fetchCloudAudio(item.text).catch(() => null)
       if (rescue && !cancelled) {
@@ -477,7 +500,7 @@ export function createSpeaker(): Speaker {
       const u = new SpeechSynthesisUtterance(text)
       const voice = pickVoice()
       if (voice) u.voice = voice
-      u.lang = voice?.lang ?? 'en-GB'
+      u.lang = voice?.lang ?? IDENTITY.language
       // Deliberate, and deliberately invariant — the character's pace does not
       // change with stakes, and that steadiness is most of the effect. This
       // lands around 130 wpm, below the median for film dialogue.
@@ -546,7 +569,7 @@ export function createSpeaker(): Speaker {
         // barge-in. Everything else means the engine could not speak.
         if (code !== 'interrupted' && code !== 'canceled') {
           diag.failures++
-          console.error(`[jarvis] speech failed (${code}) on voice "${u.voice?.name ?? 'default'}"`)
+          console.error(`[ayra] speech failed (${code}) on voice "${u.voice?.name ?? 'default'}"`)
         }
         finish()
       }
@@ -557,7 +580,7 @@ export function createSpeaker(): Speaker {
       // silent sentence is recoverable and a stuck queue is not.
       watchdog = setTimeout(() => {
         if (done || started) return
-        console.warn('[jarvis] speech did not start — un-wedging the engine')
+        console.warn('[ayra] speech did not start — un-wedging the engine')
         speechSynthesis.cancel()
         speechSynthesis.resume()
         try {
@@ -568,7 +591,7 @@ export function createSpeaker(): Speaker {
         }
         watchdog = setTimeout(() => {
           if (done || started) return
-          console.error('[jarvis] speech engine is not responding — switching to the cloud voice')
+          console.error('[ayra] speech engine is not responding — switching to the cloud voice')
           diag.failures++
           diag.lastError = diag.lastError || 'no-start'
           finish()

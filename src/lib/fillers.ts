@@ -2,7 +2,7 @@
  * Filler speech.
  *
  * A tool call can take ten seconds, and silence that long reads as a crash. So
- * JARVIS says something the instant work starts — then goes quiet until he has
+ * AYRA says something the instant work starts — then goes quiet until there is
  * an answer. One acknowledgement, no progress chatter.
  *
  * The phrasing follows the character's actual grammar rather than generic
@@ -13,13 +13,19 @@
  *   - There is no snap-to compliance formula. "Right away" and "At once" are
  *     not in his vocabulary; acknowledgement is deferential, not eager.
  *   - No filler words, no enthusiasm, no apology, no exclamation marks.
- *   - "Sir" fronted means urgency; final means routine. These are all routine,
- *     so it goes at the end, and only sometimes.
+ *   - The honorific (config/identity.json — "sir", "boss", or none at all)
+ *     fronted means urgency; final means routine. These are all routine, so
+ *     it goes at the end, and only sometimes. `h()` attaches it when one is
+ *     configured and leaves the line bare when not.
  */
+
+import { IDENTITY, withHonorific as h } from '../identity'
+
+const HONORIFIC = IDENTITY.honorific.trim()
 
 /** Said as soon as the first tool fires, before any answer exists. */
 const WORKING = [
-  'Working on it, sir.',
+  h('Working on it.'),
   'Compiling.',
   'Retrieving.',
   'Accessing the archive.',
@@ -31,21 +37,22 @@ const WORKING = [
 
 /** Acknowledging an order where no tool is involved. */
 const ACKNOWLEDGE = [
-  'As you wish, sir.',
-  'Very good, sir.',
+  h('As you wish.'),
+  h('Very good.'),
   'Certainly.',
   'Understood.',
   'Consider it done.',
-  'Directly, sir.',
+  h('Directly.'),
 ]
 
-/** Answering to his name, before the user has said what they want. */
+/** Answering to the name, before the user has said what they want. */
 const ATTENTION = [
-  'Yes, sir?',
-  'Sir?',
-  'At your service, sir.',
+  h('Yes?'),
+  // The bare vocative only exists when there is something to say: "Sir?"
+  ...(HONORIFIC ? [`${HONORIFIC[0].toUpperCase()}${HONORIFIC.slice(1)}?`] : []),
+  h('At your service.'),
   'Standing by.',
-  'Awake, sir.',
+  HONORIFIC ? h('Awake.') : 'Listening.',
 ]
 
 /**
@@ -129,7 +136,7 @@ const BY_TOOL: Rule[] = [
   {
     server: /elevenlabs|openai-tts/,
     tool: /speech|\bvoice\b|\btts\b|text_to_sound/,
-    lines: ['Synthesising.', 'Working on it, sir.'],
+    lines: ['Synthesising.', h('Working on it.')],
   },
   {
     server: /spotify|sonos/,
@@ -139,7 +146,7 @@ const BY_TOOL: Rule[] = [
   {
     server: /^home|homeassistant|\bhue\b|\bhass\b/,
     tool: /\blights?\b|thermostat|\bdimmer\b/,
-    lines: ['Adjusting it now.', 'Seeing to it, sir.'],
+    lines: ['Adjusting it now.', h('Seeing to it.')],
   },
   {
     server: /github|linear|jira|sentry/,
