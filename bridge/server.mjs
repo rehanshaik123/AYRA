@@ -18,8 +18,10 @@
 // First, so .env.local is loaded before anything below reads the environment.
 import { IDENTITY, env } from './identity.mjs'
 import { SYSTEM_PROMPT } from './persona.mjs'
+import { createGate, DEFAULT_CONNECTORS } from './gate.mjs'
 import { WebSocketServer } from 'ws'
-import { query } from '@anthropic-ai/claude-agent-sdk'
+import { createBrain } from './brain.mjs'
+import { createOriginCheck } from './origin.mjs'
 import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
@@ -43,53 +45,11 @@ process.on('unhandledRejection', (err) => {
   console.error('[ayra] unhandled rejection:', err)
 })
 
-/**
- * Who is allowed to talk to this bridge.
- *
- * A WebSocket handshake is not subject to the same-origin policy: the browser
- * sends it on behalf of whatever page asked, no preflight stands in the way,
- * and the page reads every byte that comes back. Without a check here, any tab
- * the user happens to have open could open a socket to ws://localhost:8787,
- * drive the agent with every MCP server on this machine, and read back every
- * token and panel. The Origin header is the only thing that separates our own
- * dev server from someone else's page, so it is checked explicitly.
- *
- * A missing Origin means a non-browser client — curl, a script, a native app.
- * That is also exactly what local malware looks like, so it is refused on the
- * socket unless AYRA_ALLOW_NO_ORIGIN=1 says otherwise.
- */
-const EXTRA_ORIGINS = new Set(
-  env('ALLOWED_ORIGINS', '')
-    .split(',')
-    .map((s) => s.trim().replace(/\/+$/, ''))
-    .filter(Boolean),
-)
-const ALLOW_NO_ORIGIN = env('ALLOW_NO_ORIGIN') === '1'
-
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
-
-/**
- * Vite takes the next free port when 5173 is busy and `vite preview` starts at
- * 4173, so the dev ranges are allowed rather than two exact numbers. Anything
- * else — including localhost on a port some other app is serving — has to be
- * named in AYRA_ALLOWED_ORIGINS.
- */
-const isDevPort = (port) =>
-  (port >= 5173 && port <= 5199) || (port >= 4173 && port <= 4199)
-
-function originAllowed(origin) {
-  if (!origin) return ALLOW_NO_ORIGIN
-  if (EXTRA_ORIGINS.has(origin.replace(/\/+$/, ''))) return true
-  let url
-  try {
-    url = new URL(origin)
-  } catch {
-    return false
-  }
-  if (url.protocol !== 'http:') return false
-  if (!LOCAL_HOSTS.has(url.hostname)) return false
-  return isDevPort(Number(url.port))
-}
+/** Who may talk to this bridge — local dev pages by default; see origin.mjs. */
+const ORIGINS = createOriginCheck({
+  extraOrigins: env('ALLOWED_ORIGINS', ''),
+  allowNoOrigin: env('ALLOW_NO_ORIGIN') === '1',
+})
 
 /**
  * Voice is a bad interface for a confirmation dialog: there is no window to
@@ -129,26 +89,6 @@ const MODEL = env('MODEL', 'claude-opus-5-5')
 const EFFORT = env('EFFORT', 'medium')
 
 /**
- * Both spellings of every renamed built-in are listed on purpose. The SDK
- * presents several tools to the model under newer names — Task is Agent,
- * BashOutput is TaskOutput, KillShell is TaskStop, and the MCP resource tools
- * gained a "Tool" suffix — so a set holding only the old names never matches
- * and the tool falls through to the write branch, which is the opposite of
- * what these lists mean. Keep both until the old names are certainly gone.
- */
-const READ_ONLY_BUILTINS = new Set([
-  'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'TodoWrite',
-  'Task', 'Agent', 'ToolSearch',
-  'ListMcpResources', 'ListMcpResourcesTool',
-  'ReadMcpResource', 'ReadMcpResourceTool',
-  'BashOutput', 'TaskOutput',
-])
-const WRITE_BUILTINS = new Set([
-  'Bash', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
-  'KillShell', 'TaskStop',
-])
-
-/**
  * Every MCP server Claude Code has configured, read out of its own config.
  *
  * This does two jobs. The HUD wants the names while the boot animation plays,
@@ -186,120 +126,35 @@ function configuredServers() {
 
 const MCP_SERVERS = configuredServers()
 
-/** MCP tools arrive as `mcp__<server>__<tool>`. */
-const mcpServerOf = (toolName) =>
-  toolName.startsWith('mcp__') ? toolName.split('__')[1] : null
-
-/** The tool half, which can itself contain underscores: `mcp__x__a__b` -> `a__b`. */
-const mcpToolOf = (toolName) => toolName.split('__').slice(2).join('__')
-
 /**
- * MCP policy, and why it is shaped this way.
- *
- * A short list of "servers that can change things" is the wrong default,
- * because it is a list of what we happened to think of. Every server not on it
- * runs unconditionally — and on a real machine that quietly includes placing a
- * phone call, spending an advertising budget, deleting a generated character
- * and writing files to disk. A voice assistant cannot ask "are you sure", so
- * the bridge has to be the one that is sure.
- *
- * So the default is deny, softened in two ways so the demo stays usable:
- *
- *   1. READ_ONLY_MCP is an explicit allowlist of servers whose whole surface is
- *      lookups and generation — search, registries, analytics reads. Anything
- *      there runs in read-only mode.
- *   2. Everywhere else, the tool has to argue for itself: its own name must
- *      begin with a read verb. `list_devices` runs; `install_apk` does not.
- *
- * On top of both sits a veto: a name containing a plainly effectful verb needs
- * ALLOW_WRITES no matter which server it came from, which is what keeps
- * `make_outbound_call` and `download_lottie` still until you ask for them.
+ * Every claude.ai connector on the owner's account, as Claude Code itself
+ * records them ("claude.ai Gmail", …). The gate uses this to remove the ones
+ * AYRA may not use before a session starts — the session's own server list
+ * only arrives after the first question, which is too late.
  */
-const READ_ONLY_MCP = new Set([
-  'exa', 'exa-code', 'serper', 'serpapi', 'lottie-search', 'mcp-registry',
-  'openrouter', 'openrouter-image', 'Microsoft_Clarity',
-  // The generation servers belong here too, and leaving them out was a real
-  // regression: `generate_image` begins with no read verb, so it fell to the
-  // deny branch and "generate an image of the Mark VII suit" — the headline
-  // demo — stopped working in the default mode.
-  //
-  // Putting them on the allowlist is safe because the veto below still applies
-  // to allowlisted servers: it is what continues to withhold
-  // make_outbound_call, delete_character, create_* and edit_image. Generation
-  // runs; acting on the world does not.
-  'higgsfield', 'heygen', 'elevenlabs',
-])
-
-/**
- * Anchored on the tool name, so it reads the verb rather than the noun.
- * `screenshot` is in here because it is a read that doesn't sound like one,
- * and the persona is told in as many words to put screenshots on the display.
- */
-const READ_VERB =
-  /^(get|list|read|search|find|query|fetch|check|describe|inspect|show|view|explain|screenshot)/i
-
-/**
- * Unanchored on purpose — `make_outbound_call` and `Bulk-Edit-Events` both
- * hide their verb in the middle. `download` is here because it writes a file
- * even though it sounds like a read.
- */
-const EFFECTFUL_VERB =
-  /(send|call|post|create|delete|remove|update|edit|write|install|launch|tap|swipe|press|type|buy|pay|charge|publish|deploy|outbound|download)/i
-
-/**
- * Tools whose names trip the veto without deserving it.
- *
- * The veto reads verbs out of names, which is the right instinct and
- * occasionally the wrong answer. `openrouter send-message` sends a prompt to a
- * language model and gets text back — nothing in the world changes — but it is
- * indistinguishable by name from sending mail. Asking a second model a question
- * is one of the better things this assistant can do, so it is named here
- * instead of being lost to a regex.
- *
- * Full `server__tool` keys, so an exemption can never leak across servers.
- */
-const VETO_EXEMPT = new Set([
-  'openrouter__send-message',
-  'openrouter__send-feedback',
-])
-
-function decideTool(name) {
-  if (READ_ONLY_BUILTINS.has(name)) return true
-  if (WRITE_BUILTINS.has(name)) return ALLOW_WRITES
-
-  const server = mcpServerOf(name)
-  if (server) {
-    // The HUD, and the interface controls beside it. Both run in this process
-    // and draw on our own screen, so neither is something to withhold —
-    // without them AYRA has no display at all. They also have to be named
-    // here rather than left to the verb rules below, which read `ui_theme` as
-    // a write and would hold the whole surface back behind ALLOW_WRITES.
-    if (server === 'ayra' || server === 'ayra_ui') return true
-
-    // The browser server gates itself, at construction: chromeServer() only
-    // builds the acting tools — click, type, form input, close tab — when
-    // ALLOW_WRITES is set, so anything that reaches here at all is something
-    // the same policy has already permitted. Deciding it a second time by
-    // reading verbs out of the name would only get it wrong: `chrome_navigate`
-    // begins with no read verb and would fall to the write branch, which would
-    // withhold the one tool the whole server is for.
-    if (server === 'ayra_chrome') return true
-
-    // The camera. Not withheld behind ALLOW_WRITES: looking changes nothing,
-    // and the real gate is the browser's own camera permission plus an
-    // indicator the user can see for as long as it is live.
-    if (server === 'ayra_eyes') return true
-
-    const tool = mcpToolOf(name)
-    if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {
-      return ALLOW_WRITES
-    }
-    // The session tools this bridge is developed inside count as read-only too.
-    if (READ_ONLY_MCP.has(server) || server.startsWith('ccd_session')) return true
-    return READ_VERB.test(tool) ? true : ALLOW_WRITES
+function everConnected() {
+  try {
+    const cfg = JSON.parse(
+      readFileSync(join(homedir(), '.claude.json'), 'utf8'),
+    )
+    return Array.isArray(cfg.claudeAiMcpEverConnected)
+      ? cfg.claudeAiMcpEverConnected
+      : []
+  } catch {
+    return []
   }
-  return ALLOW_WRITES
 }
+
+/**
+ * What AYRA may run — the whole policy lives in gate.mjs. AYRA_CONNECTORS
+ * lists the claude.ai connectors it may read (comma separated, or "none").
+ */
+const CONNECTORS = env('CONNECTORS', DEFAULT_CONNECTORS.join(','))
+const GATE = createGate({
+  allowWrites: ALLOW_WRITES,
+  connectors: CONNECTORS.toLowerCase() === 'none' ? [] : CONNECTORS.split(','),
+  everConnected: everConnected(),
+})
 
 /**
  * ElevenLabs credentials, borrowed from the MCP server config.
@@ -528,7 +383,7 @@ const http = await import('node:http')
 
 const handleRequest = async (req, res) => {
   const origin = req.headers.origin
-  if (origin && !originAllowed(origin)) {
+  if (origin && !ORIGINS.allowed(origin)) {
     console.warn(`[ayra] refused http request from origin ${origin}`)
     res.writeHead(403, { vary: 'origin' })
     return res.end('forbidden')
@@ -852,7 +707,7 @@ const wss = new WebSocketServer({
       console.warn(`[ayra] rejected websocket on path ${path}`)
       return done(false, 403, 'Forbidden')
     }
-    if (!originAllowed(origin)) {
+    if (!ORIGINS.allowed(origin)) {
       console.warn(
         `[ayra] rejected websocket from origin ${origin ?? '(none)'}` +
           ' — set AYRA_ALLOWED_ORIGINS to permit it',
@@ -873,6 +728,12 @@ console.log(
   `[ayra] writes ${ALLOW_WRITES ? 'ENABLED' : 'disabled'}` +
     (ALLOW_WRITES ? '' : ' — run npm run bridge:writes (or set AYRA_ALLOW_WRITES=1) to permit shell/file/device actions'),
 )
+console.log(
+  `[ayra] connectors (read-only): ${GATE.allowedConnectors.join(', ') || 'none'}` +
+    (GATE.excludedConnectors.length
+      ? ` · removed: ${GATE.excludedConnectors.join(', ')}`
+      : ''),
+)
 // Asynchronous, so it lands a beat after the rest of the banner. Worth printing
 // at all because an extension that is simply not running is indistinguishable
 // at the tool boundary from one that is broken, and this is the one place the
@@ -887,69 +748,34 @@ void chromeAvailable().then((ok) => {
 
 console.log(
   '[ayra] accepting local dev origins' +
-    (EXTRA_ORIGINS.size ? ` plus ${[...EXTRA_ORIGINS].join(', ')}` : '') +
-    (ALLOW_NO_ORIGIN ? ' and clients that send no origin' : ''),
+    (ORIGINS.extra.size ? ` plus ${[...ORIGINS.extra].join(', ')}` : '') +
+    (ORIGINS.allowNoOrigin ? ' and clients that send no origin' : ''),
 )
 
 /**
- * What to tell the browser when a turn ends badly. Plain sentences, because
- * whatever reaches the client is liable to be spoken.
+ * The brain every channel shares — see brain.mjs. The WebSocket below is the
+ * first channel (the HUD); Telegram will be the next (PLAN.md 3.2).
  */
-const RESULT_FAILURES = {
-  error_during_execution: 'The turn failed part way through.',
-  error_max_turns: 'The turn ran too long and was stopped.',
-  error_max_budget_usd: 'The budget for this turn ran out.',
-  error_max_structured_output_retries: 'The answer could not be assembled.',
-  api_error: 'The model could not be reached. The details are in the bridge log.',
-  default: 'The turn ended without an answer.',
-}
+const BRAIN = createBrain({
+  model: MODEL,
+  effort: EFFORT,
+  gate: GATE,
+  mcpServers: MCP_SERVERS,
+  // How long an idle conversation is worth continuing after a reload.
+  resumeHours: Number(env('RESUME_HOURS', 6)),
+})
 
+// The HUD channel: one WebSocket, one conversation.
 wss.on('connection', (socket) => {
   console.log('[ayra] client connected')
-
-  // Answer the HUD straight away rather than making it wait for the agent's
-  // first turn. Refined later by the real init message.
-  socket.send(
-    JSON.stringify({ type: 'ready', servers: Object.keys(MCP_SERVERS) }),
-  )
-
-  /** Resolves the pending user message into the SDK's input generator. */
-  let deliver = null
-  let closed = false
-  const inbox = []
-
-  async function* userMessages() {
-    while (!closed) {
-      const text =
-        inbox.shift() ??
-        (await new Promise((resolve) => {
-          deliver = resolve
-        }))
-      if (closed || text == null) return
-      yield {
-        type: 'user',
-        message: { role: 'user', content: text },
-        parent_tool_use_id: null,
-      }
-    }
-  }
 
   const send = (msg) => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg))
   }
 
-  /**
-   * Which question the agent is currently answering.
-   *
-   * The stream carries no notion of a turn, so without this the client cannot
-   * tell the tail of an abandoned answer from the start of the new one — it
-   * attaches a listener and receives whatever is on the socket. Echoing the
-   * id the client sent lets it ignore anything that is not its own, which is
-   * the only reliable fix: no amount of waiting on this side changes what a
-   * listener over there has already heard.
-   */
-  let answering = null
-  const sendTurn = (msg) => send({ ...msg, ask: answering })
+  // Answer the HUD straight away rather than making it wait for the agent's
+  // first turn. Refined later by the real init message.
+  send({ type: 'ready', servers: Object.keys(MCP_SERVERS) })
 
   /**
    * Asking the browser for something and waiting for the answer.
@@ -978,296 +804,36 @@ wss.on('connection', (socket) => {
       send({ type: kind, id, ...args })
     })
 
-  /**
-   * Announcing a tool on the HUD, once, and only if it actually runs.
-   *
-   * A tool_use block surfaces twice — as a partial stream event and again on
-   * the completed assistant message — so ids are remembered. The harder part
-   * is timing, because a refused tool that lights the badge, plays the sound
-   * and provokes a "working on it" line, for work that never happens, reads as
-   * a bug on camera.
-   *
-   * The SDK's order is: the block starts streaming, then canUseTool is asked,
-   * then the tool runs. So nothing is known at content_block_start. Announcing
-   * from inside canUseTool would know the verdict but miss tools entirely —
-   * measured on this SDK, the callback is consulted only for calls the CLI
-   * hasn't already settled, so a `Bash: echo` its own classifier waves through
-   * never reaches us at all.
-   *
-   * So: announce immediately for anything decideTool permits, since those run.
-   * Hold the rest, and let the tool_result settle it — a refusal comes back as
-   * is_error, anything else really did execute and has earned its badge, a
-   * beat late. Nothing is ever announced for work that didn't happen.
-   */
-  const seenTools = new Set()
-  const heldTools = new Map()
-
-  /**
-   * Resolves when the turn in flight has actually finished.
-   *
-   * Waiting on session.interrupt() alone is not enough. It resolves when the
-   * agent has been *told* to stop, not when it has, so the last tokens of the
-   * abandoned answer are still on their way — and since nothing on the wire
-   * identifies which question a delta belongs to, they land on the next turn's
-   * listener. Measured: ask for ALPHA, interrupt, ask for BRAVO, and BRAVO's
-   * answer arrives as "ALPHA\nBRAVO".
-   *
-   * The SDK emits exactly one `result` per turn, so that is the boundary worth
-   * waiting for. Raced against a timeout because a turn that never reports one
-   * must not wedge the conversation for ever — a stray word is a blemish, a
-   * deadlocked assistant is not.
-   */
-  let settling = Promise.resolve()
-  let finishTurn = null
-
-  const turnFinished = () =>
-    new Promise((resolve) => {
-      finishTurn = resolve
-    })
-
-  /**
-   * A brief pause so the abandoned turn's frames are tagged with the OLD id
-   * before the new one is adopted. Short, because correctness now comes from
-   * the tag rather than from the wait — this only has to cover the gap, not
-   * outlast the whole turn.
-   */
-  const SETTLE_CAP_MS = 400
-
-  const announceTool = (id, name) => {
-    if (!name || (id && seenTools.has(id))) return
-    if (id) seenTools.add(id)
-    // The display tool isn't work being done, it's the HUD drawing itself —
-    // announcing it would put "ayra · display" in the tool badge and trigger
-    // a "working on it" filler for something already on screen.
-    if (name === 'mcp__ayra__display') return
-    // The ui_* tools are the same case one step further: retinting the
-    // interface is the interface talking about itself, not work being done for
-    // the user, and the badge would be describing the very thing they can see.
-    if (name.startsWith('mcp__ayra_ui__')) return
-    if (decideTool(name)) return sendTurn({ type: 'tool', name })
-    if (id) heldTools.set(id, name)
-  }
-
-  const settleTool = (id, failed) => {
-    const name = heldTools.get(id)
-    if (name === undefined) return
-    heldTools.delete(id)
-    if (!failed) sendTurn({ type: 'tool', name })
-  }
-
-  const session = query({
-    prompt: userMessages(),
-    options: {
-      // Everything Claude Code has configured, plus the HUD as an in-process
-      // server. The HUD's handler closes over this socket, so a `display` call
-      // lands on screen directly — which is also why this object is built per
-      // connection rather than once.
-      mcpServers: {
-        ...MCP_SERVERS,
-        ayra: displayServer(
-          (panel) => send({ type: 'panel', panel }),
-          (blade) => send({ type: 'blade', blade }),
-        ),
-        // The interface controls, on the same socket. A separate key because
-        // MCP tool names are `mcp__<key>__<tool>` and one key can only carry
-        // one server; the underscore in it is why decideTool and announceTool
-        // both name `ayra_ui` explicitly.
-        ayra_ui: uiServer((op, args) => send({ type: 'ui', op, args })),
-        // The user's own Chrome, over the extension's native-host socket. It
-        // holds no per-connection state, but it is built here with the rest so
-        // the write gate is read once, at the same point as everything else.
-        ayra_chrome: chromeServer({ allowWrites: ALLOW_WRITES }),
-        // The camera, which unlike everything else here has to ask and wait.
-        ayra_eyes: visionServer(ask),
-      },
-      // A plain system prompt, not the claude_code preset. The preset is
-      // tuned for a coding agent — verbose, file-oriented, and a large chunk
-      // of input tokens on every turn. Replacing it makes the persona stick,
-      // keeps answers short enough to speak, and cuts cost per turn.
-      systemPrompt: SYSTEM_PROMPT,
-      // Run from the home directory so project-scoped MCP servers don't shadow
-      // the global ones, and so file tools have a sane root.
-      cwd: homedir(),
-      // No filesystem settings at all. Left to its default the SDK loads
-      // ~/.claude/settings.json and settings.local.json exactly as the CLI
-      // does — which on a working machine means a bypassPermissions default
-      // and a pile of allow-rules for Bash. Allow-rules are matched before the
-      // permission callback, so decideTool below would never even be asked
-      // about the tools it most needs to refuse. Empty makes this bridge the
-      // only authority. It also stops the global CLAUDE.md riding along on
-      // every voice turn, carrying instructions written for a coding agent
-      // into a conversation that is meant to be two sentences long.
-      //
-      // The cost is that MCP servers stop being discovered too, which is why
-      // mcpServers above passes them in by hand.
-      settingSources: [],
-      // Stated explicitly, and it has to be.
-      //
-      // With no `model` here the SDK falls back to its own default, which on
-      // this machine resolved to claude-opus-4-8[1m] — not what src/config.ts
-      // declares for the browser-direct path, and not anything anyone chose.
-      // Normally your own `/model` preference would decide, but that lives in
-      // the settings files `settingSources: []` deliberately stops loading, so
-      // without this line nothing in the project has a say at all.
-      model: MODEL,
-      effort: EFFORT,
-      maxTurns: 24,
-      permissionMode: 'default',
-      // Without this the SDK only emits whole assistant messages, and JARVIS
-      // would sit silent until the entire answer was written. Partial events
-      // are what let speech start on the first finished sentence.
-      includePartialMessages: true,
-      // Signature is (toolName, input, options) and it must return a
-      // PermissionResult object. Returning a bare boolean silently denies
-      // everything, with the tool name arriving undefined.
-      //
-      // Worth knowing: this is a last gate, not the only one. Calls the CLI
-      // has already settled never arrive here — its own classifier waves
-      // through a `Bash: echo hello` without asking, and only reaches us for
-      // something with a consequence, like a `touch`. So a deny here is
-      // reliable; an absence of a call here is not proof nothing ran.
-      canUseTool: async (toolName) => {
-        const ok = decideTool(toolName)
-        console.log(`[ayra] tool ${toolName} -> ${ok ? 'allow' : 'deny'}`)
-        return ok
-          ? { behavior: 'allow' }
-          : {
-              behavior: 'deny',
-              // Every word of this can end up spoken, so it carries no command
-              // to read out — the persona is forbidden from saying one aloud.
-              message:
-                `Blocked: ${IDENTITY.name} is running in read-only mode and cannot take` +
-                ' actions that change anything. Tell the user this action is' +
-                ' unavailable until they enable write access on the machine.',
-            }
-      },
+  const conversation = BRAIN.open({
+    systemPrompt: SYSTEM_PROMPT,
+    servers: {
+      // The HUD as an in-process server. Its handler closes over this socket,
+      // so a `display` call lands on screen directly.
+      ayra: displayServer(
+        (panel) => send({ type: 'panel', panel }),
+        (blade) => send({ type: 'blade', blade }),
+      ),
+      // The interface controls, on the same socket. A separate key because
+      // MCP tool names are `mcp__<key>__<tool>` and one key can only carry
+      // one server; the underscore in it is why gate.mjs and brain.mjs both
+      // name `ayra_ui` explicitly.
+      ayra_ui: uiServer((op, args) => send({ type: 'ui', op, args })),
+      // The user's own Chrome, over the extension's native-host socket. It
+      // holds no per-connection state, but it is built here with the rest so
+      // the write gate is read once, at the same point as everything else.
+      ayra_chrome: chromeServer({ allowWrites: ALLOW_WRITES }),
+      // The camera, which unlike everything else here has to ask and wait.
+      ayra_eyes: visionServer(ask),
     },
+    emit: send,
+    // Reloading the page carries on the same conversation (see brain.mjs).
+    channel: 'hud',
+    resume: true,
+    // A dead session can answer nothing more. Leaving the socket open would
+    // leave the face believing it has a working brain; closing it makes the
+    // face reconnect, which opens a fresh conversation.
+    onEnd: () => socket.close(),
   })
-
-  // Pump the session's output stream to the browser for as long as it lives.
-  ;(async () => {
-    try {
-      for await (const msg of session) {
-        if (env('DEBUG') === '1') {
-          console.log('[msg]', msg.type, msg.event?.type ?? '')
-        }
-
-        switch (msg.type) {
-          // Raw Anthropic stream events, surfaced by includePartialMessages.
-          // This is the ONLY place spoken text arrives: there is no top-level
-          // text_delta message in the SDK union and the 'assistant' message
-          // carries no deltas either. Turn includePartialMessages off and
-          // JARVIS goes completely mute.
-          case 'stream_event': {
-            const ev = msg.event
-            if (
-              ev?.type === 'content_block_delta' &&
-              ev.delta?.type === 'text_delta' &&
-              ev.delta.text
-            ) {
-              sendTurn({ type: 'text', delta: ev.delta.text })
-            }
-            if (
-              ev?.type === 'content_block_start' &&
-              ev.content_block?.type === 'tool_use'
-            ) {
-              announceTool(ev.content_block.id, ev.content_block.name)
-            }
-            break
-          }
-
-          case 'assistant': {
-            // Fallback for builds that emit whole assistant messages rather
-            // than partial events. Deduped against the stream_event path.
-            for (const block of msg.content ?? msg.message?.content ?? []) {
-              if (block.type === 'tool_use') {
-                announceTool(block.id, block.name)
-              }
-            }
-            break
-          }
-
-          case 'user': {
-            // Tool results come back as a user message. This is the only place
-            // a held announcement can be resolved: a refused tool arrives with
-            // is_error set and stays off the HUD, anything else ran.
-            const blocks = msg.message?.content
-            if (!Array.isArray(blocks)) break
-            for (const block of blocks) {
-              if (block?.type === 'tool_result') {
-                settleTool(block.tool_use_id, block.is_error === true)
-              }
-            }
-            break
-          }
-
-          case 'result':
-            // A result is not automatically a success. The error subtypes
-            // carry no `result` field at all, so reporting them as 'done' with
-            // empty text is indistinguishable from a turn that simply had
-            // nothing to say — the HUD stops spinning and JARVIS stands there
-            // silent. Say what happened instead.
-            //
-            // Nor is 'success' on its own. An API failure — a model the
-            // bundled Claude Code doesn't know, an expired login, a rate
-            // limit — arrives as subtype 'success' with is_error set and the
-            // raw error as the result: "API Error: 400 …", which would be
-            // read aloud as the answer. The detail goes to the log instead.
-            if (msg.subtype === 'success' && !msg.is_error) {
-              sendTurn({
-                type: 'done',
-                text: msg.result ?? '',
-                costUsd: msg.total_cost_usd ?? null,
-              })
-            } else {
-              const apiError = msg.subtype === 'success'
-              console.error(
-                `[ayra] turn failed: ${apiError ? 'api error' : msg.subtype}`,
-                apiError ? (msg.result ?? '') : (msg.errors ?? ''),
-              )
-              sendTurn({
-                type: 'error',
-                message: apiError
-                  ? RESULT_FAILURES.api_error
-                  : (RESULT_FAILURES[msg.subtype] ?? RESULT_FAILURES.default),
-              })
-            }
-            // Whatever was waiting on this turn to finish can go now. This is
-            // the only place a turn is genuinely over.
-            finishTurn?.()
-            finishTurn = null
-            // One turn's tool ids are never referred to again, and these
-            // otherwise grow for as long as the socket is open.
-            seenTools.clear()
-            heldTools.clear()
-            break
-
-          case 'system':
-            if (msg.subtype === 'init') {
-              // Servers report 'pending' until first use — they connect
-              // lazily — so only drop the ones that are actually unusable.
-              const usable = (msg.mcp_servers ?? [])
-                .filter((s) => s.status !== 'needs-auth' && s.status !== 'failed')
-                .map((s) => s.name)
-              send({ type: 'ready', servers: usable })
-              console.log(`[ayra] ${usable.length} MCP servers available`)
-            }
-            break
-        }
-      }
-    } catch (err) {
-      console.error('[ayra] session error:', err)
-      send({ type: 'error', message: String(err?.message ?? err) })
-      // The stream is finished either way — nothing will ever be read from it
-      // again. Leaving the socket open would leave the client believing it has
-      // a working bridge, and every later question would hang for ever waiting
-      // on a pump that has already stopped. Close it so it reconnects.
-      closed = true
-      deliver?.(null)
-      session.close?.()
-      socket.close()
-    }
-  })()
 
   socket.on('message', (raw) => {
     let msg
@@ -1278,31 +844,7 @@ wss.on('connection', (socket) => {
     }
 
     if (msg.type === 'ask' && typeof msg.text === 'string') {
-      /**
-       * Queued behind any interrupt that is still settling.
-       *
-       * A barge-in is two messages in quick succession — interrupt, then the
-       * new question — and session.interrupt() is asynchronous. Delivering the
-       * question the instant it arrives means the agent can still be winding
-       * down the previous turn, so its last tokens are emitted after the new
-       * one has begun and land on the new turn's listener. Measured: ask "one",
-       * interrupt, ask "two", and the answer to "two" comes back as "One."
-       *
-       * Waiting costs nothing when nothing is interrupting — the chain is an
-       * already-resolved promise — and removes the cross-talk when there is.
-       */
-      const text = msg.text
-      const id = typeof msg.id === 'string' ? msg.id : null
-      void settling.then(() => {
-        answering = id
-        if (deliver) {
-          const resolve = deliver
-          deliver = null
-          resolve(text)
-        } else {
-          inbox.push(text)
-        }
-      })
+      conversation.ask(msg.text, typeof msg.id === 'string' ? msg.id : null)
     }
 
     if (msg.type === 'reply' && typeof msg.id === 'string') {
@@ -1314,24 +856,11 @@ wss.on('connection', (socket) => {
       }
     }
 
-    if (msg.type === 'interrupt') {
-      // Held so the next question can wait for it rather than racing it.
-      const stopped = turnFinished()
-      settling = Promise.resolve(session.interrupt?.())
-        .catch(() => {})
-        .then(() =>
-          Promise.race([
-            stopped,
-            new Promise((r) => setTimeout(r, SETTLE_CAP_MS)),
-          ]),
-        )
-    }
+    if (msg.type === 'interrupt') conversation.interrupt()
   })
 
   socket.on('close', () => {
     console.log('[ayra] client disconnected')
-    closed = true
-    deliver?.(null)
-    session.close?.()
+    conversation.close()
   })
 })

@@ -2,11 +2,11 @@
 
 ## ▶ Continue here
 
-- **Phase:** 2 — Core brain & safety · branch `phase-2-core` (Phase 1 ✅ merged to `main`)
-- **Next task:** 2.1 — connector policy (keep Gmail/Calendar/Drive reads, keep other connectors out, deny effectful connector tools)
-- **Blockers:** none
-- **Waiting on owner:** 1.15 voice test (not blocking) · decisions Q1–Q7 in PLAN.md (none block Phases 1–2)
-- **Health:** build ✓ · lint 0 · setup green · smoke ✓ 4.1 s on `claude-opus-5-5` · HUD verified
+- **Phase:** 3 — AYRA Anywhere · branch `phase-3-anywhere` (Phases 1–2 ✅ on `main`)
+- **Next task:** 3.1 🧑 owner creates the Telegram bot + finds their user ID (steps in chat), then 3.2 Telegram channel
+- **Blockers:** 3.1 needs the owner (Telegram bot token + user ID)
+- **Waiting on owner:** 3.1 Telegram bot · 1.15 voice test · decisions Q1–Q7 (Q5 needed before 3.4, Q6 before 3.6)
+- **Health:** build ✓ · lint 0 · `npm test` 27/27 · smoke ✓ on `claude-opus-5-5`
 
 ## Log — one line per task (what changed — why)
 
@@ -27,6 +27,13 @@
 - 2026-10-02 · 1.12 Error lines use the configured honorific, stale `JARVIS_*` comment fixed, smoke reads `.env.local`, `.gitattributes` keeps LF — last hard-coded "sir"s gone; no more CRLF warnings on commits.
 - 2026-10-02 · 1.13 Verified via `npm start`: build ✓, lint 0, setup all green, smoke 4.1 s on `claude-opus-5-5`, HUD shows A.Y.R.A. / "SAY HEY AYRA", female voice picked — Phase 1 works end to end on Windows.
 - 2026-10-02 · 1.14 Phase 1 merged into `main` (with the owner's GitHub "Initial commit" merged in, no force-push) and pushed to rehanshaik123/AYRA — the project is now on GitHub with a readable history.
+- 2026-10-02 · 2.1 New `bridge/gate.mjs` (policy moved out of server.mjs): model gets 6 read built-ins (not 32), Gmail/Calendar/Drive read-only even with writes, 7 other connectors removed (`AYRA_CONNECTORS`), `npm test` 7/7 — the brain had the full Claude Code toolbox and could have sent mail unconfirmed with writes on.
+- 2026-10-02 · 2.2 Session logic moved from server.mjs (1249 → 902 lines) into `bridge/brain.mjs` (`createBrain().open()`); WebSocket is now a thin HUD adapter. Verified: plain turn, tool turn, barge-in — Telegram (3.2) can reuse the same brain.
+- 2026-10-02 · 2.3 New `bridge/context.mjs` stamps each question "[Now: Friday, 2 October 2026, 14:05 (Asia/Kolkata)]" (not the system prompt, so caching holds); persona told not to read it — AYRA had no clock; "tomorrow" now answers "Saturday, the third of October".
+- 2026-10-02 · 2.4 New `bridge/state.mjs` (`data/state.json`); the HUD resumes its last Claude session after a reload if used within `AYRA_RESUME_HOURS` (6); a broken saved session is forgotten with a spoken "could not be restored" — a reload used to wipe the conversation. Verified: code word recalled across reconnects; bogus id → clean error → fresh session.
+- 2026-10-02 · 2.5 New `bridge/audit.mjs`: every question, tool run, gate decision, answer, failure and session event → `data/logs/YYYY-MM-DD.jsonl` (owner's local date; text clipped, never tool inputs); `open()` now takes `channel` + `resume` — so "what did AYRA do and why was it allowed?" always has an answer.
+- 2026-10-02 · 2.6 Origin check moved to `bridge/origin.mjs`; tests for wake phrase, identity + persona, origin, state, audit, time; `npm test` (tsx loader for .ts) = 27/27 and part of the Definition of Done — the core now has a safety net. Live: foreign page 403 (HTTP + WebSocket), own page 200.
+- 2026-10-02 · Phase 2 ✅ merged to `main` and pushed — one reusable brain, connector policy, time awareness, reload-proof conversations, audit log, tests.
 
 ## Findings worth remembering
 

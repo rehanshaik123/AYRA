@@ -12,7 +12,7 @@ Rules for how to work are in [CLAUDE.md](CLAUDE.md).
 - [x] 0.2 Install dependencies (`npm ci`); record baseline build ✓ and lint (2 upstream warnings).
 - [x] 0.3 Baseline brain test: upstream bridge answers through the owner's Claude login on Windows.
 
-## Phase 1 — Foundation (AYRA identity + Windows) · branch `phase-1-foundation`
+## Phase 1 — Foundation (AYRA identity + Windows) · branch `phase-1-foundation` ✅
 
 Goal: AYRA runs on this laptop under its own name, Windows-correct, verified, pushed to GitHub.
 
@@ -42,24 +42,24 @@ Goal: AYRA runs on this laptop under its own name, Windows-correct, verified, pu
 - [ ] 1.15 🧑 Owner test in a real Chrome/Edge window: say "Hey AYRA", ask something, judge the voice
       (press V to cycle voices). Doesn't block Phase 2.
 
-## Phase 2 — Core brain & safety · branch `phase-2-core`
+## Phase 2 — Core brain & safety · branch `phase-2-core` ✅
 
 Goal: one reusable brain for every channel, safe defaults for the owner's connected accounts, the
 conversation survives reloads, an audit trail, and automated tests.
 
-- [ ] 2.1 Connector policy. The brain inherits 10 claude.ai connectors (Gmail, Calendar, Drive, Figma,
+- [x] 2.1 Connector policy. The brain inherits 10 claude.ai connectors (Gmail, Calendar, Drive, Figma,
       Canva, Lucid, draw.io, Beautiful.ai, Wispr Flow, Claude Docs). Keep Gmail/Calendar/Drive reads;
       keep the rest out of AYRA's sessions; deny every effectful connector tool even with writes on
       until confirmations exist (3.3). Debug mode logs the tool names AYRA sees.
       Check: unit test on `decideTool` + smoke.
-- [ ] 2.2 Extract `bridge/brain.mjs` (session creation, gate, persona per channel) from `server.mjs`;
+- [x] 2.2 Extract `bridge/brain.mjs` (session creation, gate, persona per channel) from `server.mjs`;
       the WebSocket becomes one channel adapter. Check: smoke passes, behaviour unchanged.
-- [ ] 2.3 Time & locale on every turn (local date, time, weekday in IST) without breaking prompt
+- [x] 2.3 Time & locale on every turn (local date, time, weekday in IST) without breaking prompt
       caching. Check: "what is tomorrow's date?" is right.
-- [ ] 2.4 Conversation survives a page reload: resume the SDK session (id kept in `data/state.json`).
+- [x] 2.4 Conversation survives a page reload: resume the SDK session (id kept in `data/state.json`).
       Check: reload, AYRA remembers the previous question.
-- [ ] 2.5 Audit log `data/logs/YYYY-MM-DD.jsonl`: turns, tools, allow/deny decisions, errors — no secrets.
-- [ ] 2.6 Tests: `npm test` (node:test) for `decideTool`, wake phrase, identity, origin checks; added to
+- [x] 2.5 Audit log `data/logs/YYYY-MM-DD.jsonl`: turns, tools, allow/deny decisions, errors — no secrets.
+- [x] 2.6 Tests: `npm test` (node:test) for `decideTool`, wake phrase, identity, origin checks; added to
       the Definition of Done.
 
 ## Phase 3 — AYRA Anywhere (phone access) · branch `phase-3-anywhere`
