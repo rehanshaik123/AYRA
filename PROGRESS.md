@@ -3,7 +3,7 @@
 ## ▶ Continue here
 
 - **Phase:** 1 — Foundation · branch `phase-1-foundation`
-- **Next task:** 1.11 — README for AYRA + `.env.example` with `AYRA_*` settings
+- **Next task:** 1.12 — cleanup: honorific-aware error lines, stale `JARVIS_*` comments, smoke reads `.env.local`
 - **Blockers:** none
 - **Waiting on owner:** 1.15 voice test (not blocking) · decisions Q1–Q7 in PLAN.md (none block Phases 1–2)
 - **Health:** build ✓ · lint 0 warnings · smoke ✓ on `claude-opus-5-5` (6.1 s)
@@ -23,6 +23,7 @@
 - 2026-10-02 · 1.8 Wrote CLAUDE.md, PLAN.md, PROGRESS.md — rules, roadmap and this log so any session can resume without re-reading the repo.
 - 2026-10-02 · 1.9 Agent SDK 0.3.220 → 0.3.287 (bundled Claude Code 2.1.287) — the old one rejected `claude-opus-5-5`; smoke now answers "AYRA is online." in 6.1 s.
 - 2026-10-02 · 1.10 Bridge treats `is_error` results as errors and smoke rejects "API Error" answers — AYRA would have read raw API errors aloud as answers; verified with a bad model name (clean FAIL) and the real one (PASS 5.8 s).
+- 2026-10-02 · 1.11 Rewrote README (setup, controls, settings, safety, "what each file is for") and `.env.example` (`AYRA_*`) — the old ones described JARVIS and settings the bridge no longer reads.
 
 ## Findings worth remembering
 

@@ -32,7 +32,7 @@ Goal: AYRA runs on this laptop under its own name, Windows-correct, verified, pu
       `claude-opus-5-5`. Check: `npm run smoke` passes on `claude-opus-5-5`.
 - [x] 1.10 Errors are errors: the bridge honours the SDK's `is_error` (never speaks "API Error…" as an
       answer); smoke fails on error answers. Check: a bad model name → smoke FAIL, clean spoken line.
-- [ ] 1.11 README for AYRA (what it is, quick start, what each file is for) + `.env.example` with
+- [x] 1.11 README for AYRA (what it is, quick start, what each file is for) + `.env.example` with
       `AYRA_*` settings.
 - [ ] 1.12 Cleanup: honorific-aware error lines (`src/lib/bridge.ts`, `src/lib/anthropic.ts`); stale
       `JARVIS_*` comments; smoke reads `.env.local`.
