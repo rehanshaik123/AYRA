@@ -66,13 +66,13 @@ conversation survives reloads, an audit trail, and automated tests.
 
 Goal: reach AYRA from the phone on any network, safely, while the laptop is at home.
 
-- [ ] 3.0 Personality & voice (owner's request): excited and warm; a little playful roasting and
+- [x] 3.0 Personality & voice (owner's request): excited and warm; a little playful roasting and
       flirting at the right moments (kind, PG, never during bad news or stress; "AYRA, be serious"
-      turns it off); ElevenLabs voice `si0svtk05vPEuvwAW93c`. 🧑 needs the owner's ElevenLabs API key
+      turns it off); ElevenLabs voice Lily `pFZP5JQG7iQjIQuC4Bku` (Blondie needs a paid plan). 🧑 needs the owner's ElevenLabs API key
       and approval of sample replies before merging.
-- [ ] 3.1 🧑 Owner creates a Telegram bot with @BotFather and finds their Telegram user ID; both go into
+- [x] 3.1 🧑 Owner creates a Telegram bot with @BotFather and finds their Telegram user ID; both go into
       `.env.local` (`AYRA_TELEGRAM_TOKEN`, `AYRA_TELEGRAM_OWNER_ID`).
-- [ ] 3.2 Telegram channel `bridge/telegram.mjs`: long polling (no open ports), owner-only, text in/out,
+- [x] 3.2 Telegram channel `bridge/telegram.mjs`: long polling (no open ports), owner-only, text in/out,
       Markdown persona variant. Check: message from the phone on mobile data → answer.
 - [ ] 3.3 Confirmations: effectful tools pause and ask on Telegram with Approve / Deny buttons; no answer
       in 2 minutes = deny. Check: "send an email to …" asks first; Deny cancels.
@@ -128,7 +128,7 @@ Goal: reach AYRA from the phone on any network, safely, while the laptop is at h
 | ID | Question | Default until answered |
 |---|---|---|
 | Q1 | How should AYRA address you? | ✅ "boss" (owner, 2026-10-02) |
-| Q2 | AYRA's voice? | ✅ ElevenLabs `si0svtk05vPEuvwAW93c`; excited, a little flirty (owner, 2026-10-02) |
+| Q2 | AYRA's voice? | ✅ ElevenLabs Lily `pFZP5JQG7iQjIQuC4Bku` (free; Blondie needs a paid plan); excited, a little flirty (owner, 2026-10-02) |
 | Q3 | Model: Opus 5.5 (smartest) or Sonnet 5.5 (faster, lighter on plan limits)? | `claude-opus-5-5`, effort `medium` |
 | Q4 | Telegram as the first phone channel? | yes |
 | Q5 | Voice-note transcription: ElevenLabs (free tier, account needed) or local Whisper (free, slower)? | decide at 3.4 |

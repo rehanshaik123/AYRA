@@ -64,6 +64,8 @@ npm test               # unit tests (gate, wake phrase, identity, …)
 ```
 
 The preview pane in the Claude app blocks the microphone — voice features need a real Chrome/Edge window.
+A second bridge for testing must not read the owner's Telegram bot: start it with
+`AYRA_BRIDGE_PORT=8788 AYRA_TELEGRAM=off node bridge/server.mjs` (Git Bash).
 
 ## 5. Map — what each file is for
 
@@ -76,7 +78,8 @@ The preview pane in the Claude app blocks the microphone — voice features need
 | `bridge/state.mjs` | `data/state.json` — small state that survives restarts (each channel's last session id) |
 | `bridge/gate.mjs` | **The safety gate**: `createGate()` → `decide(tool)`, the built-in tool list, connector policy (claude.ai Gmail/Calendar/Drive read-only, others removed). Tested in `test/gate.test.mjs` |
 | `bridge/identity.mjs` | Loads identity + `.env.local`; `env('X')` reads `AYRA_X` |
-| `bridge/persona.mjs` · `bridge/context.mjs` | AYRA's spoken personality (system prompt) · the "[Now: …]" local-time stamp on every question |
+| `bridge/persona.mjs` · `bridge/context.mjs` | AYRA's personality: `SYSTEM_PROMPT` (voice + HUD) and `TEXT_PROMPT` (Telegram), one shared character · the "[Now: …]" local-time stamp on every question |
+| `bridge/telegram.mjs` | Telegram channel: long polling, owner-only, one question at a time (a burst of messages = one question), text persona, Chrome but no HUD tools |
 | `bridge/panels.mjs` | Tool server `ayra`: `display`, `blade`, `probe_url` — what appears on the HUD |
 | `bridge/ui.mjs` | Tool server `ayra_ui`: theme, reactor, orbit, chrome, effect, screen, reset |
 | `bridge/chrome.mjs` | Tool server `ayra_chrome`: drives the owner's Chrome via the Claude extension (Windows named pipe `\\.\pipe\claude-mcp-browser-bridge-<user>`) |
@@ -106,7 +109,7 @@ Face ↔ brain protocol (WebSocket): face sends `ask {id,text}`, `interrupt`, `r
 - **Identity:** `config/identity.json` only. Never hard-code the name, wake words or honorific.
 - **Settings and secrets:** `.env.local` (gitignored; template `.env.example`). Bridge reads `AYRA_*`
   (`MODEL` default `claude-opus-5-5`, `EFFORT` `medium`, `BRIDGE_PORT` 8787, `ALLOW_WRITES`,
-  `ALLOWED_ORIGINS`, `ALLOW_NO_ORIGIN`, `FILE_ROOTS`, `VOICE_ID`, `DEBUG`, `RESUME_HOURS` — default 6, `CONNECTORS` — default
+  `ALLOWED_ORIGINS`, `ALLOW_NO_ORIGIN`, `FILE_ROOTS`, `VOICE_ID`, `DEBUG`, `RESUME_HOURS` — default 6, `TELEGRAM_TOKEN`, `TELEGRAM_OWNER_ID`, `TELEGRAM` — `off` disables it, `CONNECTORS` — default
   `Gmail,Google Calendar,Google Drive`, or `none`) plus `ELEVENLABS_API_KEY`.
   The face reads `VITE_*` — only `VITE_*` values reach the browser, so never put a secret in one.
 - AYRA's own sessions never load this file: the bridge runs with `settingSources: []`.

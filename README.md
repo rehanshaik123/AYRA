@@ -53,6 +53,13 @@ npm run smoke     # sends one question and prints AYRA's answer
 | T | One-line audio self-test |
 | G | Hand-gesture control |
 
+## AYRA on your phone (Telegram)
+
+With `AYRA_TELEGRAM_TOKEN` and `AYRA_TELEGRAM_OWNER_ID` in `.env.local`, the brain also answers
+your Telegram bot — from college, mobile data, anywhere — as long as AYRA is running on the laptop.
+It polls Telegram, so nothing on the laptop is opened to the internet, and it ignores everyone but
+you. Same personality, written instead of spoken; several messages in a row get one reply.
+
 ## Configuration
 
 **Identity** — [`config/identity.json`](config/identity.json) decides who AYRA is: name, wordmark,
@@ -70,6 +77,9 @@ Only `VITE_*` values ever reach the browser. `.env.local` is gitignored.
 | `AYRA_BRIDGE_PORT` | `8787` | Port for the brain (HTTP + WebSocket) |
 | `AYRA_ALLOW_WRITES` | off | `1` allows effectful tools — see Safety |
 | `AYRA_RESUME_HOURS` | `6` | A reload continues the last conversation if it was used within this many hours |
+| `AYRA_TELEGRAM_TOKEN` | — | Your Telegram bot's token (from @BotFather) |
+| `AYRA_TELEGRAM_OWNER_ID` | — | Your Telegram user id — AYRA answers nobody else |
+| `AYRA_TELEGRAM` | on | `off` stops this process from answering Telegram |
 | `AYRA_CONNECTORS` | `Gmail,Google Calendar,Google Drive` | claude.ai connectors AYRA may read, or `none` |
 | `AYRA_ALLOWED_ORIGINS` | local dev | Extra page origins allowed to connect |
 | `AYRA_FILE_ROOTS` | — | Extra folders the `/file` endpoint may serve images from |
@@ -106,6 +116,7 @@ bridge/                THE BRAIN (Node, port 8787)
   gate.mjs             The safety gate: which tools AYRA may run, connector policy
   persona.mjs          AYRA's personality — the system prompt
   context.mjs          Stamps every question with the local date and time
+  telegram.mjs         AYRA on Telegram: owner-only chat from your phone
   state.mjs            data/state.json — e.g. which conversation to continue after a reload
   audit.mjs            data/logs/<date>.jsonl — what AYRA was asked, what it ran, what was allowed
   identity.mjs         Loads identity.json and .env.local for the bridge

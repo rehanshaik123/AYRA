@@ -3,10 +3,10 @@
 ## ▶ Continue here
 
 - **Phase:** 3 — AYRA Anywhere · branch `phase-3-anywhere` (Phases 1–2 ✅ on `main`)
-- **Next task:** 3.0 owner picks a voice (Blondie needs a paid ElevenLabs plan; free samples Jessica / Laura / Lily sent) → 3.1 owner sends a message to @Ayra_rehan_bot, then I save their user ID → 3.2 Telegram.
-- **Blockers:** owner: voice choice (paid Blondie vs a free voice) · a message to the bot
-- **Waiting on owner:** keys in `.env.local` · 1.15 voice test · decisions Q3–Q7 (Q1 = "boss", Q2 = ElevenLabs voice; Q5 before 3.4, Q6 before 3.6)
-- **Health:** build ✓ · lint 0 · `npm test` 32/32 · smoke ✓ on `claude-opus-5-5`
+- **Next task:** 3.3 Approve / Deny buttons on Telegram before any action (needs the owner's OK on which actions to allow — ask first)
+- **Blockers:** none (owner to confirm Telegram replies on the phone)
+- **Waiting on owner:** Telegram check on the phone · 1.15 voice test in Chrome · decisions Q3–Q7 (Q5 before 3.4, Q6 before 3.6)
+- **Health:** build ✓ · lint 0 · `npm test` 38/38 · smoke ✓ · Lily TTS ✓ · Telegram ✓ (live)
 
 ## Log — one line per task (what changed — why)
 
@@ -34,6 +34,9 @@
 - 2026-10-02 · 2.5 New `bridge/audit.mjs`: every question, tool run, gate decision, answer, failure and session event → `data/logs/YYYY-MM-DD.jsonl` (owner's local date; text clipped, never tool inputs); `open()` now takes `channel` + `resume` — so "what did AYRA do and why was it allowed?" always has an answer.
 - 2026-10-02 · 2.6 Origin check moved to `bridge/origin.mjs`; tests for wake phrase, identity + persona, origin, state, audit, time; `npm test` (tsx loader for .ts) = 27/27 and part of the Definition of Done — the core now has a safety net. Live: foreign page 403 (HTTP + WebSocket), own page 200.
 - 2026-10-02 · Phase 2 ✅ merged to `main` and pushed — one reusable brain, connector policy, time awareness, reload-proof conversations, audit log, tests.
+- 2026-10-02 · 3.0 Excited personality with light roasting + flirting (owner: "a little more flirty", call me "boss"); voice = ElevenLabs Lily (owner's pick of free voices — Blondie is Voice Library = paid plan) — the owner wanted AYRA lively, not a dry butler.
+- 2026-10-02 · 3.1 Owner made @Ayra_rehan_bot; token in `.env.local`; owner id 1300190813 ("Starboy") read from their first message and saved — only that account can talk to AYRA.
+- 2026-10-02 · 3.2 New `bridge/telegram.mjs` + `TEXT_PROMPT`: AYRA answers the owner on Telegram (long polling, no open ports, typing indicator, late-message note); live test answered the owner's real messages. Bug found live — a burst of messages left "typing…" stuck — fixed by one-question-at-a-time batching, covered by tests (38/38).
 
 ## Findings worth remembering
 

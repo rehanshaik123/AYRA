@@ -17,11 +17,13 @@
 
 // First, so .env.local is loaded before anything below reads the environment.
 import { IDENTITY, env } from './identity.mjs'
-import { SYSTEM_PROMPT } from './persona.mjs'
+import { SYSTEM_PROMPT, TEXT_PROMPT } from './persona.mjs'
 import { createGate, DEFAULT_CONNECTORS } from './gate.mjs'
 import { WebSocketServer } from 'ws'
 import { createBrain } from './brain.mjs'
 import { createOriginCheck } from './origin.mjs'
+import { createAudit } from './audit.mjs'
+import { startTelegram } from './telegram.mjs'
 import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
@@ -757,14 +759,43 @@ console.log(
  * The brain every channel shares — see brain.mjs. The WebSocket below is the
  * first channel (the HUD); Telegram will be the next (PLAN.md 3.2).
  */
+// One audit log for every channel, so lines from the HUD and Telegram stay in order.
+const AUDIT = createAudit()
+
 const BRAIN = createBrain({
   model: MODEL,
   effort: EFFORT,
   gate: GATE,
   mcpServers: MCP_SERVERS,
+  audit: AUDIT,
   // How long an idle conversation is worth continuing after a reload.
   resumeHours: Number(env('RESUME_HOURS', 6)),
 })
+
+/**
+ * The Telegram channel (PLAN.md 3.2) — on when the bot token and the owner's
+ * Telegram id are both set. AYRA_TELEGRAM=off keeps it off for this process,
+ * which a second bridge started for testing needs: two processes reading the
+ * same bot make Telegram refuse one of them.
+ */
+const TELEGRAM_TOKEN = env('TELEGRAM_TOKEN')
+const TELEGRAM_OWNER = env('TELEGRAM_OWNER_ID')
+if (env('TELEGRAM', 'on') === 'off') {
+  console.log('[ayra] telegram: off for this process (AYRA_TELEGRAM=off)')
+} else if (TELEGRAM_TOKEN && TELEGRAM_OWNER) {
+  startTelegram({
+    token: TELEGRAM_TOKEN,
+    ownerId: TELEGRAM_OWNER,
+    brain: BRAIN,
+    systemPrompt: TEXT_PROMPT,
+    // The laptop's Chrome is reachable from the phone too; the HUD's screen,
+    // interface and camera are not, so they are not offered.
+    servers: { ayra_chrome: chromeServer({ allowWrites: ALLOW_WRITES }) },
+    audit: AUDIT,
+  })
+} else if (TELEGRAM_TOKEN) {
+  console.log('[ayra] telegram: token set but AYRA_TELEGRAM_OWNER_ID is missing — channel off')
+}
 
 // The HUD channel: one WebSocket, one conversation.
 wss.on('connection', (socket) => {
