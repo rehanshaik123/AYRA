@@ -104,6 +104,7 @@ bridge/                THE BRAIN (Node, port 8787)
   brain.mjs            One conversation with Claude — used by every channel (HUD, Telegram…)
   gate.mjs             The safety gate: which tools AYRA may run, connector policy
   persona.mjs          AYRA's personality — the system prompt
+  context.mjs          Stamps every question with the local date and time
   identity.mjs         Loads identity.json and .env.local for the bridge
   panels.mjs           Tools that put things on screen: display, blade, probe_url
   ui.mjs               Tools that restyle the interface: theme, reactor, orbit, effects, reset

@@ -70,7 +70,7 @@ The preview pane in the Claude app blocks the microphone — voice features need
 | `bridge/brain.mjs` | **The brain**, channel-independent: `createBrain().open({ systemPrompt, servers, emit })` → one Claude session with `ask / interrupt / close`; emits `ready text tool done error` |
 | `bridge/gate.mjs` | **The safety gate**: `createGate()` → `decide(tool)`, the built-in tool list, connector policy (claude.ai Gmail/Calendar/Drive read-only, others removed). Tested in `test/gate.test.mjs` |
 | `bridge/identity.mjs` | Loads identity + `.env.local`; `env('X')` reads `AYRA_X` |
-| `bridge/persona.mjs` | AYRA's spoken personality (system prompt) |
+| `bridge/persona.mjs` · `bridge/context.mjs` | AYRA's spoken personality (system prompt) · the "[Now: …]" local-time stamp on every question |
 | `bridge/panels.mjs` | Tool server `ayra`: `display`, `blade`, `probe_url` — what appears on the HUD |
 | `bridge/ui.mjs` | Tool server `ayra_ui`: theme, reactor, orbit, chrome, effect, screen, reset |
 | `bridge/chrome.mjs` | Tool server `ayra_chrome`: drives the owner's Chrome via the Claude extension (Windows named pipe `\\.\pipe\claude-mcp-browser-bridge-<user>`) |

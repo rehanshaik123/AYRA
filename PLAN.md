@@ -54,7 +54,7 @@ conversation survives reloads, an audit trail, and automated tests.
       Check: unit test on `decideTool` + smoke.
 - [x] 2.2 Extract `bridge/brain.mjs` (session creation, gate, persona per channel) from `server.mjs`;
       the WebSocket becomes one channel adapter. Check: smoke passes, behaviour unchanged.
-- [ ] 2.3 Time & locale on every turn (local date, time, weekday in IST) without breaking prompt
+- [x] 2.3 Time & locale on every turn (local date, time, weekday in IST) without breaking prompt
       caching. Check: "what is tomorrow's date?" is right.
 - [ ] 2.4 Conversation survives a page reload: resume the SDK session (id kept in `data/state.json`).
       Check: reload, AYRA remembers the previous question.

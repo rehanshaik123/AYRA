@@ -20,6 +20,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { homedir } from 'node:os'
 import { IDENTITY, env } from './identity.mjs'
+import { stamp } from './context.mjs'
 
 /**
  * What to tell the channel when a turn ends badly. Plain sentences, because
@@ -73,7 +74,8 @@ export function createBrain({ model, effort, gate, mcpServers }) {
         if (closed || text == null) return
         yield {
           type: 'user',
-          message: { role: 'user', content: text },
+          // Stamped with the local time as it is sent — see context.mjs.
+          message: { role: 'user', content: stamp(text) },
           parent_tool_use_id: null,
         }
       }
