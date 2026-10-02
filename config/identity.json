@@ -8,7 +8,8 @@
   "timezone": "Asia/Kolkata",
   "voice": {
     "gender": "female",
-    "prefer": []
+    "prefer": [],
+    "elevenLabsId": "si0svtk05vPEuvwAW93c"
   },
   "wake": {
     "names": ["ayra", "ayrah", "aira", "airah", "eyra", "eira", "aiyra", "ayira", "ayera", "heyra", "haira", "hera"],

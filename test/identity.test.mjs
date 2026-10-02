@@ -48,3 +48,14 @@ test('the persona is built from identity', () => {
   assert.ok(!SYSTEM_PROMPT.includes('JARVIS'))
   if (!raw.honorific) assert.ok(!/\bsir\b/i.test(SYSTEM_PROMPT))
 })
+
+test("the persona's roasting and flirting keep their guardrails", () => {
+  assert.ok(SYSTEM_PROMPT.includes('ROASTING AND FLIRTING'))
+  assert.ok(SYSTEM_PROMPT.includes('Always kind and PG'))
+  assert.ok(SYSTEM_PROMPT.includes('Never when the moment is serious'))
+  assert.ok(SYSTEM_PROMPT.includes('be serious'))
+})
+
+test('the premium voice is the one the owner chose', () => {
+  assert.equal(raw.voice.elevenLabsId, 'si0svtk05vPEuvwAW93c')
+})

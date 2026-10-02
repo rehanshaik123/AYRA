@@ -66,6 +66,10 @@ conversation survives reloads, an audit trail, and automated tests.
 
 Goal: reach AYRA from the phone on any network, safely, while the laptop is at home.
 
+- [ ] 3.0 Personality & voice (owner's request): excited and warm; a little playful roasting and
+      flirting at the right moments (kind, PG, never during bad news or stress; "AYRA, be serious"
+      turns it off); ElevenLabs voice `si0svtk05vPEuvwAW93c`. 🧑 needs the owner's ElevenLabs API key
+      and approval of sample replies before merging.
 - [ ] 3.1 🧑 Owner creates a Telegram bot with @BotFather and finds their Telegram user ID; both go into
       `.env.local` (`AYRA_TELEGRAM_TOKEN`, `AYRA_TELEGRAM_OWNER_ID`).
 - [ ] 3.2 Telegram channel `bridge/telegram.mjs`: long polling (no open ports), owner-only, text in/out,

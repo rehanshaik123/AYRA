@@ -3,10 +3,10 @@
 ## ▶ Continue here
 
 - **Phase:** 3 — AYRA Anywhere · branch `phase-3-anywhere` (Phases 1–2 ✅ on `main`)
-- **Next task:** 3.1 🧑 owner creates the Telegram bot + finds their user ID (steps in chat), then 3.2 Telegram channel
-- **Blockers:** 3.1 needs the owner (Telegram bot token + user ID)
+- **Next task:** 3.0 personality & voice — code done (29/29 tests, sample replies OK); waiting on the owner's ElevenLabs key + approval. Then 3.1 Telegram.
+- **Blockers:** owner: ElevenLabs API key (3.0), approval of the new personality, Telegram bot (3.1)
 - **Waiting on owner:** 3.1 Telegram bot · 1.15 voice test · decisions Q1–Q7 (Q5 needed before 3.4, Q6 before 3.6)
-- **Health:** build ✓ · lint 0 · `npm test` 27/27 · smoke ✓ on `claude-opus-5-5`
+- **Health:** build ✓ · lint 0 · `npm test` 29/29 · smoke ✓ on `claude-opus-5-5`
 
 ## Log — one line per task (what changed — why)
 

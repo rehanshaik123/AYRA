@@ -175,7 +175,8 @@ function elevenKey() {
   }
 }
 
-const VOICE_ID = env('VOICE_ID', 'JBFqnCBsd6RMkjVDRZzb')
+// The owner's chosen ElevenLabs voice (config/identity.json); AYRA_VOICE_ID overrides it.
+const VOICE_ID = env('VOICE_ID', IDENTITY.voice.elevenLabsId || 'JBFqnCBsd6RMkjVDRZzb')
 
 /**
  * Where /file is permitted to read from, and how big a read may get.

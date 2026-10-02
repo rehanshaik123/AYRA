@@ -501,14 +501,12 @@ export function createSpeaker(): Speaker {
       const voice = pickVoice()
       if (voice) u.voice = voice
       u.lang = voice?.lang ?? IDENTITY.language
-      // Deliberate, and deliberately invariant — the character's pace does not
-      // change with stakes, and that steadiness is most of the effect. This
-      // lands around 130 wpm, below the median for film dialogue.
-      u.rate = 0.92
-      // Mid-baritone, and *not* pushed lower for gravitas. The voice is
-      // clarity-weighted rather than chest-weighted; dropping it further reads
-      // as a film-trailer voiceover, which is the wrong character entirely.
-      u.pitch = 0.95
+      // AYRA is excited and quick, so the fallback voice runs at a natural,
+      // lively pace rather than the upstream butler's deliberate 0.92.
+      u.rate = 1.05
+      // A touch brighter than neutral reads as upbeat; much higher reads as
+      // a cartoon.
+      u.pitch = 1.05
 
       // speechSynthesis exposes no amplitude, so drive the reactor from a
       // synthetic envelope. It only has to look like speech, not match it.
