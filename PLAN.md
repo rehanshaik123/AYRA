@@ -84,6 +84,10 @@ Telegram off on the laptop at cut-over.
 - [ ] 4.6 Move in: copy the laptop's `data/` (state, logs) to the server; refresh README and
       `.env.example` (voice Lily, "boss", cloud setup).
       Check: `/log` shows today's entries; README matches what's real.
+- [ ] 4.7 Small fixes from the QA pass ([docs/TEST-REPORT.md](docs/TEST-REPORT.md) #3–7): the HUD
+      voice label, the "systems" count, the interrupt wording, stale `decideTool()` pointers, Vite
+      re-optimising on a port change.
+      Check: each defect re-tested and gone.
 
 **Demo:** phone only, laptop shut — check an idea, then `/status`. Until Phase 5 the HUD still runs
 its own brain on the laptop, with Telegram off there.
@@ -97,7 +101,8 @@ Chrome, files and HUD; when it's off, she says so and queues the job.
 sends each job to the right place."
 
 **Intent check — settle:** which laptop jobs matter first (open a page in your Chrome, find a file,
-…) · how long a queued job may wait · HUD and Telegram as one shared conversation.
+…) · how long a queued job may wait · HUD and Telegram as one shared conversation · how AYRA
+gets Chrome's per-site permission (pre-approved sites, or asking on the phone — QA finding #1).
 
 **🧑 Owner steps:** turn the Windows page file back on and restart Chrome · let the desk start at
 login · voice test in Chrome.
