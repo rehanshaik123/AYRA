@@ -900,6 +900,7 @@ const RESULT_FAILURES = {
   error_max_turns: 'The turn ran too long and was stopped.',
   error_max_budget_usd: 'The budget for this turn ran out.',
   error_max_structured_output_retries: 'The answer could not be assembled.',
+  api_error: 'The model could not be reached. The details are in the bridge log.',
   default: 'The turn ended without an answer.',
 }
 
@@ -1206,20 +1207,29 @@ wss.on('connection', (socket) => {
             // empty text is indistinguishable from a turn that simply had
             // nothing to say — the HUD stops spinning and JARVIS stands there
             // silent. Say what happened instead.
-            if (msg.subtype === 'success') {
+            //
+            // Nor is 'success' on its own. An API failure — a model the
+            // bundled Claude Code doesn't know, an expired login, a rate
+            // limit — arrives as subtype 'success' with is_error set and the
+            // raw error as the result: "API Error: 400 …", which would be
+            // read aloud as the answer. The detail goes to the log instead.
+            if (msg.subtype === 'success' && !msg.is_error) {
               sendTurn({
                 type: 'done',
                 text: msg.result ?? '',
                 costUsd: msg.total_cost_usd ?? null,
               })
             } else {
+              const apiError = msg.subtype === 'success'
               console.error(
-                `[ayra] turn failed: ${msg.subtype}`,
-                msg.errors ?? '',
+                `[ayra] turn failed: ${apiError ? 'api error' : msg.subtype}`,
+                apiError ? (msg.result ?? '') : (msg.errors ?? ''),
               )
               sendTurn({
                 type: 'error',
-                message: RESULT_FAILURES[msg.subtype] ?? RESULT_FAILURES.default,
+                message: apiError
+                  ? RESULT_FAILURES.api_error
+                  : (RESULT_FAILURES[msg.subtype] ?? RESULT_FAILURES.default),
               })
             }
             // Whatever was waiting on this turn to finish can go now. This is

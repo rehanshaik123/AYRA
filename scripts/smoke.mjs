@@ -88,6 +88,9 @@ ws.on('message', (raw) => {
     if (tools.length) console.log(`[smoke] tools used: ${tools.join(', ')}`)
     console.log(`[smoke] answer (${secs}s): ${answer || '(empty)'}`)
     if (!answer) fail('the turn finished with an empty answer')
+    // A bridge that predates the is_error check delivers API failures as an
+    // ordinary answer; never let that count as a pass.
+    if (/^API Error\b/i.test(answer)) fail('the answer is an API error, not a reply')
     console.log('[smoke] PASS')
     process.exit(0)
   }

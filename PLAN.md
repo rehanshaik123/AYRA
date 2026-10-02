@@ -30,7 +30,7 @@ Goal: AYRA runs on this laptop under its own name, Windows-correct, verified, pu
 - [x] 1.8 Project docs: CLAUDE.md (rules), PLAN.md (this roadmap), PROGRESS.md (log + resume point).
 - [x] 1.9 Update Claude Agent SDK 0.3.220 → 0.3.287 — its bundled Claude Code (2.1.220) is too old for
       `claude-opus-5-5`. Check: `npm run smoke` passes on `claude-opus-5-5`.
-- [ ] 1.10 Errors are errors: the bridge honours the SDK's `is_error` (never speaks "API Error…" as an
+- [x] 1.10 Errors are errors: the bridge honours the SDK's `is_error` (never speaks "API Error…" as an
       answer); smoke fails on error answers. Check: a bad model name → smoke FAIL, clean spoken line.
 - [ ] 1.11 README for AYRA (what it is, quick start, what each file is for) + `.env.example` with
       `AYRA_*` settings.
