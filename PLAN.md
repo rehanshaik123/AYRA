@@ -10,7 +10,8 @@ line) → a short demo the owner can try from the phone → merge after the owne
 does this step; they get click-by-click instructions when it comes up.
 
 **Where we are:** Phase 5 — Light AYRA with hands on the laptop. Done: live hearing, the ask-first
-rules, light mode, Approve + kill switch, shell and files. Next: 5.6 her Chrome.
+rules, light mode, Approve + kill switch, shell and files, her Chrome. Next: 5.7 Windows apps, then
+the owner's setup and demo (5.8).
 
 ---
 
@@ -221,10 +222,13 @@ try Approve and the kill switch · optional: start AYRA at login.
       instructions is not resumed — she kept saying "the laptop isn't connected" from an old session.
       Check ✓: "which programs use the most memory" answered via PowerShell; a file created; a delete
       asked first.
-- [ ] 5.6 Her Chrome: `bridge/browser.mjs` attaches to the "Chrome (AYRA)" window over the DevTools
-      protocol — tabs, read, click, type, scroll, screenshot to a blade, sign in with Chrome's saved
-      passwords, site permissions for trusted sites. Check: open the owner's portal, read it, close the
-      tab, with nobody touching the laptop; "Buy" or "Send" asks.
+- [x] 5.6 Her Chrome: `bridge/browser.mjs` (`ayra_browser`, puppeteer-core) attaches to "Chrome
+      (AYRA)" — its own profile, port 9222 on 127.0.0.1 — and starts it if needed: tabs, open, read
+      (text + numbered pressables), click, type, press, scroll, back, close, screenshot to a blade, site
+      permissions (trusted sites at once, others ask). Every click / submit / Enter is checked with the
+      element's real label. `npm run shortcuts` makes "AYRA" (one click: start + app window, mic granted)
+      and "Chrome (AYRA)". Check ✓: opened and read example.com, closed the tab; a "Buy now" click asked
+      ("spends money") and No left it unclicked. The owner's own portal waits for their sign-in (5.8).
 - [ ] 5.7 Windows apps: open and close apps, click and type in them through UI Automation, read the
       window. Check: three everyday tasks.
 - [ ] 5.8 🧑 Setup and demo: the owner's steps above, then a live run at the desk and from the phone.

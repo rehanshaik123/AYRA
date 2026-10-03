@@ -60,6 +60,7 @@ Laptop, today (Windows — PowerShell or Git Bash):
 npm install            # once, after cloning
 npm start              # daily use, light: builds the face if needed, one process → open http://localhost:5173
 npm run start:dev      # working on the face: bridge + Vite dev server (hot reload)
+npm run shortcuts      # Desktop shortcuts: "AYRA" (one click) and "Chrome (AYRA)" (her Chrome)
 npm run bridge         # brain only                       npm run dev   # face only (Vite)
 npm run build          # type-check + production build (must pass)
 npm run lint           # oxlint (must stay at 0 warnings)
@@ -96,6 +97,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/identity.mjs` | Loads identity + `.env.local`; `env('X')` reads `AYRA_X` |
 | `bridge/persona.mjs` · `bridge/context.mjs` | AYRA's personality: `SYSTEM_PROMPT` (voice + HUD) and `TEXT_PROMPT` (Telegram), one character, plus what she can do today · the "[Now: …]" local-time stamp |
 | `bridge/telegram.mjs` | Telegram channel: long polling, owner-only, one question at a time, text persona, Approve buttons, `/stop` |
+| `bridge/browser.mjs` | Tool server `ayra_browser`: her Chrome — "Chrome (AYRA)" over the DevTools protocol (port 9222); clicks and submits checked with the real label |
 | `bridge/approvals.mjs` | The owner's Approve: holds each "ask" until the first answer (HUD, voice, Telegram) or 2 min → no; `halt()` is the kill switch |
 | `bridge/listen.mjs` | Live hearing: relays the face's microphone stream (`/listen` socket) to ElevenLabs Scribe Realtime and the words back |
 | `bridge/face.mjs` | Serves the built face (`dist/`) on 127.0.0.1:5173 in daily use — no dev server |
@@ -111,11 +113,12 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `src/ui/Boot.tsx` · `Ignition.tsx` · `Diagnostics.tsx` · `Suggestions.tsx` | Start-up sequence · INITIALISE button · diagnostics (D) · rotating example questions |
 | `src/store.ts` · `src/index.css` | App state · all styles incl. the `.hud-*` design system blades use |
 | `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` · `bench.mjs` · `bridge-copy.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test · `npm run bench` speed table · `npm run bridge:test` |
+| `scripts/open.mjs` · `shortcuts.mjs` | The "AYRA" shortcut (start if needed, open her app window) · `npm run shortcuts` |
 | `test/*.test.mjs` | Unit tests, run by `npm test` |
 | `index.html` · `vite.config.ts` | Page shell + strict CSP · dev server, `%AYRA_WORDMARK%` title |
 | `data/` | AYRA's runtime data (logs, state; later memory) — gitignored, never committed |
 
-Planned, with their phase: `browser.mjs`, `apps.mjs` (5) · `db.mjs`, `memory.mjs`
+Planned, with their phase: `apps.mjs` (5) · `db.mjs`, `memory.mjs`
 (7) · `core.mjs`, `deploy/` (8) · `link.mjs`, `desk.mjs`, `jobs.mjs` (9) · `notify.mjs`,
 `scheduler.mjs` (10) · `agents/<name>/` (11).
 
@@ -137,7 +140,9 @@ will live in `bridge/link.mjs` (Phase 9), and the same rule applies.
   server, one settings file readable only by the `ayra` user. The bridge reads `AYRA_*` (`MODEL`
   default `claude-opus-5-5`, `EFFORT` `low`, `BRIDGE_PORT` 8787, `ALLOWED_ORIGINS`,
   `ALLOW_NO_ORIGIN`, `VOICE_ID`, `DEBUG`, `RESUME_HOURS` — default 6, `SLEEP_MINUTES` — the brain
-  naps after this long idle, default 10, `FACE_PORT` 5173, `SERVE_FACE`, `TELEGRAM_TOKEN`,
+  naps after this long idle, default 10, `FACE_PORT` 5173, `SERVE_FACE`, `ALLOW_WRITES` — `0` turns
+  laptop control off, `CHROME_PORT` 9222, `CHROME_PATH`, `TRUSTED_SITES` — sites she may grant mic /
+  camera herself, `TELEGRAM_TOKEN`,
   `TELEGRAM_OWNER_ID`, `TELEGRAM` — `off` disables it, `CONNECTORS` — default `none`) plus
   `ELEVENLABS_API_KEY`. Writes are off in code (`ALLOW_WRITES = false` in server.mjs) until the
   laptop-hands phase. The bridge sets `ENABLE_TOOL_SEARCH=false` for Claude Code (tools load up
