@@ -13,8 +13,13 @@
  *   { type: 'error', message, ask }       a plain sentence, safe to speak
  *
  * `ask` echoes the id the channel gave the question. Everything a channel
- * adds of its own — the HUD's display tools, the camera — comes in through
- * `servers` when the conversation is opened.
+ * adds of its own — the HUD's display tools — comes in through `servers` when
+ * the conversation is opened.
+ *
+ * A conversation sleeps when idle: after `sleepMinutes` with no question its
+ * Claude process is closed (a few hundred MB back on the owner's laptop) and
+ * the next question wakes it on the same conversation — the SDK keeps the
+ * transcript on disk — for a second or two once.
  */
 
 import { query } from '@anthropic-ai/claude-agent-sdk'
@@ -50,15 +55,18 @@ const SETTLE_CAP_MS = 400
 /**
  * @param {{ model: string, effort: string, gate: ReturnType<import('./gate.mjs').createGate>,
  *           mcpServers: Record<string, object>, store?: ReturnType<typeof createStore>,
- *           audit?: ReturnType<typeof createAudit>, resumeHours?: number }} config
- *   mcpServers  — the owner's own MCP servers, shared by every conversation
- *   store       — where each channel's last session id is kept (data/state.json)
- *   audit       — where every question, tool decision and answer is logged
- *   resumeHours — a conversation idle longer than this starts fresh
+ *           audit?: ReturnType<typeof createAudit>, resumeHours?: number,
+ *           sleepMinutes?: number }} config
+ *   mcpServers   — the owner's own MCP servers, shared by every conversation
+ *   store        — where each channel's last session id is kept (data/state.json)
+ *   audit        — where every question, tool decision and answer is logged
+ *   resumeHours  — a conversation idle longer than this starts fresh
+ *   sleepMinutes — close an idle conversation's Claude process after this long
+ *                  (0 = never); the next question wakes it
  */
 export function createBrain({
   model, effort, gate, mcpServers,
-  store = createStore(), audit = createAudit(), resumeHours = 6,
+  store = createStore(), audit = createAudit(), resumeHours = 6, sleepMinutes = 10,
 }) {
   /**
    * Open one conversation.
@@ -88,7 +96,6 @@ export function createBrain({
         : undefined
     if (resume) console.log(`[ayra] resuming the ${channel} conversation (${resume.slice(0, 8)}…)`)
     audit.log({ type: 'session', channel, event: resume ? 'resume' : 'open', session: resume ?? null })
-    let started = false
     const remember = (sessionId) => {
       if (stateKey && sessionId) {
         store.set(stateKey, { id: sessionId, updatedAt: new Date().toISOString() })
@@ -106,19 +113,28 @@ export function createBrain({
       audit.log({ type: 'session', channel, event: 'resume_failed', session: resume })
     }
 
-    /** Resolves the pending user message into the SDK's input generator. */
-    let deliver = null
+    /**
+     * The live Claude process for this conversation, or null while it sleeps.
+     * Each process has its own input queue, so ending one for a nap can never
+     * swallow a question meant for the next.
+     */
+    let live = null
     let closed = false
-    const inbox = []
+    /** The conversation to carry on when waking; the SDK keeps it on disk. */
+    let lastSession = resume ?? null
+    /** A question is being answered — never nap in the middle of one. */
+    let busy = false
+    let napTimer = null
 
-    async function* userMessages() {
-      while (!closed) {
+    /** The input generator for one process: questions in, one at a time. */
+    async function* userMessages(proc) {
+      while (!closed && !proc.done) {
         const text =
-          inbox.shift() ??
+          proc.inbox.shift() ??
           (await new Promise((resolve) => {
-            deliver = resolve
+            proc.deliver = resolve
           }))
-        if (closed || text == null) return
+        if (closed || proc.done || text == null) return
         yield {
           type: 'user',
           // Stamped with the local time as it is sent — see context.mjs.
@@ -224,91 +240,127 @@ export function createBrain({
         finishTurn = resolve
       })
 
-    const session = query({
-      prompt: userMessages(),
-      options: {
-        // Continue the channel's last conversation, when there is a recent one.
-        ...(resume ? { resume } : {}),
-        // The owner's MCP servers plus the channel's own, which close over
-        // the channel (the HUD's `display` lands on that socket) — which is
-        // why this object is built per conversation rather than once.
-        mcpServers: { ...mcpServers, ...servers },
-        // A plain system prompt, not the claude_code preset. The preset is
-        // tuned for a coding agent — verbose, file-oriented, and a large chunk
-        // of input tokens on every turn. Replacing it makes the persona stick,
-        // keeps answers short enough to speak, and cuts cost per turn.
-        systemPrompt,
-        // Run from the home directory so project-scoped MCP servers don't
-        // shadow the global ones, and so file tools have a sane root.
-        cwd: homedir(),
-        // No filesystem settings at all. Left to its default the SDK loads
-        // ~/.claude/settings.json and settings.local.json exactly as the CLI
-        // does — which on a working machine means a bypassPermissions default
-        // and a pile of allow-rules for Bash. Allow-rules are matched before the
-        // permission callback, so the gate would never even be asked about the
-        // tools it most needs to refuse. Empty makes this bridge the only
-        // authority. It also stops the global CLAUDE.md riding along on every
-        // voice turn, carrying instructions written for a coding agent into a
-        // conversation that is meant to be two sentences long.
-        //
-        // The cost is that MCP servers stop being discovered too, which is why
-        // mcpServers above passes them in by hand.
-        settingSources: [],
-        // Stated explicitly, and it has to be: with no `model` the SDK falls
-        // back to its own default, and the owner's `/model` preference lives in
-        // the settings files `settingSources: []` deliberately stops loading.
-        model,
-        effort,
-        // Only the built-ins AYRA needs, and none of the owner's claude.ai
-        // connectors they haven't allowed — both decided in gate.mjs.
-        tools: gate.builtins,
-        disallowedTools: gate.disallowed,
-        maxTurns: 24,
-        permissionMode: 'default',
-        // Without this the SDK only emits whole assistant messages, and AYRA
-        // would sit silent until the entire answer was written. Partial events
-        // are what let speech start on the first finished sentence.
-        includePartialMessages: true,
-        // Signature is (toolName, input, options) and it must return a
-        // PermissionResult object. Returning a bare boolean silently denies
-        // everything, with the tool name arriving undefined.
-        //
-        // Worth knowing: this is a last gate, not the only one. Calls the CLI
-        // has already settled never arrive here — its own classifier waves
-        // through a `Bash: echo hello` without asking, and only reaches us for
-        // something with a consequence, like a `touch`. So a deny here is
-        // reliable; an absence of a call here is not proof nothing ran.
-        canUseTool: async (toolName) => {
-          const ok = gate.decide(toolName)
-          audit.log({ type: 'decision', channel, tool: toolName, allowed: ok })
-          console.log(`[ayra] tool ${toolName} -> ${ok ? 'allow' : 'deny'}`)
-          return ok
-            ? { behavior: 'allow' }
-            : {
-                behavior: 'deny',
-                // Every word of this can end up spoken, so it carries no
-                // command to read out — the persona never says one aloud.
-                message:
-                  `Blocked: ${IDENTITY.name} is running in read-only mode and cannot take` +
-                  ' actions that change anything. Tell the user this action is' +
-                  ' unavailable until they enable write access on the machine.',
-              }
+    /** Start a Claude process — at open, and again when a question wakes a nap. */
+    const wake = (resumeId) => {
+      const proc = { inbox: [], deliver: null, done: false, napping: false, started: false, resumeId }
+      proc.session = query({
+        prompt: userMessages(proc),
+        options: {
+          // Continue the channel's last conversation, when there is a recent one.
+          ...(resumeId ? { resume: resumeId } : {}),
+          // The owner's MCP servers plus the channel's own, which close over
+          // the channel (the HUD's `display` lands on that socket) — which is
+          // why this object is built per conversation rather than once.
+          mcpServers: { ...mcpServers, ...servers },
+          // A plain system prompt, not the claude_code preset. The preset is
+          // tuned for a coding agent — verbose, file-oriented, and a large chunk
+          // of input tokens on every turn. Replacing it makes the persona stick,
+          // keeps answers short enough to speak, and cuts cost per turn.
+          systemPrompt,
+          // Run from the home directory so project-scoped MCP servers don't
+          // shadow the global ones, and so file tools have a sane root.
+          cwd: homedir(),
+          // No filesystem settings at all. Left to its default the SDK loads
+          // ~/.claude/settings.json and settings.local.json exactly as the CLI
+          // does — which on a working machine means a bypassPermissions default
+          // and a pile of allow-rules for Bash. Allow-rules are matched before the
+          // permission callback, so the gate would never even be asked about the
+          // tools it most needs to refuse. Empty makes this bridge the only
+          // authority. It also stops the global CLAUDE.md riding along on every
+          // voice turn, carrying instructions written for a coding agent into a
+          // conversation that is meant to be two sentences long.
+          //
+          // The cost is that MCP servers stop being discovered too, which is why
+          // mcpServers above passes them in by hand.
+          settingSources: [],
+          // Stated explicitly, and it has to be: with no `model` the SDK falls
+          // back to its own default, and the owner's `/model` preference lives in
+          // the settings files `settingSources: []` deliberately stops loading.
+          model,
+          effort,
+          // Only the built-ins AYRA needs, and none of the owner's claude.ai
+          // connectors they haven't allowed — both decided in gate.mjs.
+          tools: gate.builtins,
+          disallowedTools: gate.disallowed,
+          maxTurns: 24,
+          permissionMode: 'default',
+          // Without this the SDK only emits whole assistant messages, and AYRA
+          // would sit silent until the entire answer was written. Partial events
+          // are what let speech start on the first finished sentence.
+          includePartialMessages: true,
+          // Signature is (toolName, input, options) and it must return a
+          // PermissionResult object. Returning a bare boolean silently denies
+          // everything, with the tool name arriving undefined.
+          //
+          // Worth knowing: this is a last gate, not the only one. Calls the CLI
+          // has already settled never arrive here — its own classifier waves
+          // through a `Bash: echo hello` without asking, and only reaches us for
+          // something with a consequence, like a `touch`. So a deny here is
+          // reliable; an absence of a call here is not proof nothing ran.
+          canUseTool: async (toolName) => {
+            const ok = gate.decide(toolName)
+            audit.log({ type: 'decision', channel, tool: toolName, allowed: ok })
+            console.log(`[ayra] tool ${toolName} -> ${ok ? 'allow' : 'deny'}`)
+            return ok
+              ? { behavior: 'allow' }
+              : {
+                  behavior: 'deny',
+                  // Every word of this can end up spoken, so it carries no
+                  // command to read out — the persona never says one aloud.
+                  message:
+                    `Blocked: ${IDENTITY.name} is running in read-only mode and cannot take` +
+                    ' actions that change anything. Tell the user this action is' +
+                    ' unavailable until they enable write access on the machine.',
+                }
+          },
         },
-      },
-    })
+      })
 
-    /** The session can take no more turns: stop feeding it and tell the channel. */
+      live = proc
+      void pump(proc)
+      return proc
+    }
+
+    /** Stop one process: no more input, and let it exit. */
+    const stop = (proc) => {
+      proc.done = true
+      proc.deliver?.(null)
+      proc.session.close?.()
+    }
+
+    /** The conversation can take no more turns: stop feeding it and tell the channel. */
     const end = () => {
       if (closed) return
       closed = true
-      deliver?.(null)
-      session.close?.()
+      clearTimeout(napTimer)
+      if (live) stop(live)
+      live = null
       audit.log({ type: 'session', channel, event: 'ended' })
       onEnd?.()
     }
 
-    // Pump the session's output to the channel for as long as it lives.
-    ;(async () => {
+    /** Close the idle process; the conversation itself stays open. */
+    const nap = () => {
+      if (!live || busy || closed) return
+      const proc = live
+      live = null
+      proc.napping = true
+      stop(proc)
+      audit.log({ type: 'session', channel, event: 'asleep' })
+      console.log(`[ayra] ${channel}: idle — the brain sleeps until the next question`)
+    }
+
+    const napLater = () => {
+      clearTimeout(napTimer)
+      if (sleepMinutes > 0) {
+        napTimer = setTimeout(nap, sleepMinutes * 60_000)
+        napTimer.unref?.()
+      }
+    }
+
+    // Pump one process's output to the channel for as long as it lives.
+    async function pump(proc) {
+      const session = proc.session
       try {
         for await (const msg of session) {
           if (env('DEBUG') === '1') {
@@ -375,7 +427,7 @@ export function createBrain({
               // A resume whose session is gone fails here, before the session
               // ever starts — "No conversation found with session ID" — as an
               // error result, not an exception.
-              const resumeFailed = Boolean(resume) && !started && msg.subtype !== 'success'
+              const resumeFailed = Boolean(proc.resumeId) && !proc.started && msg.subtype !== 'success'
               // A result is not automatically a success. The error subtypes
               // carry no `result` field at all, so reporting them as 'done'
               // with empty text is indistinguishable from a turn that simply
@@ -421,21 +473,26 @@ export function createBrain({
               // otherwise grow for as long as the conversation is open.
               seenTools.clear()
               heldTools.clear()
+              toolNames.clear()
+              busy = false
               if (resumeFailed) {
                 // Nothing more can happen in this session. Forget it and end,
                 // so the channel reconnects into a fresh conversation.
                 forget()
                 end()
               } else {
+                if (msg.session_id) lastSession = msg.session_id
                 remember(msg.session_id)
+                napLater()
               }
               break
             }
 
             case 'system':
               if (msg.subtype === 'init') {
-                started = true
+                proc.started = true
                 audit.log({ type: 'session', channel, event: 'started', session: msg.session_id ?? null, model })
+                if (msg.session_id) lastSession = msg.session_id
                 remember(msg.session_id)
                 // Servers report 'pending' until first use — they connect
                 // lazily — so only drop the ones that are actually unusable.
@@ -454,14 +511,17 @@ export function createBrain({
               break
           }
         }
+        // Put to sleep on purpose: the conversation carries on at the next question.
+        if (proc.napping) return
         // The stream ended on its own. Same as a crash, as far as the channel
         // is concerned: this conversation can take no more questions.
         end()
       } catch (err) {
+        if (proc.napping) return
         console.error('[ayra] session error:', err)
         audit.log({ type: 'error', channel, message: 'session error', detail: clip(err?.message ?? err) })
         // Died before it ever started: most likely the resume itself.
-        if (resume && !started) forget()
+        if (proc.resumeId && !proc.started) forget()
         emit({ type: 'error', message: String(err?.message ?? err) })
         // The stream is finished either way — nothing will ever be read from
         // it again. Leaving the channel open would leave the client believing
@@ -469,7 +529,11 @@ export function createBrain({
         // waiting on a pump that has already stopped.
         end()
       }
-    })()
+    }
+
+    // Started at once, so the first question doesn't wait for a process.
+    wake(resume)
+    napLater()
 
     return {
       /**
@@ -487,23 +551,43 @@ export function createBrain({
        */
       ask(text, id = null) {
         void settling.then(() => {
+          if (closed) return
           answering = id
           askedAt = Date.now()
           audit.log({ type: 'question', channel, ask: id, text: clip(text) })
-          if (deliver) {
-            const resolve = deliver
-            deliver = null
+          busy = true
+          clearTimeout(napTimer)
+          // Asleep: wake on the same conversation.
+          const proc = live ?? wake(lastSession)
+          if (proc.deliver) {
+            const resolve = proc.deliver
+            proc.deliver = null
             resolve(text)
           } else {
-            inbox.push(text)
+            proc.inbox.push(text)
           }
         })
+      },
+
+      /**
+       * Someone is about to ask: wake now if asleep, so the start-up overlaps
+       * their talking instead of their waiting. Measured, a nap costs ~3.7 s on
+       * the first answer otherwise; the face calls this the moment it hears
+       * speech begin.
+       */
+      warm() {
+        if (closed) return
+        if (!live) {
+          console.log(`[ayra] ${channel}: someone is talking — waking the brain`)
+          wake(lastSession)
+        }
+        napLater()
       },
 
       /** Stop the answer in flight. Held so the next question can wait for it. */
       interrupt() {
         const stopped = turnFinished()
-        settling = Promise.resolve(session.interrupt?.())
+        settling = Promise.resolve(live?.session.interrupt?.())
           .catch(() => {})
           .then(() =>
             Promise.race([
@@ -517,9 +601,10 @@ export function createBrain({
       close() {
         if (closed) return
         closed = true
+        clearTimeout(napTimer)
         audit.log({ type: 'session', channel, event: 'closed' })
-        deliver?.(null)
-        session.close?.()
+        if (live) stop(live)
+        live = null
       },
     }
   }
