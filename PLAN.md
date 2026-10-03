@@ -10,7 +10,7 @@ line) → a short demo the owner can try from the phone → merge after the owne
 does this step; they get click-by-click instructions when it comes up.
 
 **Where we are:** Phase 5 — Light AYRA with hands on the laptop. Done: live hearing, the ask-first
-rules, light mode. Next: 5.4 Approve and the kill switch.
+rules, light mode, Approve + kill switch, shell and files. Next: 5.6 her Chrome.
 
 ---
 
@@ -211,12 +211,16 @@ try Approve and the kill switch · optional: start AYRA at login.
       the bridge listens on the laptop only (it was reachable from the Wi-Fi). Check ✓: brain 204 MB
       awake → 0 asleep; first answer after a nap 3.2 s with the pre-wake (3.4 s awake); voice loop on
       the production build: question 0.87 s, answer 2.4 s. Her app window moves to 5.6 (one Chrome).
-- [ ] 5.4 Approve and the kill switch: `bridge/approvals.mjs`; a Yes/No card on the HUD (Y/N keys, or
-      say "yes"/"no"), buttons on Telegram, 2 minutes without an answer = no; Esc / "AYRA, stop" /
-      `/stop` halts every turn. Check: a delete asks; No cancels; `/stop` stops a running task; the
-      audit log shows each.
-- [ ] 5.5 Shell and files: PowerShell, read / write / edit / search files, writes on — each call
-      reviewed. Check: "open Notepad, write a note, save it to my Desktop" works; a delete asks.
+- [x] 5.4 Approve and the kill switch: `bridge/approvals.mjs` (6 tests); a Yes/No card on the HUD (Y/N
+      keys, or say "yes"/"no" — her own voice asks), Yes/No buttons on Telegram (5 tests), 2 minutes
+      without an answer = no; Esc / `/stop` decline everything waiting and stop every turn. Check ✓:
+      a delete asked, No kept the file, Yes deleted it; the kill switch declined a waiting Approve and
+      stopped a 30 s task at 5 s ("Stopped."); the audit log records each.
+- [x] 5.5 Shell and files: PowerShell, Read/Glob/Grep/Write/Edit, writes on (`AYRA_ALLOW_WRITES=0`
+      turns it off); every call reviewed by the gate. A conversation saved under other tools or
+      instructions is not resumed — she kept saying "the laptop isn't connected" from an old session.
+      Check ✓: "which programs use the most memory" answered via PowerShell; a file created; a delete
+      asked first.
 - [ ] 5.6 Her Chrome: `bridge/browser.mjs` attaches to the "Chrome (AYRA)" window over the DevTools
       protocol — tabs, read, click, type, scroll, screenshot to a blade, sign in with Chrome's saved
       passwords, site permissions for trusted sites. Check: open the owner's portal, read it, close the
@@ -224,8 +228,8 @@ try Approve and the kill switch · optional: start AYRA at login.
 - [ ] 5.7 Windows apps: open and close apps, click and type in them through UI Automation, read the
       window. Check: three everyday tasks.
 - [ ] 5.8 🧑 Setup and demo: the owner's steps above, then a live run at the desk and from the phone.
-- [ ] 5.9 Leftovers: an interrupted answer is logged as "interrupted", not "failed"; no Vite
-      re-optimising on a port change (gone with 5.3 for daily use).
+- [x] 5.9 Leftovers: an interrupted answer is "Stopped." and logged as `interrupted`, not a failure;
+      no Vite re-optimising in daily use (gone with 5.3).
 
 ## Phase 6 — Apps, one at a time · branch `phase-6-apps`
 

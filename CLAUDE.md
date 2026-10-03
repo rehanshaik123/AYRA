@@ -12,9 +12,9 @@ README for GitHub).
   goals, takes their commands, routes each job, and runs specialist agents added one at a time.
 - **Today (Phase 5, light AYRA with hands):** one bridge on the laptop (`bridge/server.mjs`) — the
   brain, the HUD's WebSocket, live hearing and Telegram. The face is an avatar with the ElevenLabs
-  voice Lily. Her tools so far: **web search, web pages and the HUD display**; laptop control (shell,
-  files, her Chrome, apps — four things ask first) is being added in Phase 5. No cloud until the owner
-  has the budget.
+  voice Lily. Her tools: **web search and pages, the HUD display, PowerShell and the laptop's files**
+  — four kinds of action wait for the owner's Approve; her own Chrome and Windows apps are being
+  added. No cloud until the owner has the budget.
 - **Target:** two homes, one AYRA. **AYRA Core** in the cloud, always on (brain, one conversation,
   memory, Telegram, gate, guardian, audit, scheduler, agents). **AYRA Desk** on the laptop while
   it's on (HUD + voice, AYRA's own Chrome, files, PC control), dialling out to the core over
@@ -95,7 +95,8 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/audit.mjs` · `bridge/state.mjs` | Audit log `data/logs/YYYY-MM-DD.jsonl` (never tool inputs or secrets) · `data/state.json`, small state that survives restarts |
 | `bridge/identity.mjs` | Loads identity + `.env.local`; `env('X')` reads `AYRA_X` |
 | `bridge/persona.mjs` · `bridge/context.mjs` | AYRA's personality: `SYSTEM_PROMPT` (voice + HUD) and `TEXT_PROMPT` (Telegram), one character, plus what she can do today · the "[Now: …]" local-time stamp |
-| `bridge/telegram.mjs` | Telegram channel: long polling, owner-only, one question at a time, text persona |
+| `bridge/telegram.mjs` | Telegram channel: long polling, owner-only, one question at a time, text persona, Approve buttons, `/stop` |
+| `bridge/approvals.mjs` | The owner's Approve: holds each "ask" until the first answer (HUD, voice, Telegram) or 2 min → no; `halt()` is the kill switch |
 | `bridge/listen.mjs` | Live hearing: relays the face's microphone stream (`/listen` socket) to ElevenLabs Scribe Realtime and the words back |
 | `bridge/face.mjs` | Serves the built face (`dist/`) on 127.0.0.1:5173 in daily use — no dev server |
 | `bridge/panels.mjs` · `bridge/sources.mjs` | Tool server `ayra`: `display`, `blade`, `probe_url` — what appears on the HUD · a web search's links turned into a card by the bridge, no model in the way |
@@ -114,7 +115,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `index.html` · `vite.config.ts` | Page shell + strict CSP · dev server, `%AYRA_WORDMARK%` title |
 | `data/` | AYRA's runtime data (logs, state; later memory) — gitignored, never committed |
 
-Planned, with their phase: `approvals.mjs`, `browser.mjs`, `apps.mjs` (5) · `db.mjs`, `memory.mjs`
+Planned, with their phase: `browser.mjs`, `apps.mjs` (5) · `db.mjs`, `memory.mjs`
 (7) · `core.mjs`, `deploy/` (8) · `link.mjs`, `desk.mjs`, `jobs.mjs` (9) · `notify.mjs`,
 `scheduler.mjs` (10) · `agents/<name>/` (11).
 
@@ -122,7 +123,8 @@ Live hearing (`/listen` WebSocket): face sends 16 kHz PCM (binary), `commit`, `w
 `partial {text}`, `final {text}`, `error {code,message}` — see `bridge/listen.mjs`.
 
 Face ↔ brain protocol (WebSocket): face sends `ask {id,text}`, `interrupt`, `warm` (speech began:
-wake a sleeping brain); brain sends
+wake a sleeping brain), `approval {id,ok}`, `halt`; brain sends `approve {id,reason,detail,tool}`,
+`approved {id,ok,by}`, `halt {by}`,
 `ready {servers}`, `text {delta}`, `tool {name}`, `done {text}`, `error {message}`, `blade` — turn
 frames carry `ask: <id>`. Inside the bridge the brain also emits `sources {query, links}`, which the
 HUD channel turns into a `blade`. Change both sides together or not at all. The core ↔ desk link protocol
@@ -148,10 +150,12 @@ will live in `bridge/link.mjs` (Phase 9), and the same rule applies.
 ## 7. Non-negotiable project rules
 
 **Safety (runtime)**
-- Read-only by default. Sending, deleting, paying, posting, sharing, shell, file writes and device
-  control need writes enabled — and, once Approve buttons and the guardian exist (Phase 7), the
-  owner's Approve. Per-tool and per-agent exceptions only as agreed at their intent check. Never
-  make writes the default.
+- Laptop control is on by the owner's decision (2026-10-03, answer "a"): AYRA acts on the laptop
+  herself, and exactly four kinds of action wait for the owner's Approve (HUD card, voice, Telegram;
+  2 minutes = no) — spending money, sending or posting as the owner, deleting for good, passwords and
+  security settings (`gate.mjs` `ASK`). Changing that list, or adding a category that runs without
+  asking, needs the owner. The kill switch (Esc, `/stop`) must always work. `AYRA_ALLOW_WRITES=0`
+  turns writes off. Agents get their own rules at their intent check.
 - The gate in `bridge/gate.mjs` (`decide()`) is the single authority for every tool, cloud and desk
   alike. Classify every new tool there explicitly and add a test in `test/gate.test.mjs`; no
   blanket allows.
