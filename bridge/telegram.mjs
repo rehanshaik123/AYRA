@@ -12,7 +12,10 @@
  *
  * It is one conversation on the shared brain (channel 'telegram', resumed
  * across restarts like the HUD's), with the text persona and no HUD tools —
- * there is no screen or camera on this side.
+ * there is no screen on this side.
+ *
+ * It also carries the owner's Approve (Yes / No buttons under each request, the
+ * message edited to show the outcome) and the kill switch, `/stop`.
  */
 
 import { localTime } from './context.mjs'
@@ -43,6 +46,16 @@ export function chunk(text, size = MAX_MESSAGE) {
   return pieces
 }
 
+/** The text of an Approve request, as the owner reads it on the phone. */
+export const approveText = ({ reason, detail }) =>
+  `🔐 AYRA wants to do something that ${reason}:\n\n${String(detail ?? '').slice(0, 300) || '(no details)'}\n\nAllow it?`
+
+/** `ap:<id>:y` / `ap:<id>:n` — what the buttons send back. */
+export function parseApproval(data) {
+  const m = /^ap:([\w-]+):([yn])$/.exec(String(data ?? ''))
+  return m ? { id: m[1], ok: m[2] === 'y' } : null
+}
+
 /** True only for a message the owner sent in a private chat with the bot. */
 export const fromOwner = (message, ownerId) =>
   message?.chat?.type === 'private' &&
@@ -53,10 +66,14 @@ export const fromOwner = (message, ownerId) =>
  * @param {{ token: string, ownerId: string, brain: ReturnType<import('./brain.mjs').createBrain>,
  *           systemPrompt: string, servers?: Record<string, object>,
  *           audit: ReturnType<import('./audit.mjs').createAudit>,
+ *           approvals?: ReturnType<import('./approvals.mjs').createApprovals>,
+ *           onHalt?: () => void,
  *           request?: (method: string, body?: object, timeoutMs?: number) => Promise<any> }} options
- *   request — how Bot API calls are made; tests pass a fake, the bridge uses the real API
+ *   approvals — the shared Approve requests: shown here with Yes / No buttons
+ *   onHalt    — the kill switch, for `/stop`
+ *   request   — how Bot API calls are made; tests pass a fake, the bridge uses the real API
  */
-export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {}, audit, request }) {
+export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {}, audit, approvals, onHalt, request }) {
   const call = request ?? botApi
 
   async function botApi(method, body, timeoutMs = 15_000) {
@@ -150,6 +167,53 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
       },
     }))
 
+  /**
+   * Approve requests on the phone. The owner's private chat id is their user
+   * id, so a request can go out even before they have written anything today.
+   * Once answered — here, on the HUD, or by the clock — the message is edited
+   * to say what happened, so the buttons can't be pressed twice.
+   */
+  const asked = new Map() // approval id -> message_id
+  approvals?.subscribe((event) => {
+    if (event.type === 'approve') {
+      call('sendMessage', {
+        chat_id: ownerId,
+        text: approveText(event),
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '✅ Yes', callback_data: `ap:${event.id}:y` },
+            { text: '❌ No', callback_data: `ap:${event.id}:n` },
+          ]],
+        },
+      })
+        .then((sent) => asked.set(event.id, sent?.message_id))
+        .catch((err) => console.warn(`[ayra] telegram: could not send an Approve request — ${err.message}`))
+    }
+    if (event.type === 'approved' && asked.has(event.id)) {
+      const messageId = asked.get(event.id)
+      asked.delete(event.id)
+      const outcome = event.ok
+        ? '✅ Allowed'
+        : event.by === 'timeout'
+          ? '⌛ No answer in time — left it'
+          : '❌ Not allowed'
+      call('editMessageText', { chat_id: ownerId, message_id: messageId, text: outcome }).catch(() => {})
+    }
+  })
+
+  async function handleButton(query) {
+    if (String(query?.from?.id) !== String(ownerId)) {
+      audit.log({ type: 'telegram_ignored', from: query?.from?.id ?? null, chat: 'callback' })
+      return
+    }
+    const choice = parseApproval(query.data)
+    const settled = choice ? approvals?.answer(choice.id, choice.ok, 'telegram') : false
+    await call('answerCallbackQuery', {
+      callback_query_id: query.id,
+      text: settled ? (choice.ok ? 'Allowed' : 'Not allowed') : 'Already answered',
+    }).catch(() => {})
+  }
+
   async function handle(message) {
     if (!fromOwner(message, ownerId)) {
       audit.log({ type: 'telegram_ignored', from: message?.from?.id ?? null, chat: message?.chat?.type ?? null })
@@ -159,6 +223,17 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
     let text = message.text?.trim()
     if (!text) {
       await reply(chatId, 'I can only read text messages for now. Voice notes are coming soon!')
+      return
+    }
+    // The kill switch: everything waiting is declined, every answer stopped.
+    if (text === '/stop') {
+      // Drop the turn being stopped and anything queued behind it, so the
+      // phone gets one "Stopped." rather than a late error afterwards.
+      if (turn) clearInterval(turn.typing)
+      turn = null
+      waiting.length = 0
+      onHalt?.()
+      await reply(chatId, 'Stopped. Nothing is running now.')
       return
     }
     if (text === '/start') text = 'Hi!'
@@ -180,12 +255,21 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
     let backoff = 1_000
     while (!stopped) {
       try {
-        const updates = await call('getUpdates', { offset, timeout: 50, allowed_updates: ['message'] }, 65_000)
+        const updates = await call(
+          'getUpdates',
+          { offset, timeout: 50, allowed_updates: ['message', 'callback_query'] },
+          65_000,
+        )
         backoff = 1_000
         for (const update of updates) {
           offset = update.update_id + 1
           if (update.message) {
             await handle(update.message).catch((err) => console.warn(`[ayra] telegram message failed: ${err.message}`))
+          }
+          if (update.callback_query) {
+            await handleButton(update.callback_query).catch((err) =>
+              console.warn(`[ayra] telegram button failed: ${err.message}`),
+            )
           }
         }
         next()
@@ -220,6 +304,10 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
     stop() {
       stopped = true
       conversation?.close()
+    },
+    /** Stop the answer in flight (the kill switch). */
+    interrupt() {
+      conversation?.interrupt()
     },
   }
 }

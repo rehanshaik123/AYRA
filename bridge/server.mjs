@@ -25,6 +25,7 @@ import { displayServer } from './panels.mjs'
 import { sourcesCard } from './sources.mjs'
 import { relayListening } from './listen.mjs'
 import { serveFace } from './face.mjs'
+import { createApprovals } from './approvals.mjs'
 import { homedir } from 'node:os'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -51,11 +52,13 @@ const ORIGINS = createOriginCheck({
 })
 
 /**
- * Writes stay off. AYRA's tools today only read the web, so nothing here needs
- * them; the gate keeps the switch for the phase that brings laptop control,
- * which arrives with its own guardian and Approve step (PLAN.md).
+ * Laptop control is on — the owner's decision (2026-10-03, answer "a"): AYRA
+ * runs PowerShell and edits files herself, every call reviewed by the gate, and
+ * the four things the owner chose (spending money, sending as them, deleting for
+ * good, passwords and security) wait for their Approve. AYRA_ALLOW_WRITES=0
+ * turns it off for this process — reading only, like before Phase 5.
  */
-const ALLOW_WRITES = false
+const ALLOW_WRITES = env('ALLOW_WRITES', '1') !== '0'
 
 /**
  * The orchestrator model. Override with AYRA_MODEL to trade quality for pace
@@ -114,6 +117,8 @@ function everConnected() {
 const CONNECTORS = env('CONNECTORS', 'none')
 const GATE = createGate({
   allowWrites: ALLOW_WRITES,
+  // The laptop's files and shell (Phase 5); writes add PowerShell and edits.
+  laptop: true,
   connectors: CONNECTORS.toLowerCase() === 'none' ? [] : CONNECTORS.split(','),
   everConnected: everConnected(),
 })
@@ -618,7 +623,11 @@ console.log(
   `[ayra] speech ${elevenKey() ? `via ElevenLabs, voice ${VOICE_ID}` : 'using browser fallback voice'}`,
 )
 console.log(`[ayra] model ${MODEL} · effort ${EFFORT}`)
-console.log(`[ayra] tools: web search, web pages, the HUD display · writes off`)
+console.log(
+  ALLOW_WRITES
+    ? '[ayra] tools: web, the HUD display, the laptop (PowerShell, files) · asks first: money, sending as you, deleting for good, passwords/security'
+    : '[ayra] tools: web, the HUD display, reading the laptop\'s files · writes off (AYRA_ALLOW_WRITES=0)',
+)
 console.log(
   `[ayra] connectors (read-only): ${GATE.allowedConnectors.join(', ') || 'none'}` +
     (GATE.excludedConnectors.length
@@ -638,6 +647,25 @@ console.log(
 // One audit log for every channel, so lines from the HUD and Telegram stay in order.
 const AUDIT = createAudit()
 
+/**
+ * The owner's Approve, shared by every channel: an ask from any conversation
+ * shows on every HUD and on Telegram, and the first answer wins. See approvals.mjs.
+ */
+const APPROVALS = createApprovals({ audit: AUDIT })
+
+/** Every open conversation, so the kill switch can stop them all at once. */
+const CONVERSATIONS = new Set()
+
+/**
+ * The kill switch — Esc on the HUD, `/stop` on Telegram. Everything waiting for
+ * an Approve is declined and every answer in flight is stopped.
+ */
+function halt(by) {
+  const declined = APPROVALS.halt(by)
+  for (const c of CONVERSATIONS) c.interrupt()
+  console.log(`[ayra] stopped by ${by}${declined ? ` — ${declined} waiting action(s) declined` : ''}`)
+}
+
 const BRAIN = createBrain({
   model: MODEL,
   effort: EFFORT,
@@ -651,6 +679,7 @@ const BRAIN = createBrain({
   // An idle conversation's Claude process closes after this long and wakes on
   // the next question — light on the owner's laptop (the owner's "3 yes").
   sleepMinutes: Number(env('SLEEP_MINUTES', 10)),
+  approve: (request) => APPROVALS.ask(request),
 })
 
 /**
@@ -664,15 +693,20 @@ const TELEGRAM_OWNER = env('TELEGRAM_OWNER_ID')
 if (env('TELEGRAM', 'on') === 'off') {
   console.log('[ayra] telegram: off for this process (AYRA_TELEGRAM=off)')
 } else if (TELEGRAM_TOKEN && TELEGRAM_OWNER) {
-  startTelegram({
+  const telegram = startTelegram({
     token: TELEGRAM_TOKEN,
     ownerId: TELEGRAM_OWNER,
     brain: BRAIN,
     systemPrompt: TEXT_PROMPT,
-    // No screen on the phone, so no display tool: web search and web pages only.
+    // No screen on the phone, so no display tool; the laptop's tools come with
+    // the brain itself.
     servers: {},
     audit: AUDIT,
+    // Approve buttons on the phone, and /stop.
+    approvals: APPROVALS,
+    onHalt: () => halt('telegram'),
   })
+  CONVERSATIONS.add(telegram)
 } else if (TELEGRAM_TOKEN) {
   console.log('[ayra] telegram: token set but AYRA_TELEGRAM_OWNER_ID is missing — channel off')
 }
@@ -741,6 +775,12 @@ wss.on('connection', (socket, req) => {
     // face reconnect, which opens a fresh conversation.
     onEnd: () => socket.close(),
   })
+  CONVERSATIONS.add(conversation)
+
+  // Every Approve request reaches this screen too, and anything already
+  // waiting is shown at once — a reload must not hide a question.
+  const unsubscribe = APPROVALS.subscribe((event) => send(event))
+  for (const request of APPROVALS.pending()) send({ type: 'approve', ...request })
 
   socket.on('message', (raw) => {
     let msg
@@ -758,10 +798,18 @@ wss.on('connection', (socket, req) => {
 
     // The owner has started speaking: wake a sleeping brain while they talk.
     if (msg.type === 'warm') conversation.warm()
+
+    // The owner's answer to an Approve card, or the kill switch.
+    if (msg.type === 'approval' && typeof msg.id === 'string') {
+      APPROVALS.answer(msg.id, msg.ok === true, 'hud')
+    }
+    if (msg.type === 'halt') halt('hud')
   })
 
   socket.on('close', () => {
     console.log('[ayra] client disconnected')
+    unsubscribe()
+    CONVERSATIONS.delete(conversation)
     conversation.close()
   })
 })
