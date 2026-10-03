@@ -524,6 +524,11 @@ const handleRequest = async (req, res) => {
             : 'webm'
       const form = new FormData()
       form.append('model_id', 'scribe_v1')
+      // The owner's language, not a guess per clip. Left to detect it, Scribe
+      // heard the owner's accent as Hindi and wrote "Hey AYRA" in Devanagari
+      // ("ए आएरा"), which no wake phrase matches — so on standby AYRA silently
+      // ignored everything (2026-10-03).
+      form.append('language_code', IDENTITY.language.split('-')[0] || 'en')
       form.append(
         'file',
         new Blob([Buffer.concat(chunks)], { type }),
