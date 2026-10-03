@@ -99,6 +99,7 @@ deploy/update.sh       # Phase 4: pull main, install, restart the ayra-core serv
 | `src/lib/bridge.ts` · `brain.ts` · `capabilities.ts` · `anthropic.ts` | WebSocket client · bridge vs direct mode · `/health` probe · direct mode (not used by default) |
 | `src/lib/hands.ts` · `camera.ts` · `clap.ts` · `audio.ts` · `music.ts` · `sfx.ts` | Hand gestures · camera · clap-to-start · mic analyser · music · sound effects |
 | `src/ui/*` · `src/scene/*` · `src/store.ts` · `src/index.css` | HUD, blades, boot, sanitiser (`sanitise.ts`), diagnostics (D) · Three.js reactor · app state · all styles incl. `.hud-*` |
+| `src/ui/Avatar.tsx` · `src/ui/avatar.css` · `src/lib/avatar.ts` | **The avatar face** (default; F switches to the 3D reactor): the SVG character · her poses and animations · which pose for which phase, lip-sync, blinking (tested in `test/avatar.test.mjs`) |
 | `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test |
 | `test/*.test.mjs` | Unit tests, run by `npm test` |
 | `index.html` · `vite.config.ts` | Page shell + strict CSP · dev server, `%AYRA_WORDMARK%` title |
@@ -177,6 +178,8 @@ core ↔ desk link protocol is defined in `bridge/link.mjs` (Phase 5), and the s
 - Keep `LICENSE` and the upstream copyright (MIT); credit adewaskar/jarvis in the README.
 - `public/audio/` tracks came with the upstream demo — clear the rights or replace them before any
   public or commercial use.
+- The avatar face is fan art of Orihime Inoue (Bleach), drawn at the owner's request for personal
+  use. Keep it out of anything commercial; replace it if the rights holder objects.
 - Official APIs first, and respect each service's terms. Unofficial automation (WhatsApp Web,
   scraping portals, LinkedIn browsing) only with the owner's explicit OK and the risk noted in
   PROGRESS.md.

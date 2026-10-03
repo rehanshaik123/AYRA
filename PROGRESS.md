@@ -3,11 +3,11 @@
 ## ▶ Continue here
 
 - **Plan:** redesigned 2026-10-02 — goals in `docs/VISION.md`, design in `docs/ARCHITECTURE.md` (cloud core + laptop desk), working agreement in CLAUDE.md §2
-- **Phase:** 4 — Always-on core (thin slice: an idea check from the phone with the laptop shut) · not started · Phases 0–3 ✅; `phase-3-anywhere` (Telegram + the redesign docs) waits for the owner's OK to merge into `main`
-- **Next:** Phase 4 intent check — restate the goal, then settle the idea-check answer format, the host (D1), Tailscale (D2) and three test ideas → then 4.1
-- **Blockers:** none for Phase 4. Laptop only: the page file is still off — the HUD in Chrome waits on it (5.6–5.7)
-- **Waiting on owner:** merge OK for Phase 3 · "go" for Phase 4's intent check · page file on → then a HUD re-test in Chrome
-- **Health:** QA 2026-10-03 ([docs/TEST-REPORT.md](docs/TEST-REPORT.md)): 50 / 51 pass — build ✓ · lint 0 · `npm test` 39/39 · API 16/16 · brain 16/16 · Telegram 8/8 · Gmail/Calendar/Drive ✓ · Chrome browsing ✗ unattended · HUD ✓ in-app, untested in Chrome
+- **Phase:** 4 — Always-on core · branch `phase-4-core` · 4.8 (avatar face) done; Phases 0–3 ✅ merged to `main` (2026-10-03)
+- **Next:** the owner evaluates the avatar in Chrome; Phase 4 intent check (asked 2026-10-03) — settle the idea-check answer format, the host (D1), Tailscale (D2) and three test ideas → then 4.1
+- **Blockers:** none. The page file is on; the HUD now works in the owner's Chrome
+- **Waiting on owner:** avatar verdict · repo public or private (the avatar is fan art; VISION/PROGRESS hold personal details) before pushing 4.8 · Phase 4 intent-check answers
+- **Health:** QA 2026-10-03 ([docs/TEST-REPORT.md](docs/TEST-REPORT.md)): 50 / 51 pass; since then build ✓ · lint 0 · `npm test` 47/47 · smoke ✓ · HUD ✓ in Chrome (voice turn live) · avatar ✓ all 9 poses · Chrome browsing ✗ unattended
 
 ## Log — one line per task (what changed — why)
 
@@ -41,6 +41,8 @@
 - 2026-10-02 · 3.2+ Owner confirmed "Starboy" is their account, and asked for emoji: `TEXT_PROMPT` now allows usually one, never more than two, none in serious moments; the voice prompt stays emoji-free (TTS would read them), guarded by a test (39/39). Live check: 🎉 on exam news, none on a stressed message.
 - 2026-10-02 · Redesign (docs only): new `docs/VISION.md` (the owner's goals in their words) and `docs/ARCHITECTURE.md` (cloud core + laptop desk; Anthropic terms and prices checked), CLAUDE.md's working agreement replaces "the owner decides everything", PLAN.md rebuilt (Phase 4 thin slice first, every old task mapped, nothing dropped) — the old plan was a generic feature list that stopped for small things and wasn't built around the owner's needs.
 - 2026-10-03 · QA pass on Phases 0–3 → `docs/TEST-REPORT.md`: 50 of 51 checks pass (API 16/16, brain 16/16, Telegram 8/8, HUD 4/4); the one failure is Chrome browsing unattended (the extension's per-site Allow prompt); 5 small defects queued as task 4.7 — the owner asked for an honest picture of what works before Phase 4.
+- 2026-10-03 · Phase 3 merged to `main`; branch `phase-4-core` started. HUD re-tested in a real Chrome now the page file is on: voice question → web search → panel, all working.
+- 2026-10-03 · 4.8 New avatar face (`src/ui/Avatar.tsx`, `avatar.css`, `src/lib/avatar.ts` + 8 tests): Orihime-style SVG character, nine poses driven by the phase, lip-sync from the voice level, blinking, a snack break when idle; default face, F switches to the reactor (remembered); also fixed the stale "VOICE:" label (QA #3) — the owner asked for a light, cute face because the reactor was heavy (measured 1.55 → 0.63 CPU cores, −190 MB).
 
 ## Findings worth remembering
 
@@ -55,6 +57,8 @@
 - First owner test in Chrome (2026-10-02 16:39) failed: Claude Code exited 0xC0000409 on every HUD connect, and the reactor's WebGL context was lost (blank page). Cause: Windows hit its memory limit — no page file, 15.3 GB RAM, Chrome 5.5 GB + Claude app 2.5 GB, and Vite's dependency re-optimisation took 1.2 GB at start; System log "low virtual memory" at 16:38:58. The same code passes every probe once memory is free. C: has 417 GB free, so a page file costs nothing.
 - Retest 16:56 with memory freed (commit 8.8/15.3 GB): the brain starts cleanly ("14 MCP servers available"), but Chrome now reports `GL_VENDOR = Disabled` — its GPU process crashed in the low-memory events and Chrome keeps WebGL off until it is fully restarted.
 - QA 2026-10-03: Gmail, Calendar and Drive reads work through AYRA (their first real use). The Claude extension only shows tabs AYRA opened itself, and asks a person to "Allow" every new site — unattended browsing times out (T13). Chrome was restarted 2026-10-02 17:50 (3D back); the page file is still off.
+- Face cost, measured 2026-10-03 in a visible Chrome window (separate profile): 3D reactor ≈ 1.55 CPU cores, ≈ 1,060 MB for the Chrome instance, and it renders even behind the boot screen; avatar ≈ 0.63 cores, ≈ 870 MB. Both 48 fps (the display's rate). What's left in avatar mode is mostly the per-frame level pump and speech recognition. The Claude app's in-app browser throttles hidden panes, so measure in a visible window.
+- The GitHub repo is public (2026-10-03): docs there include personal details (VISION.md, the owner's Telegram ID in this log), and the avatar is fan art.
 - The Claude app's Terminal panel can't run commands here (its shell-integration script is missing); start AYRA for the owner with a minimized `cmd /c title AYRA & npm start` window instead.
 
 ## Known issues

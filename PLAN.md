@@ -86,8 +86,13 @@ Telegram off on the laptop at cut-over.
       Check: `/log` shows today's entries; README matches what's real.
 - [ ] 4.7 Small fixes from the QA pass ([docs/TEST-REPORT.md](docs/TEST-REPORT.md) #3–7): the HUD
       voice label, the "systems" count, the interrupt wording, stale `decideTool()` pointers, Vite
-      re-optimising on a port change.
+      re-optimising on a port change. (#3, the voice label, fixed with 4.8.)
       Check: each defect re-tested and gone.
+- [x] 4.8 The avatar face (owner's request, 2026-10-03): the 3D reactor measured heavy (~1.5 CPU
+      cores, ~1 GB in Chrome), so AYRA gets an animated character in the middle — Orihime-style
+      fan art in SVG, nine poses (sleep, idle, wave, listen, think, magic, talk with lip-sync, oops,
+      snack), F switches back to the reactor.
+      Check: every phase shows its pose; ~60% less CPU than the reactor; owner evaluates in Chrome.
 
 **Demo:** phone only, laptop shut — check an idea, then `/status`. Until Phase 5 the HUD still runs
 its own brain on the laptop, with Telegram off there.

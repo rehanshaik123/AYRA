@@ -52,6 +52,7 @@ npm run smoke     # sends one question and prints AYRA's answer
 | D | Diagnostics panel |
 | T | One-line audio self-test |
 | G | Hand-gesture control |
+| F | Switch the face: animated avatar (default, light) ↔ 3D reactor (heavy) |
 
 ## AYRA on your phone (Telegram)
 
@@ -146,6 +147,7 @@ src/                   THE FACE (React + Vite, port 5173)
   lib/hands.ts …       Hand tracking, camera, clap-to-start, audio, music, sound effects
   ui/                  HUD, blades (stackable panels), boot animation, diagnostics,
                        sanitise.ts (cleans model-written HTML before it is shown)
+  ui/Avatar.tsx        The avatar face: AYRA as an animated character (poses in lib/avatar.ts)
   scene/               The 3D reactor, orbits and particles (Three.js)
   index.css            All styles, including the .hud-* classes AYRA designs panels with
 scripts/
