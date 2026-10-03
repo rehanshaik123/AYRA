@@ -11,6 +11,7 @@
   "scripts": {
     "start": "node scripts/start.mjs",
     "start:dev": "node scripts/start.mjs --dev",
+    "shortcuts": "node scripts/shortcuts.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
