@@ -24,9 +24,11 @@ import { startTelegram } from './telegram.mjs'
 import { displayServer } from './panels.mjs'
 import { sourcesCard } from './sources.mjs'
 import { relayListening } from './listen.mjs'
+import { serveFace } from './face.mjs'
 import { homedir } from 'node:os'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
 import { renderPage } from './page.mjs'
 
@@ -591,7 +593,25 @@ const wss = new WebSocketServer({
     done(true)
   },
 })
-server.listen(PORT)
+/**
+ * Loopback only. Listening on every interface (the old default) let any device
+ * on the same Wi-Fi reach the brain — and a forged Origin header is one line in
+ * a script, so the origin check alone does not stop that. With laptop control
+ * on, that would be remote control of the laptop. Nothing outside it needs in:
+ * Telegram is outbound polling, and the face is on this machine.
+ */
+server.listen(PORT, '127.0.0.1')
+
+/**
+ * Daily use: the bridge serves the built face itself (face.mjs), so no dev
+ * server runs. `npm start` passes --face; `npm run dev` uses Vite instead.
+ */
+if (process.argv.includes('--face') || env('SERVE_FACE') === '1') {
+  serveFace({
+    dir: join(dirname(fileURLToPath(import.meta.url)), '..', 'dist'),
+    port: Number(env('FACE_PORT', 5173)),
+  })
+}
 
 console.log(`[ayra] ${IDENTITY.name} bridge listening on ws://localhost:${PORT}`)
 console.log(
@@ -628,6 +648,9 @@ const BRAIN = createBrain({
   audit: AUDIT,
   // How long an idle conversation is worth continuing after a reload.
   resumeHours: Number(env('RESUME_HOURS', 6)),
+  // An idle conversation's Claude process closes after this long and wakes on
+  // the next question — light on the owner's laptop (the owner's "3 yes").
+  sleepMinutes: Number(env('SLEEP_MINUTES', 10)),
 })
 
 /**
@@ -732,6 +755,9 @@ wss.on('connection', (socket, req) => {
     }
 
     if (msg.type === 'interrupt') conversation.interrupt()
+
+    // The owner has started speaking: wake a sleeping brain while they talk.
+    if (msg.type === 'warm') conversation.warm()
   })
 
   socket.on('close', () => {
