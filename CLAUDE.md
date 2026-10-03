@@ -63,12 +63,14 @@ npm run build          # type-check + production build (must pass)
 npm run lint           # oxlint (must stay at 0 warnings)
 npm run setup          # preflight: login, SDK binary, identity, ElevenLabs key
 npm run smoke          # one real end-to-end turn; needs a running bridge
+npm run bench          # times five standard questions (first word, done); needs a running bridge
 npm test               # unit tests (gate, wake phrase, identity, avatar, …)
 ```
 
 - A test bridge must not read the owner's Telegram bot:
   `AYRA_BRIDGE_PORT=8788 AYRA_TELEGRAM=off node bridge/server.mjs` (Git Bash), then
-  `AYRA_BRIDGE_PORT=8788 npm run smoke`. To look at the face against a Telegram-off bridge on
+  `AYRA_BRIDGE_PORT=8788 npm run smoke` (or `npm run bench`; add `AYRA_RESUME_HOURS=0` to the
+  bridge for a fresh conversation). To look at the face against a Telegram-off bridge on
   :8787, `preview_start` the `face` entry in `.claude/launch.json` (port 5181).
 - The Claude app's preview pane blocks the microphone — voice needs a real Chrome/Edge window. Its
   Terminal panel can't run commands on this laptop; start AYRA for the owner in a minimized
@@ -91,7 +93,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/identity.mjs` | Loads identity + `.env.local`; `env('X')` reads `AYRA_X` |
 | `bridge/persona.mjs` · `bridge/context.mjs` | AYRA's personality: `SYSTEM_PROMPT` (voice + HUD) and `TEXT_PROMPT` (Telegram), one character, plus what she can do today · the "[Now: …]" local-time stamp |
 | `bridge/telegram.mjs` | Telegram channel: long polling, owner-only, one question at a time, text persona |
-| `bridge/panels.mjs` | Tool server `ayra`: `display`, `blade`, `probe_url` — what appears on the HUD |
+| `bridge/panels.mjs` · `bridge/sources.mjs` | Tool server `ayra`: `display`, `blade`, `probe_url` — what appears on the HUD · a web search's links turned into a card by the bridge, no model in the way |
 | `bridge/origin.mjs` · `bridge/net.mjs` · `bridge/page.mjs` | Which pages may talk to the bridge · SSRF-safe outbound fetching (use for EVERY server-side fetch) · web pages for blades |
 | `src/App.tsx` · `src/identity.ts` · `src/config.ts` | The face's conductor (boot, phases, voice loop, turns) · identity for the face · the bridge address |
 | `src/lib/bridge.ts` · `capabilities.ts` | WebSocket client to the bridge · `/health` probe (is ElevenLabs there?) |
@@ -101,7 +103,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `src/ui/Hud.tsx` · `Blades.tsx` · `sanitise.ts` | The HUD chrome and transcript · the blades (the one surface for results) · the sanitiser for model-written HTML |
 | `src/ui/Boot.tsx` · `Ignition.tsx` · `Diagnostics.tsx` · `Suggestions.tsx` | Start-up sequence · INITIALISE button · diagnostics (D) · rotating example questions |
 | `src/store.ts` · `src/index.css` | App state · all styles incl. the `.hud-*` design system blades use |
-| `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test |
+| `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` · `bench.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test · `npm run bench` speed table |
 | `test/*.test.mjs` | Unit tests, run by `npm test` |
 | `index.html` · `vite.config.ts` | Page shell + strict CSP · dev server, `%AYRA_WORDMARK%` title |
 | `data/` | AYRA's runtime data (logs, state; later memory) — gitignored, never committed |
@@ -112,7 +114,8 @@ Planned, with their phase: `bridge/db.mjs`, `memory.mjs` (6) · `approvals.mjs`,
 
 Face ↔ brain protocol (WebSocket): face sends `ask {id,text}`, `interrupt`; brain sends
 `ready {servers}`, `text {delta}`, `tool {name}`, `done {text}`, `error {message}`, `blade` — turn
-frames carry `ask: <id>`. Change both sides together or not at all. The core ↔ desk link protocol
+frames carry `ask: <id>`. Inside the bridge the brain also emits `sources {query, links}`, which the
+HUD channel turns into a `blade`. Change both sides together or not at all. The core ↔ desk link protocol
 will live in `bridge/link.mjs` (Phase 9), and the same rule applies.
 
 ## 6. Configuration
@@ -120,11 +123,12 @@ will live in `bridge/link.mjs` (Phase 9), and the same rule applies.
 - **Identity:** `config/identity.json` only. Never hard-code the name, wake words or honorific.
 - **Settings and secrets:** `.env.local` on the laptop (gitignored; template `.env.example`); on the
   server, one settings file readable only by the `ayra` user. The bridge reads `AYRA_*` (`MODEL`
-  default `claude-opus-5-5`, `EFFORT` `medium`, `BRIDGE_PORT` 8787, `ALLOWED_ORIGINS`,
+  default `claude-opus-5-5`, `EFFORT` `low`, `BRIDGE_PORT` 8787, `ALLOWED_ORIGINS`,
   `ALLOW_NO_ORIGIN`, `VOICE_ID`, `DEBUG`, `RESUME_HOURS` — default 6, `TELEGRAM_TOKEN`,
   `TELEGRAM_OWNER_ID`, `TELEGRAM` — `off` disables it, `CONNECTORS` — default `none`) plus
   `ELEVENLABS_API_KEY`. Writes are off in code (`ALLOW_WRITES = false` in server.mjs) until the
-  laptop-hands phase.
+  laptop-hands phase. The bridge sets `ENABLE_TOOL_SEARCH=false` for Claude Code (tools load up
+  front; measured faster).
   Planned: `AYRA_ROLE` (`core` | `desk`), `AYRA_CORE_URL`, `AYRA_LINK_TOKEN`, `AYRA_DATA_DIR`.
 - The face reads only `VITE_BRIDGE_URL` — only `VITE_*` values reach the browser, so never put a
   secret in one.
@@ -206,5 +210,5 @@ will live in `bridge/link.mjs` (Phase 9), and the same rule applies.
    after a deploy, `/status` from the phone.
 3. UI changed → the face loads; voice/mic changes are marked "needs owner check in Chrome".
 4. `npm test` passes, and new logic gets a test in `test/` (node:test; `.ts` files load through tsx).
-5. A change to a turn → its latency measured and noted (§3.6).
+5. A change to a turn → `npm run bench` before and after, the numbers in PROGRESS.md (§3.6).
 6. PLAN.md ticked, one PROGRESS.md line added, "▶ Continue here" updated.

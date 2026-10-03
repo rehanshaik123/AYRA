@@ -2,12 +2,12 @@
 
 ## ▶ Continue here
 
-- **Phase:** 4 — Clean interface · branch `phase-4-clean` (renamed from the unpushed `phase-4-core`; `origin/phase-4-core` is an empty pointer at `main`) · 4.1 avatar ✅ · 4.2 cleanup ✅ · 4.3 docs ✅ · Phases 0–3 ✅ on `main`
+- **Phase:** 4 — Clean interface · branch `phase-4-clean` (renamed from the unpushed `phase-4-core`; `origin/phase-4-core` is an empty pointer at `main`) · 4.1 avatar ✅ · 4.2 cleanup ✅ · 4.3 docs ✅ · 4.4 speed ✅ · Phases 0–3 ✅ on `main` · branch on GitHub
 - **What AYRA is right now:** avatar + ElevenLabs Lily + web search (WebSearch, WebFetch, cards on the HUD), on the HUD and on Telegram; no connectors, no Chrome, no files, writes off
-- **Next:** 4.4 Speed (measure five standard questions, then cut the lag) → 4.5 voice fallback when ElevenLabs runs out → 4.6 small fixes → 4.7 owner test in Chrome → merge
-- **Waiting on owner:** OK on the new phase order (PLAN.md) · OK to push `phase-4-clean` (local commits; the repo is public) · VISION's guesses (PLAN.md, Vision)
+- **Next:** the owner's live demo in Chrome → 4.5 voice fallback when ElevenLabs runs out → 4.6 small fixes → 4.7 owner test → merge
+- **Waiting on owner:** a faster search provider (4.4b, a new account) · VISION's guesses (PLAN.md, Vision)
 - **Blockers:** none
-- **Health (2026-10-03, after the cleanup):** build ✓ (JS 411 KB) · lint 0 · `npm test` 47/47 · smoke ✓ 6.9 s · a search turn ✓ but 35 s (→ 4.4) · face ✓ in the preview pane · voice needs the owner's Chrome (4.7)
+- **Health (2026-10-03, after 4.4):** build ✓ · lint 0 · `npm test` 51/51 · smoke ✓ · bench: chat 1.6 s, quick search 8.9 s, page 5.1 s to the first word · boot 2.8 s to ready · voice needs the owner's Chrome (4.7)
 
 ## Log — one line per task (what changed — why)
 
@@ -46,6 +46,7 @@
 - 2026-10-03 · Clean interface (owner: "first an interface which only does web search", answers 1a–8b): the old Phase 4 becomes Phase 8; this is the new Phase 4 on `phase-4-clean`; the avatar (old 4.8) is now 4.1.
 - 2026-10-03 · 4.2 Removed the 3D reactor, camera + hand gestures, Chrome control (`chrome.mjs`), the camera tool (`vision.mjs`), interface effects (`ui.mjs`, `Effects.tsx`), music + the upstream mp3s, clap-to-start, Kokoro, direct mode (`anthropic.ts`, `lib/brain.ts`), the unmounted `Panels.tsx`, the `/file` endpoint and the writes mode; AYRA gets WebSearch/WebFetch/ToolSearch only, the owner's MCP servers aren't loaded, `AYRA_CONNECTORS` defaults to none, the gate no longer blanket-allows the deleted server names (+2 tests), the persona says what she can do today, the SYSTEMS rail hides removed connectors, the CSP drops the wasm/eval/blob-worker allowances — a clean central interface to add features back one at a time. brain.mjs and telegram.mjs untouched.
 - 2026-10-03 · 4.2 deps: removed three, @react-three/*, @mediapipe/tasks-vision, kokoro-js, @picovoice/*, @anthropic-ai/sdk, @types/three — nothing imports them; node_modules 1.1 GB → 409 MB, face bundle 411 KB.
+- 2026-10-03 · 4.4 Speed: new `npm run bench` (five standard questions, first word / speech / done); measured, then cut — `ENABLE_TOOL_SEARCH=false` (no ToolSearch hop), effort `low` (`medium` thought ~4.5 s first; Sonnet 5.5 measured no faster, so Opus stays), the bridge turns a WebSearch's links into the sources card itself (`bridge/sources.mjs` + 4 tests, a `sources` event from brain.mjs, the HUD channel renders it) so the model writes no card, boot 9.2 s → 2.4 s (two beats). First word, before → after: chat 1.8 → 1.6 s · date 1.5 → 0.9 s · quick search 12.7 → 8.9 s (card at 7.1 s) · "put it on screen" 18.6 → 16.1 s · read a page 10.3 → 5.1 s — the owner wants a product with no lag.
 - 2026-10-03 · 4.3 Docs merged: VISION and ARCHITECTURE condensed into PLAN.md (Vision, Target architecture), the QA report's results kept under Findings, REDESIGN finished; `docs/` deleted; README cut to a short GitHub page; PLAN rebuilt from beginning to end (apps → memory → laptop hands with a guardian → cloud core → two homes → proactive → agents) — the owner wanted only CLAUDE.md, PLAN.md and PROGRESS.md and a clear plan.
 
 ## Findings worth remembering
@@ -71,13 +72,15 @@
 - QA pass 2026-10-03 (the full report was `docs/TEST-REPORT.md`, in git at `70dcb46`): 50 of 51 checks passed — bridge API 16/16 (health, origin checks, `/tts` 1.3 s, `/stt` 0.8 s, proxies block localhost, metadata and `file://`), brain 16/16 (first words 4.4 s, date, memory across a reload, barge-in, web, Gmail/Calendar/Drive reads, safety refusals, prompt injection explained not obeyed), Telegram 8/8, HUD 4/4, secrets never in logs. The failure: Chrome browsing unattended (the extension's per-site "Allow") → Phase 7 gives AYRA her own Chrome instead. Defects #3 voice label, #4 "none linked", #6 stale docs are fixed; #5 and #7 are task 4.6.
 - After the cleanup (2026-10-03): a simple answer takes 6.9–10.3 s end to end; a search turn 35 s — ToolSearch 3.4 s (the web tools are deferred behind it), WebSearch at 8.6 s, WebFetch at 15.6 s, then the answer. The boot animation alone waits 9.2 s. Baseline for 4.4.
 - The brain's `ready` list names every claude.ai connector on the account even when the gate removed it; server.mjs filters the HUD's copy (brain.mjs left as it was). The image proxy refuses SVG on purpose (scriptable), so an SVG logo shows as a broken image.
+- Speed (4.4): Claude Code's WebSearch runs its own request on the main model and writes a summary — 6–7 s per search no matter what AYRA does; a direct search API is the next big cut (4.4b). Telling the model to "speak first, then draw the card" did not reorder it and made it say "it's on screen" instead of the answer — reverted. Asked outright to "put it on screen", Opus still writes its own card after the automatic one (~5 s). Timings vary ±2 s run to run; compare tables, not single numbers.
+- Vite's dev client creates a `blob:` worker to ping its server after a restart, so the CSP keeps `worker-src 'self' blob:`.
 - ElevenLabs Scribe failing (e.g. credits used up) currently drops every utterance — AYRA goes deaf, not just silent → 4.5.
 - Editing JS with scripts: template literals in the source carry backslash-escaped backticks, so a search string without them silently misses — assert every replacement. Inline `python - <<EOF` scripts break on some quoting; write the script to a file and run that.
 
 ## Known issues
 
 - `index.html` CSP hard-codes `localhost:8787` — must change for phone access (Later: HUD on the phone).
-- Lag: a search turn takes ~35 s and the boot animation 9.2 s → 4.4.
+- A web search still costs 6–7 s inside Claude Code's WebSearch → 4.4b. Asked outright to show results, AYRA draws a second card (~5 s).
 - ElevenLabs out of credits → AYRA can't hear (Scribe) and each sentence waits on a failed request first → 4.5.
 - From the QA pass (task 4.6): an interrupted turn is logged as "The turn failed part way through."; Vite re-optimises on every port change (1.2 GB spike).
 - AYRA may still offer things she can't do yet; the persona now tells her to say "not connected yet" — watch for it in 4.7.

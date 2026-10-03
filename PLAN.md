@@ -9,7 +9,8 @@ points, wait for "go") → tasks, each done when its **Check** passes (tick `[x]
 line) → a short demo the owner can try from the phone → merge after the owner's OK. 🧑 = the owner
 does this step; they get click-by-click instructions when it comes up.
 
-**Where we are:** Phase 4 — Clean interface. 4.1–4.3 done (avatar, cleanup, docs); next 4.4 Speed.
+**Where we are:** Phase 4 — Clean interface. 4.1–4.4 done (avatar, cleanup, docs, speed); next 4.5
+voice fallback.
 
 ---
 
@@ -166,12 +167,16 @@ Phase 4 · repo stays public).
       the face loads with no errors.
 - [x] 4.3 Docs merged into CLAUDE.md, PLAN.md, PROGRESS.md and a short README.
       Check: no other `.md` files left in the repo.
-- [ ] 4.4 Speed — no lag. Measure five standard questions (chat, date, search, search + page,
-      Telegram) for time to first word and to the full answer; then cut: web tools loaded up front
-      (no ToolSearch hop, measured 3.4 s), boot sequence 9 s → about 2 s, the session warmed before
-      the first question, and the model/effort choice shown to the owner with numbers (Opus 5.5 vs
-      Sonnet 5.5). Today: a chat answer 6.9 s, a search turn 35 s.
-      Check: a before/after table; first spoken word ≤ 3 s for chat; a search answer starts ≤ 12 s.
+- [x] 4.4 Speed — no lag. `npm run bench` times five standard questions. Cut: web tools loaded up
+      front (no ToolSearch hop), effort `low` (Opus 5.5 kept — Sonnet 5.5 measured no faster), the
+      bridge puts search sources on screen itself the moment a search returns (`sources.mjs`, no
+      card for the model to write), boot 9.2 s → 2.4 s.
+      Check ✓: chat first word 1.6 s, date 0.9 s, quick search 8.9 s (sources on screen 7.1 s), read
+      a page 5.1 s; "put it on screen" 16.1 s — Opus still draws its own card when asked outright.
+- [ ] 4.4b 🧑 Faster web search: the built-in WebSearch costs ~6–7 s per search because it runs its
+      own request on the main model. A search API (Brave Search, free tier, or similar) answers in
+      about a second — a new account and key, so the owner's call.
+      Check: a quick search's first word ≤ 5 s.
 - [ ] 4.5 A voice that never goes silent or deaf: when ElevenLabs refuses (free credits used up, key
       wrong), speaking switches to the browser voice and hearing to the browser's recogniser for the
       rest of the session, with one note on screen.
@@ -391,7 +396,7 @@ Nothing the owner asked for is dropped.
 |---|---|---|
 | Q1 | How should AYRA address you? | ✅ "boss" (2026-10-02) |
 | Q2 | AYRA's voice? | ✅ ElevenLabs Lily `pFZP5JQG7iQjIQuC4Bku`; excited, a little flirty |
-| Q3 | Model? | `claude-opus-5-5`, effort `medium` today; revisited with numbers in 4.4 (speed) |
+| Q3 | Model? | ✅ `claude-opus-5-5`, effort `low` (4.4: Sonnet 5.5 measured no faster; `medium` thought ~4.5 s before speaking) |
 | Q4 | Telegram as the phone channel? | ✅ @Ayra_rehan_bot, account "Starboy" |
 | Q5 | Voice-note transcription? | ✅ ElevenLabs Scribe |
 | Q6 | Keep the laptop awake while out? | ✅ No — the cloud core will be always on |
@@ -402,6 +407,8 @@ Nothing the owner asked for is dropped.
 | D3 | What each tool and agent may do alone | Open — at each intent check |
 | D4 | LinkedIn beyond posting, WhatsApp | Open — at their intent checks, risks written down |
 | D5 | Guardian rules and hands scope | Open — Phase 7 intent check |
+| D6 | A faster web search provider (4.4b) | Open — a new account (Brave Search free tier, my pick) |
+| Q9 | Phase order and pushing | ✅ apps → memory → hands (owner, 2026-10-03: "1a"); push `phase-4-clean` ("2a") |
 
 ## Risks
 
