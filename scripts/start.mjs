@@ -5,48 +5,13 @@
  * Two long-running processes normally mean two terminals. This launcher spawns
  * both as children, tags their output so you can tell them apart, and shuts
  * them down together on Ctrl-C — no extra dependency, just Node.
- *
- * Pass --writes to allow JARVIS to take real actions (drive the phone, the
- * browser, send things): `npm start -- --writes`.
  */
 
 import { spawn } from 'node:child_process'
 import process from 'node:process'
-import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 
 const IDENTITY = JSON.parse(readFileSync('config/identity.json', 'utf8'))
-
-/**
- * Put MediaPipe's WebAssembly where the page can actually load it.
- *
- * Hand tracking needs a WASM runtime, and the usual recipe fetches it from a
- * CDN. That fails here twice over. The page's CSP names no CDN in `script-src`,
- * and the runtime arrives as a script — so it is blocked, and the failure
- * surfaces as gesture control simply never starting. And a CDN import is a live
- * supply-chain dependency: executable code, re-resolved on every load, that we
- * do not control and cannot pin against being changed under us.
- *
- * Copying it out of node_modules solves both. It is served from our own origin,
- * so `'self'` covers it; and it is the exact bytes of the version in the
- * lockfile. It stays out of git — 34 MB of build output does not belong in a
- * repository — and is re-copied whenever it is missing, which costs nothing
- * after the first run.
- */
-function vendorWasm() {
-  const from = 'node_modules/@mediapipe/tasks-vision/wasm'
-  const to = 'public/mediapipe'
-  if (!existsSync(from)) return // gesture control is optional; carry on without it
-  if (existsSync(`${to}/vision_wasm_internal.wasm`)) return
-  try {
-    mkdirSync(to, { recursive: true })
-    cpSync(from, to, { recursive: true })
-    console.log('  vendored the hand-tracking runtime into public/mediapipe.')
-  } catch (err) {
-    console.warn(`  could not vendor the hand-tracking runtime: ${err.message}`)
-  }
-}
-
-const writes = process.argv.includes('--writes')
 
 // A dim label per process, so the interleaved logs stay readable.
 const paint = (tag, colour) => (line) =>
@@ -99,21 +64,19 @@ process.on('SIGTERM', () => shutdown(0))
  *
  * The bridge only trusts WebSocket origins on localhost:5173-5199 and
  * 4173-4199, which is the right default — a socket that any local page can open
- * is a socket that drives every MCP server on the machine. But a launcher that
- * assigns a port outside that range produces the single most confusing failure
- * this project has: the interface loads, the reactor spins, the microphone
+ * is a socket that drives AYRA's brain. But a launcher that assigns a port
+ * outside that range produces the single most confusing failure this project
+ * has: the interface loads, the avatar moves, the microphone
  * hears you, and the brain answers nothing, because the handshake is being 403'd
  * somewhere neither half reports. Passing the port through closes that gap
  * without widening what the bridge trusts by default.
  */
 const port = process.env.PORT
-const bridgeEnv = writes ? { AYRA_ALLOW_WRITES: '1' } : {}
+const bridgeEnv = {}
 if (port) {
   bridgeEnv.AYRA_ALLOWED_ORIGINS = `http://localhost:${port},http://127.0.0.1:${port}`
   console.log(`  serving the face on port ${port}; the bridge will accept it.\n`)
 }
-
-vendorWasm()
 
 console.log(`\n${IDENTITY.wordmark} starting — the brain and the face.\n`)
 run('bridge', process.execPath, ['bridge/server.mjs'], '36', bridgeEnv)

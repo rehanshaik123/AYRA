@@ -3,9 +3,6 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useStore, accentFor, type Phase } from '../store'
 import { Suggestions } from './Suggestions'
 import { BladeSweep, Blades } from './Blades'
-import { Effects } from './Effects'
-import { Pointer } from './Pointer'
-import { GestureGuide } from './GestureGuide'
 import { IDENTITY } from '../identity'
 
 const statusText: Record<Phase, string> = {
@@ -156,25 +153,9 @@ export function Hud() {
   const error = useStore((s) => s.error)
   const level = useStore((s) => s.level)
   const voice = useStore((s) => s.voice)
-  const bootNote = useStore((s) => s.bootNote)
-  const gestures = useStore((s) => s.gestures)
-  const looking = useStore((s) => s.looking)
-  const ui = useStore((s) => s.ui)
 
-  // accentFor folds JARVIS's overrides in over the phase colour, so one
-  // variable on the root carries a theme change into every .hud-* rule without
-  // a single component knowing a theme exists.
-  const colour = accentFor(phase, ui)
-
-  useEffect(() => {
-    // The ground has to be set on the document, not painted here: the HUD sits
-    // above the 3D scene, so a background drawn inside it would cover the
-    // reactor rather than sit behind it. --bg is what html, body, #root and the
-    // boot screen all pin themselves to.
-    const root = document.documentElement
-    if (ui.background) root.style.setProperty('--bg', ui.background)
-    else root.style.removeProperty('--bg')
-  }, [ui.background])
+  // One variable on the root carries the phase colour into every .hud-* rule.
+  const colour = accentFor(phase)
 
   return (
     <div className="hud" style={{ ['--accent' as string]: colour }}>
@@ -189,42 +170,31 @@ export function Hud() {
       <Corner at="br" />
 
       <header className="hud-top">
-        {ui.chrome.brand && (
-          <div className="brand">
-            <span className="brand-mark">{IDENTITY.wordmark}</span>
-            <span className="brand-sub">{IDENTITY.tagline}</span>
-          </div>
-        )}
+        <div className="brand">
+          <span className="brand-mark">{IDENTITY.wordmark}</span>
+          <span className="brand-sub">{IDENTITY.tagline}</span>
+        </div>
 
         <div className="status">
           <span className="dot" />
-          <span className="status-text">
-            {/* bootNote is the voice-model download readout. It is only ever
-                the right thing to show during boot — as a general fallback a
-                note that never got cleared (a stuck 'voice 97%') sits over
-                LISTENING and PROCESSING for the rest of the session. */}
-            {phase === 'boot' && bootNote ? bootNote : statusText[phase]}
-          </span>
+          <span className="status-text">{statusText[phase]}</span>
         </div>
       </header>
 
       {/* Left rail: which integrations are live */}
-      {ui.chrome.systems && (
-        <aside className="rail rail-left">
-          <div className="rail-title">SYSTEMS</div>
-          {connected.length === 0 && <div className="rail-item dim">none linked</div>}
-          {connected.map((c) => (
-            <div key={c} className="rail-item">
-              <span className="tick" />
-              {c}
-            </div>
-          ))}
-          <div className="rail-item">
+      <aside className="rail rail-left">
+        <div className="rail-title">SYSTEMS</div>
+        {connected.map((c) => (
+          <div key={c} className="rail-item">
             <span className="tick" />
-            Web
+            {c}
           </div>
-        </aside>
-      )}
+        ))}
+        <div className="rail-item">
+          <span className="tick" />
+          Web
+        </div>
+      </aside>
 
       {/* Right rail: live telemetry, mostly for flavour */}
       <aside className="rail rail-right">
@@ -236,7 +206,7 @@ export function Hud() {
       </aside>
 
       <AnimatePresence>
-        {activeTool && ui.chrome.toolBadge && (
+        {activeTool && (
           <motion.div
             className="tool-badge"
             // Anchored to the TOP of the frame, not the middle. The old home was
@@ -262,30 +232,28 @@ export function Hud() {
       </AnimatePresence>
 
       {/* Conversation log — last few turns, fading upward */}
-      {ui.chrome.transcript && (
-        <div className="log">
-          <AnimatePresence initial={false}>
-            {turns.slice(-4).map((t) => (
-              <motion.div
-                key={t.id}
-                className={`log-line log-${t.role}`}
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ type: 'spring', stiffness: 320, damping: 32 }}
-              >
-                <span className="log-who">{t.role === 'user' ? 'YOU' : IDENTITY.name}</span>
-                {/* Only the assistant's half decodes. What the user said was
-                    never transmitted from anywhere — dressing it up as machine
-                    output would be a lie about where the words came from. */}
-                <span className="log-text">
-                  {t.role === 'assistant' ? <DecodeText text={t.text} /> : t.text}
-                </span>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
-      )}
+      <div className="log">
+        <AnimatePresence initial={false}>
+          {turns.slice(-4).map((t) => (
+            <motion.div
+              key={t.id}
+              className={`log-line log-${t.role}`}
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+            >
+              <span className="log-who">{t.role === 'user' ? 'YOU' : IDENTITY.name}</span>
+              {/* Only the assistant's half decodes. What the user said was
+                  never transmitted from anywhere — dressing it up as machine
+                  output would be a lie about where the words came from. */}
+              <span className="log-text">
+                {t.role === 'assistant' ? <DecodeText text={t.text} /> : t.text}
+              </span>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
       <AnimatePresence>
         {caption && (
@@ -300,20 +268,16 @@ export function Hud() {
         )}
       </AnimatePresence>
 
-      {/* The one surface. Panels used to sit alongside this as a second place
-          for things to appear, which meant two places to look and a decision
-          the model had to make on grounds it could not know. Everything renders
-          here now; Panels.tsx is unmounted rather than deleted so the design
-          system it documents stays findable. */}
+      {/* The one surface: everything AYRA shows lands here. */}
       <Blades />
 
-      {ui.chrome.suggestions && <Suggestions />}
+      <Suggestions />
 
       {error && <div className="error">{error}</div>}
 
       <footer className="hud-bottom">
         <span className="hint">
-          say <b>“hey {IDENTITY.name.toLowerCase()}”</b> · <kbd>Space</kbd> to talk · <kbd>G</kbd> hands
+          say <b>“hey {IDENTITY.name.toLowerCase()}”</b> · <kbd>Space</kbd> to talk
           {voice && (
             <>
               {' · '}
@@ -322,21 +286,6 @@ export function Hud() {
           )}
         </span>
       </footer>
-
-      {/* Last, so a flash or a tear reads as being on the glass rather than
-          underneath the chrome. It is pointer-events: none and unmounts the
-          instant it finishes. */}
-      <Effects />
-
-      {/* Above even the effects: the reticle shows where a press will land, and
-          a press that lands under a flourish is a press you cannot aim. */}
-      <Pointer />
-      {(gestures || looking) && (
-        <div className="hands-live">
-          {looking ? `LOOKING — ${looking.toUpperCase()}` : 'CAMERA ON · G TO STOP'}
-        </div>
-      )}
-      <GestureGuide live={gestures} />
     </div>
   )
 }

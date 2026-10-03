@@ -5,12 +5,9 @@
  * of conversation over a WebSocket. The browser stays the face and the voice;
  * this process is the brain and the hands.
  *
- * Two things this buys over calling the Claude API from the browser:
- *   1. No API key. It authenticates exactly the way `claude` does, off your
- *      existing login, and bills to that same account.
- *   2. Every MCP server in your Claude Code config is available, including the
- *      local stdio ones a browser could never reach — higgsfield, elevenlabs,
- *      android, playwright, palmier-pro and the rest.
+ * No API key: it authenticates exactly the way `claude` does, off the owner's
+ * existing login. AYRA's tools today are web search, reading web pages and the
+ * HUD's display; everything else arrives one tool at a time (PLAN.md).
  *
  *   node bridge/server.mjs
  */
@@ -18,20 +15,17 @@
 // First, so .env.local is loaded before anything below reads the environment.
 import { IDENTITY, env } from './identity.mjs'
 import { SYSTEM_PROMPT, TEXT_PROMPT } from './persona.mjs'
-import { createGate, DEFAULT_CONNECTORS } from './gate.mjs'
+import { createGate } from './gate.mjs'
 import { WebSocketServer } from 'ws'
 import { createBrain } from './brain.mjs'
 import { createOriginCheck } from './origin.mjs'
 import { createAudit } from './audit.mjs'
 import { startTelegram } from './telegram.mjs'
 import { displayServer } from './panels.mjs'
-import { uiServer } from './ui.mjs'
-import { chromeAvailable, chromeServer } from './chrome.mjs'
-import { visionServer } from './vision.mjs'
-import { homedir, tmpdir } from 'node:os'
-import { readFileSync, realpathSync } from 'node:fs'
-import { readFile, realpath, stat } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
+import { sourcesCard } from './sources.mjs'
+import { homedir } from 'node:os'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
 import { renderPage } from './page.mjs'
 
@@ -54,17 +48,11 @@ const ORIGINS = createOriginCheck({
 })
 
 /**
- * Voice is a bad interface for a confirmation dialog: there is no window to
- * click and the model can't pause for one. So the bridge decides.
- *
- * Read-only and generative tools run freely. Anything that writes to disk,
- * runs a shell, or changes the world waits for AYRA_ALLOW_WRITES=1, or for
- * the `--writes` flag — a flag because `VAR=1 node …` is POSIX shell syntax
- * that PowerShell and cmd reject, so `npm run bridge:writes` passes this
- * instead. Start without it, and turn it on once you trust what it will do.
+ * Writes stay off. AYRA's tools today only read the web, so nothing here needs
+ * them; the gate keeps the switch for the phase that brings laptop control,
+ * which arrives with its own guardian and Approve step (PLAN.md).
  */
-const ALLOW_WRITES =
-  env('ALLOW_WRITES') === '1' || process.argv.includes('--writes')
+const ALLOW_WRITES = false
 
 /**
  * The orchestrator model. Override with AYRA_MODEL to trade quality for pace
@@ -76,57 +64,24 @@ const MODEL = env('MODEL', 'claude-opus-5-5')
 /**
  * How hard the model thinks before answering.
  *
- * This was 'low', on the reasoning that a voice assistant is judged on latency
- * — and that is true right up until the answer is thin. Low effort scopes the
- * work tightly to what was literally asked: fewer tool calls, less
- * cross-referencing, no second look. On a model of this tier that is leaving
- * most of it on the table.
- *
- * 'medium' is the compromise worth having here. It reasons and reaches for
- * tools noticeably more than 'low' while still answering inside the window a
- * spoken conversation tolerates. Raise it to 'high' or 'xhigh' when quality
- * matters more than pace; drop back to 'low' when every second of dead air
- * shows. Set explicitly: Opus 5.5 defaults to 'medium' but other models do not.
+ * 'low', measured (PROGRESS.md, task 4.4): on a search question 'medium' spent
+ * about four and a half seconds thinking before it said a word, and the answers
+ * were no better for a spoken reply of two sentences. The owner wants no lag,
+ * so the default is the fastest setting that still answers well; raise it with
+ * AYRA_EFFORT when a task genuinely needs the depth.
  */
-const EFFORT = env('EFFORT', 'medium')
+const EFFORT = env('EFFORT', 'low')
 
 /**
- * Every MCP server Claude Code has configured, read out of its own config.
+ * Every tool loaded up front, none deferred behind ToolSearch.
  *
- * This does two jobs. The HUD wants the names while the boot animation plays,
- * and the agent doesn't emit its init message — and therefore its server
- * list — until the first user message flows through, which is far too late.
- * More importantly, this bridge turns filesystem settings off (see
- * settingSources below) and the SDK stops discovering these servers on its
- * own, so handing them over explicitly is what keeps the local stdio ones —
- * the whole reason the bridge exists — in play.
- *
- * Only the global block and the home-directory project scope, because
- * homedir() is our cwd. That makes the list a close but not exact match for
- * the agent's own: the 'ready' sent on connect comes from here and the second
- * one, sent from the init message a turn later, carries live status. Expect
- * the two to differ, and treat the later one as authoritative.
+ * Claude Code defers built-ins like WebSearch and WebFetch behind a search step
+ * to save context on big tool lists. AYRA's list is five tools, so the saving
+ * is nothing and the cost is a whole extra model round trip — measured at 1–3
+ * seconds — before her first search of a conversation. The SDK hands this
+ * process's environment to Claude Code, so setting it here is enough.
  */
-function configuredServers() {
-  try {
-    const cfg = JSON.parse(
-      readFileSync(join(homedir(), '.claude.json'), 'utf8'),
-    )
-    // Claude Code keys projects with forward slashes on Windows too
-    // ("C:/Users/x"), while homedir() answers with backslashes.
-    const home =
-      cfg.projects?.[homedir()] ?? cfg.projects?.[homedir().replace(/\\/g, '/')]
-    return {
-      ...(cfg.mcpServers ?? {}),
-      // Servers scoped to the home directory apply too, since that's our cwd.
-      ...(home?.mcpServers ?? {}),
-    }
-  } catch {
-    return {}
-  }
-}
-
-const MCP_SERVERS = configuredServers()
+process.env.ENABLE_TOOL_SEARCH ??= 'false'
 
 /**
  * Every claude.ai connector on the owner's account, as Claude Code itself
@@ -149,9 +104,11 @@ function everConnected() {
 
 /**
  * What AYRA may run — the whole policy lives in gate.mjs. AYRA_CONNECTORS
- * lists the claude.ai connectors it may read (comma separated, or "none").
+ * lists the claude.ai connectors it may read (comma separated). Default
+ * "none": the clean interface is web search only, and each connector comes
+ * back as its own step. The rest are removed from the session by the gate.
  */
-const CONNECTORS = env('CONNECTORS', DEFAULT_CONNECTORS.join(','))
+const CONNECTORS = env('CONNECTORS', 'none')
 const GATE = createGate({
   allowWrites: ALLOW_WRITES,
   connectors: CONNECTORS.toLowerCase() === 'none' ? [] : CONNECTORS.split(','),
@@ -179,53 +136,6 @@ function elevenKey() {
 
 // The owner's chosen ElevenLabs voice (config/identity.json); AYRA_VOICE_ID overrides it.
 const VOICE_ID = env('VOICE_ID', IDENTITY.voice.elevenLabsId || 'JBFqnCBsd6RMkjVDRZzb')
-
-/**
- * Where /file is permitted to read from, and how big a read may get.
- *
- * The roots are realpath'd once at boot so the containment check below compares
- * like with like — on macOS os.tmpdir() is a symlink into /private/var, and a
- * string prefix test against the unresolved form would reject every screenshot.
- */
-const IMAGE_TYPES = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.gif': 'image/gif',
-  // .svg is deliberately absent. An SVG is a scriptable document, and this
-  // endpoint serves it from the bridge's own origin — the one origin allowed
-  // to open the agent socket. A picture is not worth that.
-}
-
-const MAX_FILE_BYTES = 25 * 1024 * 1024
-
-const FILE_ROOTS = [
-  homedir(),
-  // Both temp directories, because on macOS os.tmpdir() is the per-user
-  // $TMPDIR under /var/folders while half the tools that take a screenshot
-  // still write it to /tmp. Dropping one of them loses real panels. Windows
-  // has no /tmp — resolving it there would quietly add `<drive>:\tmp`.
-  tmpdir(),
-  ...(process.platform === 'win32' ? [] : ['/tmp']),
-  ...env('FILE_ROOTS', '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
-].map((root) => {
-  try {
-    return realpathSync(root)
-  } catch {
-    return resolvePath(root)
-  }
-})
-
-/** True when `real` sits inside one of the roots, after both are resolved. */
-const withinRoots = (real) =>
-  FILE_ROOTS.some((root) => {
-    const rel = relative(root, real)
-    return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
-  })
 
 // ---------------------------------------------------------------------------
 
@@ -369,7 +279,7 @@ async function proxyRemote(req, res, cors, { kinds, maxBytes, timeoutMs, ranged 
  * bridge serves, so the same allowlist that guards the socket picks the
  * header. A request carrying an Origin we don't know is refused outright —
  * but a request with no Origin at all is served, because an <img src> load
- * (which is how panels fetch screenshots) never sends one.
+ * (which is how blades fetch pictures) never sends one.
  */
 function corsFor(req) {
   const origin = req.headers.origin
@@ -407,51 +317,6 @@ const handleRequest = async (req, res) => {
     const eleven = Boolean(elevenKey())
     res.writeHead(200, { ...cors, 'content-type': 'application/json' })
     return res.end(JSON.stringify({ ok: true, tts: eleven, stt: eleven }))
-  }
-
-  // Serve local image files to the page. Screenshots and generated art land on
-  // disk as absolute paths, and a page served over http can't read file:// —
-  // so the bridge, which can, hands them over.
-  if (req.method === 'GET' && req.url?.startsWith('/file?')) {
-    const asked = new URL(req.url, 'http://x').searchParams.get('path') ?? ''
-    // Resolve symlinks BEFORE judging anything. A name ending in .png can be a
-    // link pointing at /etc/hosts, and checking the suffix the caller supplied
-    // would wave that straight through — which is exactly how this endpoint
-    // used to serve the contents of arbitrary system files.
-    let real = null
-    try {
-      if (isAbsolute(asked)) real = await realpath(asked)
-    } catch {
-      real = null
-    }
-    const dot = real ? real.lastIndexOf('.') : -1
-    const ext = dot === -1 ? '' : real.slice(dot).toLowerCase()
-    // Images only, absolute paths only, and only under roots we expect things
-    // to be written to. This endpoint exists to show pictures, not to be a
-    // general file read for whatever the model — or another page — asks for.
-    if (!real || !Object.hasOwn(IMAGE_TYPES, ext) || !withinRoots(real)) {
-      res.writeHead(400, cors)
-      return res.end('images only')
-    }
-    try {
-      const info = await stat(real)
-      if (!info.isFile() || info.size > MAX_FILE_BYTES) {
-        res.writeHead(413, cors)
-        return res.end('too large')
-      }
-      // Asynchronous because this process is also pumping the agent's token
-      // stream; a synchronous read of a large screenshot stalls the voice.
-      const body = await readFile(real)
-      res.writeHead(200, {
-        ...cors,
-        'content-type': IMAGE_TYPES[ext],
-        'x-content-type-options': 'nosniff',
-      })
-      return res.end(body)
-    } catch {
-      res.writeHead(404, cors)
-      return res.end('not found')
-    }
   }
 
   // Remote images, fetched here so the page never talks to the wider web. The
@@ -659,6 +524,11 @@ const handleRequest = async (req, res) => {
             : 'webm'
       const form = new FormData()
       form.append('model_id', 'scribe_v1')
+      // The owner's language, not a guess per clip. Left to detect it, Scribe
+      // heard the owner's accent as Hindi and wrote "Hey AYRA" in Devanagari
+      // ("ए आएरा"), which no wake phrase matches — so on standby AYRA silently
+      // ignored everything (2026-10-03).
+      form.append('language_code', IDENTITY.language.split('-')[0] || 'en')
       form.append(
         'file',
         new Blob([Buffer.concat(chunks)], { type }),
@@ -727,28 +597,13 @@ console.log(
   `[ayra] speech ${elevenKey() ? `via ElevenLabs, voice ${VOICE_ID}` : 'using browser fallback voice'}`,
 )
 console.log(`[ayra] model ${MODEL} · effort ${EFFORT}`)
-console.log(
-  `[ayra] writes ${ALLOW_WRITES ? 'ENABLED' : 'disabled'}` +
-    (ALLOW_WRITES ? '' : ' — run npm run bridge:writes (or set AYRA_ALLOW_WRITES=1) to permit shell/file/device actions'),
-)
+console.log(`[ayra] tools: web search, web pages, the HUD display · writes off`)
 console.log(
   `[ayra] connectors (read-only): ${GATE.allowedConnectors.join(', ') || 'none'}` +
     (GATE.excludedConnectors.length
       ? ` · removed: ${GATE.excludedConnectors.join(', ')}`
       : ''),
 )
-// Asynchronous, so it lands a beat after the rest of the banner. Worth printing
-// at all because an extension that is simply not running is indistinguishable
-// at the tool boundary from one that is broken, and this is the one place the
-// difference can be stated before anybody asks a question that depends on it.
-void chromeAvailable().then((ok) => {
-  console.log(
-    ok
-      ? `[ayra] browser control ready${ALLOW_WRITES ? '' : ' (reading only — clicking and typing need writes enabled)'}`
-      : '[ayra] browser control unavailable — open Chrome with the Claude extension enabled',
-  )
-})
-
 console.log(
   '[ayra] accepting local dev origins' +
     (ORIGINS.extra.size ? ` plus ${[...ORIGINS.extra].join(', ')}` : '') +
@@ -756,8 +611,8 @@ console.log(
 )
 
 /**
- * The brain every channel shares — see brain.mjs. The WebSocket below is the
- * first channel (the HUD); Telegram will be the next (PLAN.md 3.2).
+ * The brain every channel shares — see brain.mjs. Two channels: the HUD's
+ * WebSocket below, and Telegram.
  */
 // One audit log for every channel, so lines from the HUD and Telegram stay in order.
 const AUDIT = createAudit()
@@ -766,7 +621,9 @@ const BRAIN = createBrain({
   model: MODEL,
   effort: EFFORT,
   gate: GATE,
-  mcpServers: MCP_SERVERS,
+  // None of the owner's own MCP servers for now: the clean interface is web
+  // search only, and each server comes back as its own step (PLAN.md).
+  mcpServers: {},
   audit: AUDIT,
   // How long an idle conversation is worth continuing after a reload.
   resumeHours: Number(env('RESUME_HOURS', 6)),
@@ -788,9 +645,8 @@ if (env('TELEGRAM', 'on') === 'off') {
     ownerId: TELEGRAM_OWNER,
     brain: BRAIN,
     systemPrompt: TEXT_PROMPT,
-    // The laptop's Chrome is reachable from the phone too; the HUD's screen,
-    // interface and camera are not, so they are not offered.
-    servers: { ayra_chrome: chromeServer({ allowWrites: ALLOW_WRITES }) },
+    // No screen on the phone, so no display tool: web search and web pages only.
+    servers: {},
     audit: AUDIT,
   })
 } else if (TELEGRAM_TOKEN) {
@@ -805,59 +661,33 @@ wss.on('connection', (socket) => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg))
   }
 
+  // The session still names the connectors the gate removed, and the HUD's own
+  // display server. Neither is something the owner can use, so the SYSTEMS rail
+  // shows only what is really live.
+  const removed = new Set(GATE.excludedConnectors.map((n) => `claude.ai ${n}`))
+  const emit = (msg) => {
+    if (msg.type === 'ready' && Array.isArray(msg.servers)) {
+      return send({ ...msg, servers: msg.servers.filter((n) => n !== 'ayra' && !removed.has(n)) })
+    }
+    // A web search's links go straight onto a blade — see sources.mjs.
+    if (msg.type === 'sources') {
+      return send({ type: 'blade', blade: sourcesCard(msg), ask: msg.ask })
+    }
+    send(msg)
+  }
+
   // Answer the HUD straight away rather than making it wait for the agent's
   // first turn. Refined later by the real init message.
-  send({ type: 'ready', servers: Object.keys(MCP_SERVERS) })
-
-  /**
-   * Asking the browser for something and waiting for the answer.
-   *
-   * Every other tool here pushes — a panel, a blade, a retint — and never needs
-   * a reply. The camera is the exception: the hardware is over there and the
-   * model is here, so a frame has to come back. Correlated by id because a turn
-   * can have more than one request in flight, and timed out because a browser
-   * that has been closed mid-question would otherwise hang the turn until the
-   * two-minute idle timer noticed.
-   */
-  const waiting = new Map()
-  let asks = 0
-
-  const ask = (kind, args, timeoutMs = 20_000) =>
-    new Promise((resolve, reject) => {
-      if (socket.readyState !== socket.OPEN) {
-        return reject(new Error('the interface is not connected'))
-      }
-      const id = `q${++asks}`
-      const timer = setTimeout(() => {
-        waiting.delete(id)
-        reject(new Error('the interface did not answer in time'))
-      }, timeoutMs)
-      waiting.set(id, { resolve, timer })
-      send({ type: kind, id, ...args })
-    })
+  send({ type: 'ready', servers: [] })
 
   const conversation = BRAIN.open({
     systemPrompt: SYSTEM_PROMPT,
     servers: {
       // The HUD as an in-process server. Its handler closes over this socket,
       // so a `display` call lands on screen directly.
-      ayra: displayServer(
-        (panel) => send({ type: 'panel', panel }),
-        (blade) => send({ type: 'blade', blade }),
-      ),
-      // The interface controls, on the same socket. A separate key because
-      // MCP tool names are `mcp__<key>__<tool>` and one key can only carry
-      // one server; the underscore in it is why gate.mjs and brain.mjs both
-      // name `ayra_ui` explicitly.
-      ayra_ui: uiServer((op, args) => send({ type: 'ui', op, args })),
-      // The user's own Chrome, over the extension's native-host socket. It
-      // holds no per-connection state, but it is built here with the rest so
-      // the write gate is read once, at the same point as everything else.
-      ayra_chrome: chromeServer({ allowWrites: ALLOW_WRITES }),
-      // The camera, which unlike everything else here has to ask and wait.
-      ayra_eyes: visionServer(ask),
+      ayra: displayServer((blade) => send({ type: 'blade', blade })),
     },
-    emit: send,
+    emit,
     // Reloading the page carries on the same conversation (see brain.mjs).
     channel: 'hud',
     resume: true,
@@ -877,15 +707,6 @@ wss.on('connection', (socket) => {
 
     if (msg.type === 'ask' && typeof msg.text === 'string') {
       conversation.ask(msg.text, typeof msg.id === 'string' ? msg.id : null)
-    }
-
-    if (msg.type === 'reply' && typeof msg.id === 'string') {
-      const slot = waiting.get(msg.id)
-      if (slot) {
-        waiting.delete(msg.id)
-        clearTimeout(slot.timer)
-        slot.resolve(msg)
-      }
     }
 
     if (msg.type === 'interrupt') conversation.interrupt()

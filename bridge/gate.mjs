@@ -20,8 +20,11 @@
  * RemoteTrigger and SendMessage. A voice assistant needs a handful; the rest
  * cost tokens on every turn and are one more thing the gate has to be right
  * about. ToolSearch stays because MCP tools load lazily behind it.
+ *
+ * Web only, for now. Read, Glob and Grep would reach the laptop's files, which
+ * come back with laptop control and its guardian (PLAN.md), not before.
  */
-const READ_TOOLS = ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'ToolSearch']
+const READ_TOOLS = ['WebFetch', 'WebSearch', 'ToolSearch']
 const WRITE_TOOLS = ['Bash', 'PowerShell', 'Write', 'Edit']
 
 /**
@@ -172,26 +175,11 @@ export function createGate({ allowWrites, connectors = DEFAULT_CONNECTORS, everC
         return CONNECTOR_READ.test(op) && !EFFECTFUL_VERB.test(op)
       }
 
-      // The HUD, and the interface controls beside it. Both run in this process
-      // and draw on our own screen, so neither is something to withhold —
-      // without them AYRA has no display at all. They also have to be named
-      // here rather than left to the verb rules below, which read `ui_theme` as
-      // a write and would hold the whole surface back behind writes.
-      if (server === 'ayra' || server === 'ayra_ui') return true
-
-      // The browser server gates itself, at construction: chromeServer() only
-      // builds the acting tools — click, type, form input, close tab — when
-      // writes are on, so anything that reaches here at all is something the
-      // same policy has already permitted. Deciding it a second time by reading
-      // verbs out of the name would only get it wrong: `chrome_navigate` begins
-      // with no read verb and would fall to the write branch, which would
-      // withhold the one tool the whole server is for.
-      if (server === 'ayra_chrome') return true
-
-      // The camera. Not withheld behind writes: looking changes nothing, and
-      // the real gate is the browser's own camera permission plus an indicator
-      // the user can see for as long as it is live.
-      if (server === 'ayra_eyes') return true
+      // The HUD. It runs in this process and draws on our own screen, so it is
+      // not something to withhold — without it AYRA has no display at all. It
+      // is named here rather than left to the verb rules below, which would
+      // read `display` and `blade` as neither a read nor a write.
+      if (server === 'ayra') return true
 
       const tool = mcpToolOf(name)
       if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {

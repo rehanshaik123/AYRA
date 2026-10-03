@@ -1,194 +1,31 @@
 # A.Y.R.A.
 
-**AYRA** is a personal voice assistant with a holographic interface. Say **"Hey AYRA"** and it wakes,
-listens, answers out loud, shows things on screen, and works through real tools — web search, your
-own Chrome, the camera, and the accounts you connect.
+**AYRA** is a personal assistant for one person. Say **"Hey AYRA"** at the laptop, or message her on
+Telegram: she answers out loud in her ElevenLabs voice, searches the web, and puts the results on
+screen as cards. The face is an animated avatar; the brain is **Claude Code run headless through the
+Claude Agent SDK** on the owner's own Claude login, so there's no API key.
 
-The face is a web page (React + Vite + Three.js). The brain is **Claude Code run headless through the
-Claude Agent SDK**, using your own Claude login — no API key, no extra bill.
+Today AYRA does web search only. Apps, memory, laptop control and agents come back one at a time:
+see [PLAN.md](PLAN.md). The rules for working on this repo are in [CLAUDE.md](CLAUDE.md), and the
+build log is in [PROGRESS.md](PROGRESS.md).
 
-AYRA is built on [adewaskar/jarvis](https://github.com/adewaskar/jarvis) (MIT) and extended for
-Windows, its own identity, and a roadmap toward phone access, memory and automations — see
-[PLAN.md](PLAN.md).
+## Run it
 
----
-
-## Requirements
-
-- **Windows 10/11** (primary; macOS and Linux paths are kept working)
-- **Node.js 20+** — <https://nodejs.org>
-- **A Claude login** — sign in to the Claude desktop app or the `claude` CLI once. The bridge reuses
-  that login; the Agent SDK brings its own Claude Code, so `claude` doesn't need to be on your PATH.
-- **Google Chrome or Microsoft Edge**, in a real window (embedded preview panes block the microphone)
-- Optional: the **Claude in Chrome** extension, so AYRA can use your signed-in browser
-- Optional: an **ElevenLabs API key** for a premium voice and transcription
-
-## Quick start
+Needs Windows 10/11 (Linux and macOS paths are kept working), Node.js 20+, a Claude login (the
+desktop app or `claude` CLI, signed in once) and Chrome or Edge in a real window.
 
 ```bash
 npm install
-npm run setup     # checks your machine and says what's missing (changes nothing)
-npm start         # starts the brain and the face together
+npm run setup     # checks the machine, changes nothing
+npm start         # brain + face → open http://localhost:5173, click INITIALISE, say "Hey AYRA"
 ```
 
-Open the URL it prints (http://localhost:5173) in **Chrome or Edge**, click **INITIALISE**, allow the
-microphone, and say **"Hey AYRA"**.
-
-To check the brain alone, with `npm start` (or `npm run bridge`) running in another terminal:
-
-```bash
-npm run smoke     # sends one question and prints AYRA's answer
-```
-
-## Controls
-
-| Key / phrase | Does |
-|---|---|
-| "Hey AYRA" | Wake it (common mishearings like "Aira" or "Eyra" work too) |
-| Space | Talk without the wake word |
-| Just speak | Interrupt mid-answer |
-| V | Cycle the voice |
-| Escape | Stand down |
-| D | Diagnostics panel |
-| T | One-line audio self-test |
-| G | Hand-gesture control |
-
-## AYRA on your phone (Telegram)
-
-With `AYRA_TELEGRAM_TOKEN` and `AYRA_TELEGRAM_OWNER_ID` in `.env.local`, the brain also answers
-your Telegram bot — from college, mobile data, anywhere — as long as AYRA is running on the laptop.
-It polls Telegram, so nothing on the laptop is opened to the internet, and it ignores everyone but
-you. Same personality, written instead of spoken (with the odd emoji); several messages in a row get
-one reply.
-
-## Configuration
-
-**Identity** — [`config/identity.json`](config/identity.json) decides who AYRA is: name, wordmark,
-tagline, how it addresses you (`honorific`, empty by default), language (`en-IN`), time zone, voice
-gender, and the wake words. Change it there; nothing else hard-codes the name.
-
-**Settings and secrets** — copy [`.env.example`](.env.example) to `.env.local` and uncomment what you
-need. Both halves read it: the bridge takes `AYRA_*` and `ELEVENLABS_API_KEY`; the face takes `VITE_*`.
-Only `VITE_*` values ever reach the browser. `.env.local` is gitignored.
-
-| Bridge setting | Default | Effect |
-|---|---|---|
-| `AYRA_MODEL` | `claude-opus-5-5` | Model (`claude-sonnet-5-5` is faster and lighter on plan limits) |
-| `AYRA_EFFORT` | `medium` | Reasoning effort: `low` … `max` |
-| `AYRA_BRIDGE_PORT` | `8787` | Port for the brain (HTTP + WebSocket) |
-| `AYRA_ALLOW_WRITES` | off | `1` allows effectful tools — see Safety |
-| `AYRA_RESUME_HOURS` | `6` | A reload continues the last conversation if it was used within this many hours |
-| `AYRA_TELEGRAM_TOKEN` | — | Your Telegram bot's token (from @BotFather) |
-| `AYRA_TELEGRAM_OWNER_ID` | — | Your Telegram user id — AYRA answers nobody else |
-| `AYRA_TELEGRAM` | on | `off` stops this process from answering Telegram |
-| `AYRA_CONNECTORS` | `Gmail,Google Calendar,Google Drive` | claude.ai connectors AYRA may read, or `none` |
-| `AYRA_ALLOWED_ORIGINS` | local dev | Extra page origins allowed to connect |
-| `AYRA_FILE_ROOTS` | — | Extra folders the `/file` endpoint may serve images from |
-| `AYRA_VOICE_ID` | George | ElevenLabs voice id |
-| `AYRA_DEBUG` | off | `1` logs every message from the SDK |
-| `ELEVENLABS_API_KEY` | — | Premium voice + transcription |
-
-## Safety
-
-- **Read-only by default.** Search, reading and generation run freely; anything that writes files,
-  runs a shell, sends, deletes, buys or posts is refused unless you start the brain with
-  `npm run bridge:writes`. Read `bridge/gate.mjs` before you do.
-- **Your claude.ai connectors.** Claude Code brings the connectors on your Claude account (Gmail,
-  Google Calendar, Drive, Figma…) into AYRA's sessions. AYRA keeps only the ones in
-  `AYRA_CONNECTORS` (default Gmail, Google Calendar, Google Drive) and only lets them **read** —
-  sending, replying, trashing, sharing and editing are refused even with writes on, until
-  Approve/Deny confirmations exist (PLAN.md 3.3). All other connectors are removed from the session.
-- **Few built-in tools.** AYRA gets only Read, Glob, Grep, WebFetch, WebSearch and ToolSearch (plus
-  Bash, PowerShell, Write and Edit when writes are on) — not the full Claude Code toolbox.
-- **Local only.** The brain and face listen on `localhost` and check the page's origin. Don't expose
-  them to a network until the authenticated remote access in PLAN.md Phase 3 exists.
-- **Personal use.** AYRA runs on your own Claude login. Don't share it with others on that login; if
-  it ever serves other people, switch the bridge to API-key authentication first.
-
-## Project structure — what each file is for
-
-```
-config/
-  identity.json        Who AYRA is: name, wake words, honorific, language, voice. Edit here.
-bridge/                THE BRAIN (Node, port 8787)
-  server.mjs           The bridge process: HTTP + WebSocket server for the HUD;
-                       image/video/page proxies; ElevenLabs speech
-  brain.mjs            One conversation with Claude — used by every channel (HUD, Telegram…)
-  gate.mjs             The safety gate: which tools AYRA may run, connector policy
-  persona.mjs          AYRA's personality — the system prompt
-  context.mjs          Stamps every question with the local date and time
-  telegram.mjs         AYRA on Telegram: owner-only chat from your phone
-  state.mjs            data/state.json — e.g. which conversation to continue after a reload
-  audit.mjs            data/logs/<date>.jsonl — what AYRA was asked, what it ran, what was allowed
-  identity.mjs         Loads identity.json and .env.local for the bridge
-  panels.mjs           Tools that put things on screen: display, blade, probe_url
-  ui.mjs               Tools that restyle the interface: theme, reactor, orbit, effects, reset
-  chrome.mjs           Tools that drive your own Chrome through the Claude extension
-  vision.mjs           Tools that look through the camera: look, watch
-  origin.mjs           Which web pages may talk to the brain (local dev pages only, by default)
-  net.mjs              Safe outbound fetching (blocks requests to private/internal addresses)
-  page.mjs             Fetches web pages for reading on a blade
-src/                   THE FACE (React + Vite, port 5173)
-  App.tsx              The conductor: boot, listening, thinking, speaking, interruptions
-  identity.ts          Identity for the face (reads config/identity.json)
-  config.ts            Face settings from VITE_* variables
-  store.ts             Shared app state
-  lib/wake.ts          The "Hey AYRA" phrase and its accepted mishearings
-  lib/voice.ts         Speech recognition loop and barge-in
-  lib/vad.ts           Detects when you start and stop speaking
-  lib/tts.ts           Speaking out loud and choosing the voice
-  lib/kokoro.ts        Optional neural voice that runs in the browser
-  lib/fillers.ts       Short lines like "Working on it." while tools run
-  lib/bridge.ts        WebSocket client that talks to the brain
-  lib/brain.ts         Chooses the bridge (default) or direct API mode
-  lib/anthropic.ts     Direct mode: the browser calls the Claude API with a key (not used by default)
-  lib/capabilities.ts  Asks the brain which voice engines are available
-  lib/hands.ts …       Hand tracking, camera, clap-to-start, audio, music, sound effects
-  ui/                  HUD, blades (stackable panels), boot animation, diagnostics,
-                       sanitise.ts (cleans model-written HTML before it is shown)
-  scene/               The 3D reactor, orbits and particles (Three.js)
-  index.css            All styles, including the .hud-* classes AYRA designs panels with
-scripts/
-  start.mjs            npm start — runs brain + face together
-  setup.mjs            npm run setup — friendly machine check
-  smoke.mjs            npm run smoke — one real test question to the brain
-test/                  npm test — unit tests (safety gate, wake phrase, identity, origin, logs…)
-public/                Static files: start-up audio, favicon
-index.html             Page shell with a strict Content Security Policy
-vite.config.ts         Dev server; fills the page title from identity.json
-CLAUDE.md              Rules for AI-assisted development of this repo
-PLAN.md                The roadmap, phase by phase, with tick boxes
-PROGRESS.md            What has been done, and where to continue
-data/                  (created at runtime) state.json, logs/ (audit log), later memory — never committed
-```
-
-## How it works
-
-```
-  ┌─ browser (the face) ───────────────┐        ┌─ bridge (the brain) ─────────────┐
-  │  "Hey AYRA" wake phrase            │        │  Node · bridge/server.mjs        │
-  │  voice activity → speech to text   │   ws   │  Claude Agent SDK                │
-  │  reactor UI (Three.js + GLSL)      │◄─────► │   = Claude Code, headless        │
-  │  text to speech                    │  8787  │  tools: ayra_* + your MCP servers │
-  │  heads-up display, blades          │        │  safety gate: bridge/gate.mjs    │
-  └────────────────────────────────────┘        └──────────────────────────────────┘
-```
-
-A browser tab can't run local tools, so the bridge does: it runs the Claude Agent SDK, which spawns
-the real Claude Code, hands it AYRA's tools plus any MCP servers in `~/.claude.json`, and streams the
-answer back sentence by sentence so AYRA starts speaking before the answer is finished.
-
-## Troubleshooting
-
-- **AYRA can't hear me / I can't hear AYRA** — use a real Chrome or Edge window and allow the
-  microphone. Press **D** for diagnostics, **T** for an audio test.
-- **No answer** — is the brain running? `npm run smoke` says exactly what's wrong.
-- **Wake word ignored** — speech recognition is set to `en-IN`; change `language` in
-  `config/identity.json` if your English differs, or add the mishearing you get to `wake.names`.
-- **"Browser control unavailable"** — open Chrome with the Claude extension enabled.
+Optional settings go in `.env.local` (template: `.env.example`): `ELEVENLABS_API_KEY` for the voice
+and transcription (otherwise the browser's own speech is used), and the Telegram bot token and owner
+ID. In the HUD, **Space** talks without the wake word, **D** opens diagnostics and **T** runs an
+audio test.
 
 ## Credits & licence
 
 MIT — see [LICENSE](LICENSE). Based on [JARVIS by Aditya Dewaskar](https://github.com/adewaskar/jarvis).
-The audio in `public/audio/` ships from the upstream demo; clear its rights (or replace it) before any
-public or commercial use.
+The avatar is fan art of Orihime Inoue (Bleach), made for personal use only.

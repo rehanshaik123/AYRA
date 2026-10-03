@@ -14,15 +14,13 @@ import { IDENTITY } from '../identity'
  */
 const EXAMPLES = [
   'what happened in AI this week',
-  "look at what I'm holding",
-  'summarise the page open in my browser',
-  "what's on my calendar tomorrow",
   'search for the best coffee near me',
   'read me the top story on Hacker News',
-  'open my GitHub notifications',
-  "summarise what's in my inbox",
   'convert five hundred dollars to rupees',
   "what's the weather looking like",
+  'show me pictures of the northern lights',
+  'find a good video on binary search',
+  'which companies offer paid internships for students',
 ]
 
 const ROTATE_MS = 4200

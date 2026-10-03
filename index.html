@@ -6,9 +6,9 @@
     <meta name="theme-color" content="#01060c" />
 
     <!--
-      Defence in depth behind the sanitiser in src/ui/Panels.tsx.
+      Defence in depth behind the sanitiser in src/ui/sanitise.ts.
 
-      Panel markup is written by a model that has just been reading the open
+      Blade markup is written by a model that has just been reading the open
       web, so the thing worth pinning down is `img-src`: a single
       `<img src="https://…">` is a working beacon that reports this machine's
       address to a host of the page author's choosing, and it needs no script to
@@ -38,12 +38,11 @@
       have been through the bridge — script-stripped, served under their own
       tight CSP, and sandboxed at the iframe — can be framed at all.
 
-      The rest is loose on purpose, because the voice stack needs it:
-      'wasm-unsafe-eval' and 'unsafe-eval' for the ONNX runtime and the inline
-      espeak-ng WASM, blob: workers for the wake-word engine and the speech
-      model, ws: for both the bridge and Vite's HMR socket, https: for the
-      model download and the speech API, and 'unsafe-inline' scripts for the
-      React Fast Refresh preamble Vite injects in dev.
+      The page talks to nothing but the bridge: speech, search results and
+      every picture come through localhost:8787. ws: is for the bridge and
+      Vite's HMR socket, blob: media for ElevenLabs audio, a blob: worker for
+      Vite's dev client pinging its server after a restart, and 'unsafe-inline'
+      scripts only for the React Fast Refresh preamble Vite injects in dev.
     -->
     <meta
       http-equiv="Content-Security-Policy"
@@ -53,10 +52,10 @@
         object-src 'none';
         frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com http://localhost:8787 http://127.0.0.1:8787;
         img-src 'self' data: blob: http://localhost:8787 http://127.0.0.1:8787;
-        script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:;
+        script-src 'self' 'unsafe-inline';
         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
         font-src 'self' data: https://fonts.gstatic.com;
-        connect-src 'self' data: blob: https: ws: wss: http://localhost:8787 http://127.0.0.1:8787;
+        connect-src 'self' ws: wss: http://localhost:8787 http://127.0.0.1:8787;
         worker-src 'self' blob:;
         media-src 'self' data: blob: http://localhost:8787 http://127.0.0.1:8787;
       "
