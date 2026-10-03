@@ -7,8 +7,8 @@
 // and the script always exits 0 — it is advice, not a gate.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { homedir, userInfo } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const tick = '  ok  ';
@@ -94,29 +94,10 @@ if (parsed) {
   const home = parsed.projects?.[homedir()] ?? parsed.projects?.[homedir().replace(/\\/g, '/')];
   const servers = { ...(parsed.mcpServers ?? {}), ...(home?.mcpServers ?? {}) };
   const count = Object.keys(servers).length;
-  if (count > 0) {
-    line(tick, `~/.claude.json lists ${count} MCP server${count === 1 ? '' : 's'}: ${Object.keys(servers).join(', ')}.`);
-  } else {
-    line(info, `No MCP servers configured yet. ${identity.name} still answers, searches the web, and drives its own interface.`);
-  }
+  // AYRA does not use them yet: the clean interface is web search only.
+  line(info, `~/.claude.json lists ${count} MCP server${count === 1 ? '' : 's'}; ${identity.name} does not use them yet (web search only).`);
 } else {
-  line(info, `~/.claude.json not found yet. It appears once you log in to Claude Code. ${identity.name} works without any MCP servers.`);
-}
-
-// --- Browser control (Claude in Chrome extension) -------------------------
-let browser = false;
-try {
-  const user = userInfo().username;
-  browser = isWindows
-    ? readdirSync('\\\\.\\pipe\\').includes(`claude-mcp-browser-bridge-${user}`)
-    : readdirSync(`/tmp/claude-mcp-browser-bridge-${user}`).some((n) => n.endsWith('.sock'));
-} catch {
-  browser = false;
-}
-if (browser) {
-  line(tick, 'Chrome with the Claude extension is running — browser control is available.');
-} else {
-  line(info, 'Browser control is not available right now: open Chrome with the Claude extension enabled.');
+  line(info, `~/.claude.json not found yet. It appears once you log in to Claude Code.`);
 }
 
 // --- ElevenLabs key (env, .env.local, or the elevenlabs MCP entry) ----------
@@ -151,8 +132,7 @@ console.log('  npm start             # brain + face together; open http://localh
 console.log('  npm run smoke         # with the bridge running: one end-to-end test turn');
 console.log('');
 console.log(`Then click INITIALISE and say "Hey ${identity.name}".`);
-console.log('Effectful actions (shell, files, clicking in Chrome, sending) are off by default.');
-console.log('To allow them: npm run bridge:writes  — read decideTool() in bridge/server.mjs first.');
+console.log(`${identity.name} can search the web and read pages; nothing on the laptop yet.`);
 console.log('');
 
 process.exit(0);
