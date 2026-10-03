@@ -2,11 +2,12 @@
 
 ## ▶ Continue here
 
-- **Plan:** redesigned 2026-10-02 — goals in `docs/VISION.md`, design in `docs/ARCHITECTURE.md` (cloud core + laptop desk), working agreement in CLAUDE.md §2
-- **Phase:** 4 — Always-on core · branch `phase-4-core` · 4.8 (avatar face) done; Phases 0–3 ✅ merged to `main` (2026-10-03)
-- **Next:** the owner evaluates the avatar in Chrome; Phase 4 intent check (asked 2026-10-03) — settle the idea-check answer format, the host (D1), Tailscale (D2) and three test ideas → then 4.1
-- **Blockers:** none. The page file is on; the HUD now works in the owner's Chrome
-- **Waiting on owner:** avatar verdict · repo public or private (the avatar is fan art; VISION/PROGRESS hold personal details) before pushing 4.8 · Phase 4 intent-check answers
+- **Docs redesign** (brief: `docs/REDESIGN.md`): Step 1 reality check ✅ · Step 2 interview → `docs/VISION.md` **DRAFT, not approved** (all answers + open questions at its end) · Step 3 architecture ✅ decided by Claude at the owner's request → `docs/ARCHITECTURE.md` · Step 4 CLAUDE.md / PLAN.md / PROGRESS.md ✅ approved ("push") and on `main`. The redesign itself is finished; only VISION's formal "approved" is missing.
+- **Approved by the owner:** the working agreement (CLAUDE.md §2), the new plan, pushing the docs, merging Phase 3, building the avatar face
+- **Phase:** 4 — Always-on core · branch `phase-4-core` · only 4.8 (avatar face) done · Phases 0–3 ✅ on `main` (2026-10-03)
+- **Next:** read the owner's answers to the open questions (VISION.md "Questions still open"): avatar verdict → repo private/public → push `phase-4-core` (2 local commits, `0fa3020` + `0e7a27d`, not on GitHub yet) → Phase 4 intent check answers → start 4.1
+- **Blockers:** none. The page file is on; the HUD works in the owner's Chrome
+- **Waiting on owner:** VISION "approved" · avatar verdict · repo public or private · Phase 4: host (DigitalOcean ≈ ₹1,050 pick / Hetzner ≈ ₹620), free Tailscale account, idea-check answer format, 3 test ideas
 - **Health:** QA 2026-10-03 ([docs/TEST-REPORT.md](docs/TEST-REPORT.md)): 50 / 51 pass; since then build ✓ · lint 0 · `npm test` 47/47 · smoke ✓ · HUD ✓ in Chrome (voice turn live) · avatar ✓ all 9 poses · Chrome browsing ✗ unattended
 
 ## Log — one line per task (what changed — why)
@@ -58,6 +59,9 @@
 - Retest 16:56 with memory freed (commit 8.8/15.3 GB): the brain starts cleanly ("14 MCP servers available"), but Chrome now reports `GL_VENDOR = Disabled` — its GPU process crashed in the low-memory events and Chrome keeps WebGL off until it is fully restarted.
 - QA 2026-10-03: Gmail, Calendar and Drive reads work through AYRA (their first real use). The Claude extension only shows tabs AYRA opened itself, and asks a person to "Allow" every new site — unattended browsing times out (T13). Chrome was restarted 2026-10-02 17:50 (3D back); the page file is still off.
 - Face cost, measured 2026-10-03 in a visible Chrome window (separate profile): 3D reactor ≈ 1.55 CPU cores, ≈ 1,060 MB for the Chrome instance, and it renders even behind the boot screen; avatar ≈ 0.63 cores, ≈ 870 MB. Both 48 fps (the display's rate). What's left in avatar mode is mostly the per-frame level pump and speech recognition. The Claude app's in-app browser throttles hidden panes, so measure in a visible window.
+- AYRA was left running by the 2026-10-03 session through the Claude app's preview server (`.claude/launch.json` "ayra" → `npm start`: face :5180, bridge :8787, Telegram live). It stops when that session ends; a new session restarts it with the minimized `cmd /c title AYRA & npm start` window (face :5173) or `preview_start` "ayra".
+- How to test without bothering the owner: a test bridge on :8788 with `AYRA_TELEGRAM=off` driven over the HUD WebSocket (origin `http://localhost:5173`); Telegram through `startTelegram({ request })` with a fake Telegram and a scratch `createStore`; avatar poses with the dev hook `__ayra.setPhase('thinking')` or `?pose=think`. The scripts lived in a session scratchpad and are gone. The owner closes Chrome windows that pop up on their screen — don't open one without asking; the in-app browser throttles while hidden, so measure CPU/FPS only in a visible window. Shell heredocs choke on quotes in CSS — write files with the Write/Edit tools.
+- When started from inside the Claude app, AYRA inherits that app's `CLAUDE_CODE_*` / `CLAUDECODE` session variables; started from Task Scheduler or a plain terminal it won't. No failure traced to it yet, but strip them in the core's environment (Phase 4) so AYRA behaves the same however it is launched. The owner often follows along from the phone (Remote Control) and answers tersely, skipping questions they don't care about.
 - The GitHub repo is public (2026-10-03): docs there include personal details (VISION.md, the owner's Telegram ID in this log), and the avatar is fan art.
 - The Claude app's Terminal panel can't run commands here (its shell-integration script is missing); start AYRA for the owner with a minimized `cmd /c title AYRA & npm start` window instead.
 
