@@ -58,8 +58,9 @@ Laptop, today (Windows — PowerShell or Git Bash):
 
 ```
 npm install            # once, after cloning
-npm start              # brain + face together → open http://localhost:5173 in Chrome/Edge
-npm run bridge         # brain only                       npm run dev   # face only
+npm start              # daily use, light: builds the face if needed, one process → open http://localhost:5173
+npm run start:dev      # working on the face: bridge + Vite dev server (hot reload)
+npm run bridge         # brain only                       npm run dev   # face only (Vite)
 npm run build          # type-check + production build (must pass)
 npm run lint           # oxlint (must stay at 0 warnings)
 npm run setup          # preflight: login, SDK binary, identity, ElevenLabs key
@@ -96,6 +97,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/persona.mjs` · `bridge/context.mjs` | AYRA's personality: `SYSTEM_PROMPT` (voice + HUD) and `TEXT_PROMPT` (Telegram), one character, plus what she can do today · the "[Now: …]" local-time stamp |
 | `bridge/telegram.mjs` | Telegram channel: long polling, owner-only, one question at a time, text persona |
 | `bridge/listen.mjs` | Live hearing: relays the face's microphone stream (`/listen` socket) to ElevenLabs Scribe Realtime and the words back |
+| `bridge/face.mjs` | Serves the built face (`dist/`) on 127.0.0.1:5173 in daily use — no dev server |
 | `bridge/panels.mjs` · `bridge/sources.mjs` | Tool server `ayra`: `display`, `blade`, `probe_url` — what appears on the HUD · a web search's links turned into a card by the bridge, no model in the way |
 | `bridge/origin.mjs` · `bridge/net.mjs` · `bridge/page.mjs` | Which pages may talk to the bridge · SSRF-safe outbound fetching (use for EVERY server-side fetch) · web pages for blades |
 | `src/App.tsx` · `src/identity.ts` · `src/config.ts` | The face's conductor (boot, phases, voice loop, turns) · identity for the face · the bridge address |
@@ -119,7 +121,8 @@ Planned, with their phase: `approvals.mjs`, `browser.mjs`, `apps.mjs` (5) · `db
 Live hearing (`/listen` WebSocket): face sends 16 kHz PCM (binary), `commit`, `warm`; bridge sends
 `partial {text}`, `final {text}`, `error {code,message}` — see `bridge/listen.mjs`.
 
-Face ↔ brain protocol (WebSocket): face sends `ask {id,text}`, `interrupt`; brain sends
+Face ↔ brain protocol (WebSocket): face sends `ask {id,text}`, `interrupt`, `warm` (speech began:
+wake a sleeping brain); brain sends
 `ready {servers}`, `text {delta}`, `tool {name}`, `done {text}`, `error {message}`, `blade` — turn
 frames carry `ask: <id>`. Inside the bridge the brain also emits `sources {query, links}`, which the
 HUD channel turns into a `blade`. Change both sides together or not at all. The core ↔ desk link protocol
@@ -131,7 +134,8 @@ will live in `bridge/link.mjs` (Phase 9), and the same rule applies.
 - **Settings and secrets:** `.env.local` on the laptop (gitignored; template `.env.example`); on the
   server, one settings file readable only by the `ayra` user. The bridge reads `AYRA_*` (`MODEL`
   default `claude-opus-5-5`, `EFFORT` `low`, `BRIDGE_PORT` 8787, `ALLOWED_ORIGINS`,
-  `ALLOW_NO_ORIGIN`, `VOICE_ID`, `DEBUG`, `RESUME_HOURS` — default 6, `TELEGRAM_TOKEN`,
+  `ALLOW_NO_ORIGIN`, `VOICE_ID`, `DEBUG`, `RESUME_HOURS` — default 6, `SLEEP_MINUTES` — the brain
+  naps after this long idle, default 10, `FACE_PORT` 5173, `SERVE_FACE`, `TELEGRAM_TOKEN`,
   `TELEGRAM_OWNER_ID`, `TELEGRAM` — `off` disables it, `CONNECTORS` — default `none`) plus
   `ELEVENLABS_API_KEY`. Writes are off in code (`ALLOW_WRITES = false` in server.mjs) until the
   laptop-hands phase. The bridge sets `ENABLE_TOOL_SEARCH=false` for Claude Code (tools load up
@@ -159,7 +163,8 @@ will live in `bridge/link.mjs` (Phase 9), and the same rule applies.
   injection.
 
 **Security**
-- No public ports anywhere. The core reaches Telegram and Anthropic outbound only; the desk link
+- No public ports anywhere — the bridge and the face listen on 127.0.0.1 only. The core reaches
+  Telegram and Anthropic outbound only; the desk link
   runs inside Tailscale and needs `AYRA_LINK_TOKEN`; the HUD and face stay on localhost with the
   Origin check. Exposing anything else to a network needs the owner's OK.
 - The server: non-root `ayra` user, SSH only through Tailscale, firewall closed, automatic security

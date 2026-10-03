@@ -10,7 +10,7 @@ line) → a short demo the owner can try from the phone → merge after the owne
 does this step; they get click-by-click instructions when it comes up.
 
 **Where we are:** Phase 5 — Light AYRA with hands on the laptop. Done: live hearing, the ask-first
-rules. Next: 5.3 make her light.
+rules, light mode. Next: 5.4 Approve and the kill switch.
 
 ---
 
@@ -205,10 +205,12 @@ try Approve and the kill switch · optional: start AYRA at login.
       speaker stops, answer starts 2.5 s; the owner: "answers quickly, no stucking".
 - [x] 5.2 The ask-first rules: `gate.review()` — allow / deny / ask per call, from fast rules over
       commands, file paths and page actions. Check ✓: 8 tests, 72/72.
-- [ ] 5.3 Light: the bridge serves the built face (no dev server in daily use), the brain sleeps after
-      10 idle minutes and wakes on the next question, the face redraws only on change and stops when
-      hidden, a "still" switch, her own small app window. Check: memory and CPU before/after, idle and
-      while answering; the first answer after a nap ≤ 3 s slower.
+- [x] 5.3 Light: `npm start` serves the built face from the bridge (one 85 MB process, no dev server;
+      `npm run start:dev` for face work), the brain sleeps after 10 idle minutes and the face wakes it
+      the moment speech starts, the HUD no longer re-renders per voice level, a "still" switch (L), and
+      the bridge listens on the laptop only (it was reachable from the Wi-Fi). Check ✓: brain 204 MB
+      awake → 0 asleep; first answer after a nap 3.2 s with the pre-wake (3.4 s awake); voice loop on
+      the production build: question 0.87 s, answer 2.4 s. Her app window moves to 5.6 (one Chrome).
 - [ ] 5.4 Approve and the kill switch: `bridge/approvals.mjs`; a Yes/No card on the HUD (Y/N keys, or
       say "yes"/"no"), buttons on Telegram, 2 minutes without an answer = no; Esc / "AYRA, stop" /
       `/stop` halts every turn. Check: a delete asks; No cancels; `/stop` stops a running task; the
