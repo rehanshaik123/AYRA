@@ -2,13 +2,12 @@
 
 ## ▶ Continue here
 
-- **Docs redesign** (brief: `docs/REDESIGN.md`): Step 1 reality check ✅ · Step 2 interview → `docs/VISION.md` **DRAFT, not approved** (all answers + open questions at its end) · Step 3 architecture ✅ decided by Claude at the owner's request → `docs/ARCHITECTURE.md` · Step 4 CLAUDE.md / PLAN.md / PROGRESS.md ✅ approved ("push") and on `main`. The redesign itself is finished; only VISION's formal "approved" is missing.
-- **Approved by the owner:** the working agreement (CLAUDE.md §2), the new plan, pushing the docs, merging Phase 3, building the avatar face
-- **Phase:** 4 — Always-on core · branch `phase-4-core` · only 4.8 (avatar face) done · Phases 0–3 ✅ on `main` (2026-10-03)
-- **Next:** read the owner's answers to the open questions (VISION.md "Questions still open"): avatar verdict → repo private/public → push `phase-4-core` (2 local commits, `0fa3020` + `0e7a27d`, not on GitHub yet) → Phase 4 intent check answers → start 4.1
-- **Blockers:** none. The page file is on; the HUD works in the owner's Chrome
-- **Waiting on owner:** VISION "approved" · avatar verdict · repo public or private · Phase 4: host (DigitalOcean ≈ ₹1,050 pick / Hetzner ≈ ₹620), free Tailscale account, idea-check answer format, 3 test ideas
-- **Health:** QA 2026-10-03 ([docs/TEST-REPORT.md](docs/TEST-REPORT.md)): 50 / 51 pass; since then build ✓ · lint 0 · `npm test` 47/47 · smoke ✓ · HUD ✓ in Chrome (voice turn live) · avatar ✓ all 9 poses · Chrome browsing ✗ unattended
+- **Phase:** 4 — Clean interface · branch `phase-4-clean` (renamed from the unpushed `phase-4-core`; `origin/phase-4-core` is an empty pointer at `main`) · 4.1 avatar ✅ · 4.2 cleanup ✅ · 4.3 docs ✅ · Phases 0–3 ✅ on `main`
+- **What AYRA is right now:** avatar + ElevenLabs Lily + web search (WebSearch, WebFetch, cards on the HUD), on the HUD and on Telegram; no connectors, no Chrome, no files, writes off
+- **Next:** 4.4 Speed (measure five standard questions, then cut the lag) → 4.5 voice fallback when ElevenLabs runs out → 4.6 small fixes → 4.7 owner test in Chrome → merge
+- **Waiting on owner:** OK on the new phase order (PLAN.md) · OK to push `phase-4-clean` (local commits; the repo is public) · VISION's guesses (PLAN.md, Vision)
+- **Blockers:** none
+- **Health (2026-10-03, after the cleanup):** build ✓ (JS 411 KB) · lint 0 · `npm test` 47/47 · smoke ✓ 6.9 s · a search turn ✓ but 35 s (→ 4.4) · face ✓ in the preview pane · voice needs the owner's Chrome (4.7)
 
 ## Log — one line per task (what changed — why)
 
@@ -44,6 +43,10 @@
 - 2026-10-03 · QA pass on Phases 0–3 → `docs/TEST-REPORT.md`: 50 of 51 checks pass (API 16/16, brain 16/16, Telegram 8/8, HUD 4/4); the one failure is Chrome browsing unattended (the extension's per-site Allow prompt); 5 small defects queued as task 4.7 — the owner asked for an honest picture of what works before Phase 4.
 - 2026-10-03 · Phase 3 merged to `main`; branch `phase-4-core` started. HUD re-tested in a real Chrome now the page file is on: voice question → web search → panel, all working.
 - 2026-10-03 · 4.8 New avatar face (`src/ui/Avatar.tsx`, `avatar.css`, `src/lib/avatar.ts` + 8 tests): Orihime-style SVG character, nine poses driven by the phase, lip-sync from the voice level, blinking, a snack break when idle; default face, F switches to the reactor (remembered); also fixed the stale "VOICE:" label (QA #3) — the owner asked for a light, cute face because the reactor was heavy (measured 1.55 → 0.63 CPU cores, −190 MB).
+- 2026-10-03 · Clean interface (owner: "first an interface which only does web search", answers 1a–8b): the old Phase 4 becomes Phase 8; this is the new Phase 4 on `phase-4-clean`; the avatar (old 4.8) is now 4.1.
+- 2026-10-03 · 4.2 Removed the 3D reactor, camera + hand gestures, Chrome control (`chrome.mjs`), the camera tool (`vision.mjs`), interface effects (`ui.mjs`, `Effects.tsx`), music + the upstream mp3s, clap-to-start, Kokoro, direct mode (`anthropic.ts`, `lib/brain.ts`), the unmounted `Panels.tsx`, the `/file` endpoint and the writes mode; AYRA gets WebSearch/WebFetch/ToolSearch only, the owner's MCP servers aren't loaded, `AYRA_CONNECTORS` defaults to none, the gate no longer blanket-allows the deleted server names (+2 tests), the persona says what she can do today, the SYSTEMS rail hides removed connectors, the CSP drops the wasm/eval/blob-worker allowances — a clean central interface to add features back one at a time. brain.mjs and telegram.mjs untouched.
+- 2026-10-03 · 4.2 deps: removed three, @react-three/*, @mediapipe/tasks-vision, kokoro-js, @picovoice/*, @anthropic-ai/sdk, @types/three — nothing imports them; node_modules 1.1 GB → 409 MB, face bundle 411 KB.
+- 2026-10-03 · 4.3 Docs merged: VISION and ARCHITECTURE condensed into PLAN.md (Vision, Target architecture), the QA report's results kept under Findings, REDESIGN finished; `docs/` deleted; README cut to a short GitHub page; PLAN rebuilt from beginning to end (apps → memory → laptop hands with a guardian → cloud core → two homes → proactive → agents) — the owner wanted only CLAUDE.md, PLAN.md and PROGRESS.md and a clear plan.
 
 ## Findings worth remembering
 
@@ -62,12 +65,20 @@
 - AYRA was left running by the 2026-10-03 session through the Claude app's preview server (`.claude/launch.json` "ayra" → `npm start`: face :5180, bridge :8787, Telegram live). It stops when that session ends; a new session restarts it with the minimized `cmd /c title AYRA & npm start` window (face :5173) or `preview_start` "ayra".
 - How to test without bothering the owner: a test bridge on :8788 with `AYRA_TELEGRAM=off` driven over the HUD WebSocket (origin `http://localhost:5173`); Telegram through `startTelegram({ request })` with a fake Telegram and a scratch `createStore`; avatar poses with the dev hook `__ayra.setPhase('thinking')` or `?pose=think`. The scripts lived in a session scratchpad and are gone. The owner closes Chrome windows that pop up on their screen — don't open one without asking; the in-app browser throttles while hidden, so measure CPU/FPS only in a visible window. Shell heredocs choke on quotes in CSS — write files with the Write/Edit tools.
 - When started from inside the Claude app, AYRA inherits that app's `CLAUDE_CODE_*` / `CLAUDECODE` session variables; started from Task Scheduler or a plain terminal it won't. No failure traced to it yet, but strip them in the core's environment (Phase 4) so AYRA behaves the same however it is launched. The owner often follows along from the phone (Remote Control) and answers tersely, skipping questions they don't care about.
-- The GitHub repo is public (2026-10-03): docs there include personal details (VISION.md, the owner's Telegram ID in this log), and the avatar is fan art.
+- The GitHub repo is public and the owner chose to keep it so (2026-10-03, answer 8b), knowing the docs hold personal details (the Vision in PLAN.md, the owner's Telegram ID in this log) and the avatar is fan art.
 - The Claude app's Terminal panel can't run commands here (its shell-integration script is missing); start AYRA for the owner with a minimized `cmd /c title AYRA & npm start` window instead.
+
+- QA pass 2026-10-03 (the full report was `docs/TEST-REPORT.md`, in git at `70dcb46`): 50 of 51 checks passed — bridge API 16/16 (health, origin checks, `/tts` 1.3 s, `/stt` 0.8 s, proxies block localhost, metadata and `file://`), brain 16/16 (first words 4.4 s, date, memory across a reload, barge-in, web, Gmail/Calendar/Drive reads, safety refusals, prompt injection explained not obeyed), Telegram 8/8, HUD 4/4, secrets never in logs. The failure: Chrome browsing unattended (the extension's per-site "Allow") → Phase 7 gives AYRA her own Chrome instead. Defects #3 voice label, #4 "none linked", #6 stale docs are fixed; #5 and #7 are task 4.6.
+- After the cleanup (2026-10-03): a simple answer takes 6.9–10.3 s end to end; a search turn 35 s — ToolSearch 3.4 s (the web tools are deferred behind it), WebSearch at 8.6 s, WebFetch at 15.6 s, then the answer. The boot animation alone waits 9.2 s. Baseline for 4.4.
+- The brain's `ready` list names every claude.ai connector on the account even when the gate removed it; server.mjs filters the HUD's copy (brain.mjs left as it was). The image proxy refuses SVG on purpose (scriptable), so an SVG logo shows as a broken image.
+- ElevenLabs Scribe failing (e.g. credits used up) currently drops every utterance — AYRA goes deaf, not just silent → 4.5.
+- Editing JS with scripts: template literals in the source carry backslash-escaped backticks, so a search string without them silently misses — assert every replacement. Inline `python - <<EOF` scripts break on some quoting; write the script to a file and run that.
 
 ## Known issues
 
-- `index.html` CSP hard-codes `localhost:8787` — must change for phone access (3.7).
-- `@picovoice/*` packages are installed but unused (wake word is speech-based) — revisit at 7.3.
-- From the QA pass (task 4.7): the HUD footer says "VOICE: MICROSOFT ZIRA" while Lily speaks; "SYSTEMS: NONE LINKED" ignores claude.ai connectors; an interrupted turn is logged as "The turn failed part way through."; `setup.mjs` and `.env.example` point to `decideTool()` in server.mjs (now `gate.mjs`); README and `.env.example` still say voice "George" and no honorific; Vite re-optimises on every port change (1.2 GB spike).
-- AYRA sometimes offers things it cannot do yet — reminders (no scheduler until 5.1), drafting mail (read-only until 3.3) — fix with those tasks, or a persona line if the owner wants it sooner.
+- `index.html` CSP hard-codes `localhost:8787` — must change for phone access (Later: HUD on the phone).
+- Lag: a search turn takes ~35 s and the boot animation 9.2 s → 4.4.
+- ElevenLabs out of credits → AYRA can't hear (Scribe) and each sentence waits on a failed request first → 4.5.
+- From the QA pass (task 4.6): an interrupted turn is logged as "The turn failed part way through."; Vite re-optimises on every port change (1.2 GB spike).
+- AYRA may still offer things she can't do yet; the persona now tells her to say "not connected yet" — watch for it in 4.7.
+- `bridge/page.mjs` still injects a scroll shim the face no longer uses (it served hand-gesture scrolling); harmless, remove when page.mjs is next touched. `brain.mjs` still skips `mcp__ayra_ui__*` in the tool badge — dead, left because brain.mjs stays as it is.
