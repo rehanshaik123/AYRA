@@ -31,6 +31,16 @@ export type Blade = {
   hold: 'turn' | 'sticky'
 }
 
+/** Something AYRA wants to do that the owner chose to be asked about first. */
+export type Approval = {
+  id: string
+  /** What kind of thing it is — "deletes something for good". */
+  reason: string
+  /** Exactly what would happen — the command, the file, the button. */
+  detail: string
+  tool: string
+}
+
 export type Turn = {
   id: string
   role: 'user' | 'assistant'
@@ -57,6 +67,8 @@ type State = {
   focusedBlade: string | null
   /** A blade thrown to full screen, or null. */
   expandedBlade: string | null
+  /** Actions waiting for the owner's yes, oldest first. */
+  approvals: Approval[]
 
   setVoice: (v: string) => void
   pushBlade: (b: Blade) => void
@@ -64,6 +76,9 @@ type State = {
   clearBlades: () => void
   focusBlade: (id: string | null) => void
   expandBlade: (id: string | null) => void
+  addApproval: (a: Approval) => void
+  removeApproval: (id: string) => void
+  clearApprovals: () => void
   setPhase: (p: Phase) => void
   setLevel: (l: number) => void
   setCaption: (c: string) => void
@@ -86,6 +101,7 @@ export const useStore = create<State>((set) => ({
   blades: [],
   focusedBlade: null,
   expandedBlade: null,
+  approvals: [],
 
   setVoice: (voice) => set({ voice }),
   /**
@@ -122,6 +138,10 @@ export const useStore = create<State>((set) => ({
     }),
   focusBlade: (focusedBlade) => set({ focusedBlade }),
   expandBlade: (expandedBlade) => set({ expandedBlade }),
+  addApproval: (a) =>
+    set((s) => (s.approvals.some((x) => x.id === a.id) ? {} : { approvals: [...s.approvals, a] })),
+  removeApproval: (id) => set((s) => ({ approvals: s.approvals.filter((a) => a.id !== id) })),
+  clearApprovals: () => set({ approvals: [] }),
   setPhase: (phase) => set({ phase }),
   setLevel: (level) => set({ level }),
   setCaption: (caption) => set({ caption }),

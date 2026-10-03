@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useStore, accentFor, type Phase } from '../store'
+import { answerApproval } from '../lib/bridge'
 import { Suggestions } from './Suggestions'
 import { BladeSweep, Blades } from './Blades'
 import { IDENTITY } from '../identity'
@@ -176,6 +177,39 @@ function Meter() {
   )
 }
 
+/* ----------------------------------------------------------------- approve */
+
+/**
+ * The owner's Approve card: what AYRA wants to do, exactly, and why she asks.
+ * Yes / No by click, by the Y and N keys, or by saying it. Only the oldest is
+ * shown; the rest wait their turn.
+ */
+function ApproveCard() {
+  const waiting = useStore((s) => s.approvals[0])
+  const more = useStore((s) => s.approvals.length - 1)
+  const removeApproval = useStore((s) => s.removeApproval)
+  if (!waiting) return null
+  const pick = (ok: boolean) => {
+    answerApproval(waiting.id, ok)
+    removeApproval(waiting.id)
+  }
+  return (
+    <div className="approve" role="alertdialog" aria-label="Approve this action">
+      <div className="approve-kicker">{IDENTITY.name} wants to do something that {waiting.reason}</div>
+      <div className="approve-detail">{waiting.detail || waiting.tool}</div>
+      <div className="approve-acts">
+        <button className="approve-yes" onClick={() => pick(true)}>
+          Yes <kbd>Y</kbd>
+        </button>
+        <button className="approve-no" onClick={() => pick(false)}>
+          No <kbd>N</kbd>
+        </button>
+        {more > 0 && <span className="approve-more">+{more} waiting</span>}
+      </div>
+    </div>
+  )
+}
+
 /* --------------------------------------------------------------------- hud */
 
 export function Hud() {
@@ -301,13 +335,15 @@ export function Hud() {
       {/* The one surface: everything AYRA shows lands here. */}
       <Blades />
 
+      <ApproveCard />
+
       <Suggestions />
 
       {error && <div className="error">{error}</div>}
 
       <footer className="hud-bottom">
         <span className="hint">
-          say <b>“hey {IDENTITY.name.toLowerCase()}”</b> · <kbd>Space</kbd> to talk · <kbd>L</kbd> still
+          say <b>“hey {IDENTITY.name.toLowerCase()}”</b> · <kbd>Space</kbd> to talk · <kbd>Esc</kbd> stop · <kbd>L</kbd> still
           {voice && (
             <>
               {' · '}

@@ -1,4 +1,4 @@
-import type { Blade } from '../store'
+import type { Approval, Blade } from '../store'
 import { BRIDGE_WS_URL } from '../config'
 import { withHonorific } from '../identity'
 
@@ -30,6 +30,12 @@ type Frame = {
   message?: string
   blade?: Blade
   ask?: string
+  id?: string
+  reason?: string
+  detail?: string
+  tool?: string
+  ok?: boolean
+  by?: string
   servers?: Array<string | { name?: string }>
 }
 
@@ -48,6 +54,29 @@ export const bridgeServers = () => servers
 let onServers: ((s: string[]) => void) | null = null
 export function watchServers(fn: (s: string[]) => void) {
   onServers = fn
+}
+
+/**
+ * The owner's Approve, from the bridge: a request to show, a request settled
+ * (here, on Telegram, or by the clock), or the kill switch thrown somewhere.
+ */
+export type ApprovalEvent =
+  | { type: 'approve'; approval: Approval }
+  | { type: 'approved'; id: string; ok: boolean; by: string }
+  | { type: 'halt'; by: string }
+let onApproval: ((e: ApprovalEvent) => void) | null = null
+export function watchApprovals(fn: (e: ApprovalEvent) => void) {
+  onApproval = fn
+}
+
+/** The owner's answer to an Approve card. */
+export function answerApproval(id: string, ok: boolean): void {
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'approval', id, ok }))
+}
+
+/** The kill switch: decline everything waiting and stop every answer in flight. */
+export function haltAll(): void {
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'halt' }))
 }
 
 /** Blades arrive out of band — pushed mid-turn by the `display` and `blade`
@@ -136,6 +165,15 @@ function dispatch(ws: WebSocket) {
       firstReady.resolve()
     } else if (msg.type === 'blade' && msg.blade) {
       onBlade?.(msg.blade)
+    } else if (msg.type === 'approve' && msg.id) {
+      onApproval?.({
+        type: 'approve',
+        approval: { id: msg.id, reason: msg.reason ?? '', detail: msg.detail ?? '', tool: msg.tool ?? '' },
+      })
+    } else if (msg.type === 'approved' && msg.id) {
+      onApproval?.({ type: 'approved', id: msg.id, ok: msg.ok === true, by: msg.by ?? '' })
+    } else if (msg.type === 'halt') {
+      onApproval?.({ type: 'halt', by: msg.by ?? '' })
     }
   })
 }

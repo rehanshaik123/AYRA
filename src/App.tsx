@@ -16,6 +16,9 @@ import {
   interrupt,
   watchServers,
   watchBlades,
+  watchApprovals,
+  answerApproval,
+  haltAll,
   watchConnection,
   bridgeServers,
 } from './lib/bridge'
@@ -49,6 +52,10 @@ const FOLLOW_UP_MS = 60000
 /** How long the boot sequence (Boot.tsx) stays up. It only has to cover the
  *  bridge connecting and the voice probe; the old nine seconds were pure wait. */
 const BOOT_MS = 2400
+
+/** A spoken answer to an Approve card. Hindi yes/no too — the owner's own words. */
+const SAID_YES = /^(yes|yeah|yep|yup|sure|ok(ay)?|go ahead|do it|allow( it)?|approve(d)?|confirm(ed)?|haan|ha)\b/i
+const SAID_NO = /^(no|nope|nah|don'?t|do not|cancel|stop|deny|decline|nahi|na)\b/i
 
 /** "Still" mode (the L key): no animation, no level pump. Remembered per browser. */
 const STILL_KEY = 'ayra.still'
@@ -205,10 +212,29 @@ export default function App() {
     }
   }
 
+  // -- the owner's Approve ---------------------------------------------------
+
+  /** Answer an Approve card; the bridge tells every screen it is settled. */
+  const answer = (id: string, ok: boolean) => {
+    answerApproval(id, ok)
+    store.getState().removeApproval(id)
+    sfx.play(ok ? 'done' : 'error')
+  }
+
+  /** The kill switch: everything waiting declined, everything running stopped. */
+  const halt = () => {
+    haltAll()
+    store.getState().clearApprovals()
+    if (store.getState().phase !== 'offline') goDormant()
+  }
+
   // -- voice events ---------------------------------------------------------
 
   /** What the voice loop should do with what it hears, derived from phase. */
   const mode = (): VoiceMode => {
+    // Waiting on the owner's yes: whatever they say is the answer, never an
+    // interruption that would cancel the very action being asked about.
+    if (store.getState().approvals.length) return 'command'
     switch (store.getState().phase) {
       case 'offline':
       case 'boot':
@@ -258,6 +284,8 @@ export default function App() {
     clearIdle()
     const phase = store.getState().phase
     if (phase === 'offline' || phase === 'boot' || phase === 'dormant') return
+    // Answering an Approve card is not a barge-in.
+    if (store.getState().approvals.length) return
 
     const wasBusy =
       phase === 'thinking' || phase === 'tooling' || phase === 'speaking'
@@ -277,6 +305,16 @@ export default function App() {
   const onUtterance = (text: string) => {
     const phase = store.getState().phase
     if (phase === 'offline' || phase === 'boot' || phase === 'dormant') return
+
+    // A spoken answer to the oldest Approve card. Anything else is ignored
+    // while one is waiting — it must be a clear yes or no.
+    const waiting = store.getState().approvals[0]
+    if (waiting) {
+      const said = text.replace(LEADING_NAME, '').trim()
+      if (SAID_YES.test(said)) answer(waiting.id, true)
+      else if (SAID_NO.test(said)) answer(waiting.id, false)
+      return
+    }
 
     // People keep using his name as a vocative once they're already talking to
     // him. Strip it rather than sending "jarvis" to the model as a question.
@@ -343,6 +381,22 @@ export default function App() {
 
     watchServers((servers) => store.getState().setConnected(servers))
     watchBlades((blade) => store.getState().pushBlade(blade))
+
+    // Approve cards. Spoken as well as shown: the owner may be across the room.
+    watchApprovals((event) => {
+      const st = store.getState()
+      if (event.type === 'approve') {
+        st.addApproval(event.approval)
+        const ask = createSpeaker()
+        ask.say(withHonorific(`Quick check: this ${event.approval.reason}. Yes or no?`))
+        void ask.end()
+      } else if (event.type === 'approved') {
+        st.removeApproval(event.id)
+      } else if (event.type === 'halt') {
+        st.clearApprovals()
+        silence()
+      }
+    })
 
     // In bridge mode the conversation lives in the agent session, which is tied
     // to the socket — so a drop silently wipes his memory while the transcript
@@ -469,11 +523,19 @@ export default function App() {
         return
       }
 
-      // Escape stands the whole thing down — the one thing the old build had
-      // no key for at all.
+      // Y / N answer the oldest Approve card.
+      const waiting = store.getState().approvals[0]
+      if (waiting && (e.key === 'y' || e.key === 'n') && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        answer(waiting.id, e.key === 'y')
+        return
+      }
+
+      // Escape is the kill switch: it stands her down, declines everything
+      // waiting for an Approve and stops every answer in flight.
       if (e.key === 'Escape') {
         e.preventDefault()
-        if (store.getState().phase !== 'offline') goDormant()
+        halt()
         return
       }
 
