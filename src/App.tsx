@@ -45,6 +45,10 @@ const AWAIT_SPEECH_MS = 14000
  *  again to continue a thought. */
 const FOLLOW_UP_MS = 11000
 
+/** How long the boot sequence (Boot.tsx) stays up. It only has to cover the
+ *  bridge connecting and the voice probe; the old nine seconds were pure wait. */
+const BOOT_MS = 2400
+
 /** crypto.randomUUID needs a secure context, which a LAN address over plain
  *  http is not. Not worth failing a whole turn over an id. */
 const newId = () =>
@@ -336,11 +340,8 @@ export default function App() {
     })
     const warming = warmBridge().catch((err: Error) => s.setError(err.message))
 
-    // Long enough for the four-beat start-up sequence in Boot.tsx to play —
-    // status bar, rings, suit schematic, reactor power-up — before the live
-    // interface takes over. Kept a touch under the boot cue so the music is
-    // still rising as the reactor lands.
-    await new Promise((r) => setTimeout(r, 9200)) // boot sequence
+    // Long enough for the start-up sequence in Boot.tsx to land the wordmark.
+    await new Promise((r) => setTimeout(r, BOOT_MS))
     await warming
     store.getState().setConnected(bridgeServers())
     store.getState().setVoice(currentVoiceName())

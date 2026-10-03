@@ -40,7 +40,8 @@
 
       The page talks to nothing but the bridge: speech, search results and
       every picture come through localhost:8787. ws: is for the bridge and
-      Vite's HMR socket, blob: media for ElevenLabs audio, and 'unsafe-inline'
+      Vite's HMR socket, blob: media for ElevenLabs audio, a blob: worker for
+      Vite's dev client pinging its server after a restart, and 'unsafe-inline'
       scripts only for the React Fast Refresh preamble Vite injects in dev.
     -->
     <meta
@@ -55,7 +56,7 @@
         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
         font-src 'self' data: https://fonts.gstatic.com;
         connect-src 'self' ws: wss: http://localhost:8787 http://127.0.0.1:8787;
-        worker-src 'self';
+        worker-src 'self' blob:;
         media-src 'self' data: blob: http://localhost:8787 http://127.0.0.1:8787;
       "
     />
