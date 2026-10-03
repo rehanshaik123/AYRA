@@ -6,11 +6,92 @@
  * is that decision, kept apart from the server so it can be read in one place
  * and tested on its own (`npm test`).
  *
- * createGate() returns three things the bridge hands to the Agent SDK:
- *   decide(name)  — the canUseTool verdict for one tool name
- *   builtins      — the built-in Claude Code tools AYRA may see at all
- *   disallowed    — tools removed from the model's context entirely
+ * createGate() returns what the bridge hands to the Agent SDK:
+ *   decide(name)         — may this tool run at all
+ *   review(name, input)  — and this particular call: allow, deny, or ask the owner
+ *   builtins             — the built-in Claude Code tools AYRA may see at all
+ *   disallowed           — tools removed from the model's context entirely
  */
+
+/**
+ * What AYRA asks the owner about first. The owner gave her the whole laptop
+ * (2026-10-03, answer "a") with exactly these four exceptions; everything else
+ * she just does. The words are what the owner sees on the Approve card.
+ */
+export const ASK = {
+  money: 'spends money',
+  send: 'sends or posts something as you',
+  delete: 'deletes something for good',
+  security: 'touches passwords or security settings',
+}
+
+/** A command token: at the start, or after a separator, and ending at one. */
+const cmd = (names) =>
+  new RegExp(`(?:^|[\\s;|&({])(?:${names})(?=$|[\\s;|&)}])`, 'i')
+
+/**
+ * Shell commands that need the owner's yes, by what they do. Rules, not a
+ * model: they run in microseconds, so ordinary commands cost no lag at all.
+ * Moving a file to the Recycle Bin is not on the list — it can be undone.
+ */
+const COMMAND_RULES = [
+  [ASK.delete, cmd('remove-item|ri|rm|rmdir|rd|del|erase|clear-recyclebin|clear-disk|remove-partition|format-volume|initialize-disk|diskpart|sdelete')],
+  [ASK.delete, /(?:^|[\s;|&(])format(?:\.com)?\s+[a-z]:/i],
+  [ASK.delete, /cipher(?:\.exe)?\s+\/w/i],
+  [ASK.security, /(?:set|add|remove)-mppreference|netsh(?:\.exe)?\s+(?:adv)?firewall|(?:set|new|remove|disable|enable)-netfirewall|set-executionpolicy|bcdedit|manage-bde|(?:enable|disable|suspend)-bitlocker|cmdkey|vaultcmd|takeown|icacls|set-acl/i],
+  [ASK.security, /net(?:\.exe)?\s+(?:user|localgroup|accounts)|(?:set|new|remove|enable|disable|rename)-localuser|(?:add|remove)-localgroupmember/i],
+  [ASK.security, /reg(?:\.exe)?\s+(?:add|delete|import|restore)|(?:set|new|remove)-itemproperty\s[^;|]*hk(?:lm|cu|ey)|certutil(?:\.exe)?\s+-(?:add|del)/i],
+  [ASK.security, /(?:set|stop)-service\s[^;|]*(?:windefend|wscsvc|mpssvc|wuauserv)/i],
+  [ASK.send, /send-mailmessage|invoke-(?:webrequest|restmethod)\b[^;|]*-method\s+['"]?(?:post|put|patch|delete)/i],
+  [ASK.send, /(?:^|[\s;|&(])(?:curl|curl\.exe|wget)\b[^;|]*(?:-x\s*['"]?(?:post|put|patch)|--data|--form|\s-d\s|\s-f\s)/i],
+]
+
+/** Why a shell command needs the owner's yes, or null. */
+export function riskOfCommand(command) {
+  const text = String(command ?? '')
+  for (const [reason, re] of COMMAND_RULES) if (re.test(text)) return reason
+  return null
+}
+
+/**
+ * Files AYRA may not write without asking: the system, programs, start-up
+ * entries and keys. Everything in the owner's own folders is hers to use.
+ */
+const PROTECTED_PATH =
+  /^(?:[a-z]:)?[\\/](?:windows|program files(?: \(x86\))?|programdata)(?:[\\/]|$)|[\\/]\.(?:ssh|gnupg|aws)[\\/]|[\\/]start menu[\\/]programs[\\/]startup[\\/]|[\\/]drivers[\\/]etc[\\/]hosts$/i
+
+/** Why writing this file needs the owner's yes, or null. */
+export function riskOfPath(path) {
+  return PROTECTED_PATH.test(String(path ?? '')) ? ASK.security : null
+}
+
+/** Button and link words, by what pressing them does. */
+const MONEY = /\b(?:buy|pay|purchase|checkout|check out|place (?:your )?order|order now|confirm (?:order|payment|purchase)|subscribe|upgrade|donate|transfer|send money|book now|reserve|rent now|add funds|top up)\b/i
+const DELETE = /\b(?:delete|remove|trash|discard|erase|deactivate|close (?:my )?account|wipe|empty (?:bin|trash))\b/i
+const SEND = /\b(?:send|post|publish|tweet|reply|comment|share|submit|apply|message|invite|connect|upload)\b/i
+/** Pages where any action is a security change. */
+const SECURITY_PAGE = /accounts\.google\.com|myaccount\.google\.com\/(?:security|signinoptions)|\/(?:security|password|passwords|2fa|two-factor|mfa)(?:[/?#]|$)|^chrome:\/\/(?:settings|password)/i
+
+/**
+ * Why an action on a web page or app window needs the owner's yes, or null.
+ *
+ * @param {{ action: 'click'|'type'|'enter', label?: string, url?: string,
+ *           field?: 'password'|'search'|'text'|'' }} what
+ *   label — the visible name of the button, link or field
+ *   field — what kind of box the action is in
+ */
+export function riskOfPageAction({ action, label = '', url = '', field = '' }) {
+  if (action === 'type' && field === 'password') return ASK.security
+  if (SECURITY_PAGE.test(url)) return ASK.security
+  if (action === 'click') {
+    if (MONEY.test(label)) return ASK.money
+    if (DELETE.test(label)) return ASK.delete
+    if (SEND.test(label)) return ASK.send
+  }
+  // Enter in a message box sends the message. In a search box it searches.
+  if (action === 'enter' && field !== 'search') return ASK.send
+  return null
+}
 
 /**
  * Built-in Claude Code tools AYRA is given at all (the SDK's `tools` option).
@@ -21,11 +102,14 @@
  * cost tokens on every turn and are one more thing the gate has to be right
  * about. ToolSearch stays because MCP tools load lazily behind it.
  *
- * Web only, for now. Read, Glob and Grep would reach the laptop's files, which
- * come back with laptop control and its guardian (PLAN.md), not before.
+ * Web only unless `laptop` is set: then the laptop's files too, and with writes
+ * the shell and file edits — each call reviewed against the ask-first list.
  */
 const READ_TOOLS = ['WebFetch', 'WebSearch', 'ToolSearch']
-const WRITE_TOOLS = ['Bash', 'PowerShell', 'Write', 'Edit']
+/** The laptop's files, to read and search. */
+const FILE_TOOLS = ['Read', 'Glob', 'Grep']
+/** PowerShell rather than Bash: the laptop is Windows, and it is the native shell. */
+const WRITE_TOOLS = ['PowerShell', 'Write', 'Edit']
 
 /**
  * Both spellings of every renamed built-in are listed on purpose. The SDK
@@ -149,12 +233,13 @@ export const connectorKey = (displayName) => displayName.replace(/[^A-Za-z0-9_-]
 const CONNECTOR_READ = /^(get|list|search|read|suggest)/i
 
 /**
- * @param {{ allowWrites: boolean, connectors?: string[], everConnected?: string[] }} options
+ * @param {{ allowWrites: boolean, laptop?: boolean, connectors?: string[], everConnected?: string[] }} options
+ *   laptop        — AYRA may use the laptop's files (and, with writes, its shell)
  *   connectors    — connector names AYRA may read, e.g. ['Gmail', 'Google Calendar']
  *   everConnected — every connector on the account, as Claude Code lists them
  *                   ("claude.ai Figma"); the ones not allowed are removed
  */
-export function createGate({ allowWrites, connectors = DEFAULT_CONNECTORS, everConnected = [] }) {
+export function createGate({ allowWrites, laptop = false, connectors = DEFAULT_CONNECTORS, everConnected = [] }) {
   const allowed = new Set(
     connectors.map((name) => connectorKey(`claude.ai ${name.trim()}`).toLowerCase()),
   )
@@ -192,9 +277,32 @@ export function createGate({ allowWrites, connectors = DEFAULT_CONNECTORS, everC
     return allowWrites
   }
 
+  /**
+   * One particular call: 'allow', 'deny', or 'ask' with the reason and what
+   * exactly would happen, for the owner's Approve card.
+   */
+  function review(name, input = {}) {
+    if (!decide(name)) return { verdict: 'deny' }
+    let reason = null
+    let detail = ''
+    if (name === 'PowerShell' || name === 'Bash') {
+      detail = String(input?.command ?? '')
+      reason = riskOfCommand(detail)
+    } else if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(name)) {
+      detail = String(input?.file_path ?? input?.notebook_path ?? '')
+      reason = riskOfPath(detail)
+    }
+    return reason ? { verdict: 'ask', reason, detail } : { verdict: 'allow' }
+  }
+
   return {
     decide,
-    builtins: allowWrites ? [...READ_TOOLS, ...WRITE_TOOLS] : [...READ_TOOLS],
+    review,
+    builtins: [
+      ...READ_TOOLS,
+      ...(laptop ? FILE_TOOLS : []),
+      ...(allowWrites ? WRITE_TOOLS : []),
+    ],
     disallowed: excluded.map((name) => `mcp__${connectorKey(name)}`),
     allowedConnectors: connectors.map((name) => name.trim()).filter(Boolean),
     excludedConnectors: excluded.map((name) => name.slice('claude.ai '.length)),
