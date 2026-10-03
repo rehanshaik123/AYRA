@@ -40,10 +40,10 @@ import { withHonorific } from './identity'
  *  people say his name and *then* think about what they wanted. */
 const AWAIT_SPEECH_MS = 14000
 
-/** After an answer, how long the mic stays open for a follow-up before he
- *  drops back to standby. Long enough that you don't have to say the name
- *  again to continue a thought. */
-const FOLLOW_UP_MS = 11000
+/** After an answer, how long she keeps listening for a follow-up before she
+ *  drops back to standby — a conversation, not a wake word per sentence (the
+ *  owner, 2026-10-03). Escape stands her down sooner. */
+const FOLLOW_UP_MS = 60000
 
 /** How long the boot sequence (Boot.tsx) stays up. It only has to cover the
  *  bridge connecting and the voice probe; the old nine seconds were pure wait. */

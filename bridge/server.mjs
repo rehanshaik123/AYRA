@@ -16,13 +16,14 @@
 import { IDENTITY, env } from './identity.mjs'
 import { SYSTEM_PROMPT, TEXT_PROMPT } from './persona.mjs'
 import { createGate } from './gate.mjs'
-import { WebSocketServer } from 'ws'
+import { WebSocket, WebSocketServer } from 'ws'
 import { createBrain } from './brain.mjs'
 import { createOriginCheck } from './origin.mjs'
 import { createAudit } from './audit.mjs'
 import { startTelegram } from './telegram.mjs'
 import { displayServer } from './panels.mjs'
 import { sourcesCard } from './sources.mjs'
+import { relayListening } from './listen.mjs'
 import { homedir } from 'node:os'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -576,7 +577,7 @@ const wss = new WebSocketServer({
   // 403 would look like the bridge simply isn't running.
   verifyClient: ({ origin, req }, done) => {
     const path = (req.url ?? '/').split('?')[0]
-    if (path !== '/' && path !== '/ws') {
+    if (path !== '/' && path !== '/ws' && path !== '/listen') {
       console.warn(`[ayra] rejected websocket on path ${path}`)
       return done(false, 403, 'Forbidden')
     }
@@ -653,8 +654,29 @@ if (env('TELEGRAM', 'on') === 'off') {
   console.log('[ayra] telegram: token set but AYRA_TELEGRAM_OWNER_ID is missing — channel off')
 }
 
+/**
+ * Live hearing: the face streams the microphone on `/listen` and the bridge
+ * relays it to ElevenLabs Scribe Realtime — see listen.mjs. The key stays here.
+ */
+function listen(socket) {
+  const key = elevenKey()
+  if (!key) {
+    socket.send(JSON.stringify({ type: 'error', code: 'no_key', message: 'no ElevenLabs key' }))
+    return socket.close()
+  }
+  relayListening(socket, {
+    key,
+    language: IDENTITY.language.split('-')[0] || 'en',
+    // Spelled the way AYRA's name should come back, so the wake phrase matches.
+    keyterms: [IDENTITY.name],
+    connect: (url, k) => new WebSocket(url, { headers: { 'xi-api-key': k } }),
+    log: (msg) => console.warn(msg),
+  })
+}
+
 // The HUD channel: one WebSocket, one conversation.
-wss.on('connection', (socket) => {
+wss.on('connection', (socket, req) => {
+  if ((req.url ?? '/').split('?')[0] === '/listen') return listen(socket)
   console.log('[ayra] client connected')
 
   const send = (msg) => {

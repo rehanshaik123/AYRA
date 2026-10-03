@@ -1,7 +1,6 @@
-import { BRIDGE_HTTP_URL } from '../config'
 import { getMic } from './audio'
 import { speakingNow, speakingSince } from './tts'
-import { startVad, type Vad } from './vad'
+import { startListening, type Listener } from './listen'
 import { caps } from './capabilities'
 import { WAKE, afterWake } from './wake'
 import { IDENTITY } from '../identity'
@@ -313,7 +312,7 @@ function isEcho(heard: string, spoken: string): boolean {
  * apart in one glance.
  */
 export const diag = {
-  /** Which input engine is running: 'elevenlabs' (VAD+Scribe) or 'browser'. */
+  /** Which input engine is running: 'elevenlabs-live' (Scribe Realtime) or 'browser'. */
   engine: 'browser',
   /** Whether the microphone pipeline is live. */
   running: false,
@@ -358,8 +357,9 @@ if (typeof window !== 'undefined') {
  * Pick the voice engine and start it.
  *
  * Two engines, chosen by what the bridge reported at boot (see capabilities.ts):
- *   - ElevenLabs available -> local voice-activity detection for instant
- *     barge-in, and ElevenLabs Scribe for the words. The reliable path.
+ *   - ElevenLabs available -> voice-activity detection on the audio thread for
+ *     instant barge-in, and ElevenLabs Scribe Realtime streaming the words
+ *     (listen.ts). The fast path; it falls back to the next one by itself.
  *   - nothing configured -> the browser's own SpeechRecognition, so a student
  *     with no keys still has a working assistant. Less robust, but free and
  *     zero-setup, and guarded by a heartbeat so its silent death is recovered.
@@ -379,30 +379,25 @@ export async function startVoice(h: VoiceHandlers): Promise<Voice> {
     )
     return { stop: () => {}, live: () => false }
   }
-  diag.engine = caps().stt ? 'elevenlabs' : 'browser'
-  return caps().stt ? startElevenVoice(h) : startBrowserVoice(h)
+  diag.engine = caps().stt ? 'elevenlabs-live' : 'browser'
+  return caps().stt ? startLiveVoice(h) : startBrowserVoice(h)
 }
 
-/** VAD + ElevenLabs Scribe. */
-async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
+/**
+ * Live hearing: speech detected on the audio thread, words streamed from
+ * ElevenLabs Scribe Realtime through the bridge (listen.ts, bridge/listen.mjs).
+ *
+ * If ElevenLabs refuses — free credits used up, a bad key, the service down —
+ * it hands over to the browser's own recogniser for the rest of the session and
+ * says so once, rather than going deaf (task 4.5).
+ */
+async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
   let lastWake = 0
-  let vad: Vad | null = null
-
-  /**
-   * Segments waiting for the transcriber, oldest first.
-   *
-   * This was a boolean — `if (transcribing) return` — and that single line was
-   * the worst bug in the pause story. Segments arrive faster than Scribe
-   * answers whenever someone speaks in bursts, which is exactly what pausing
-   * mid-sentence looks like, so the second half of the thought was not merely
-   * mis-timed, it was silently discarded. Queue instead: nothing a person says
-   * out loud gets thrown away because the network was busy.
-   *
-   * Order is preserved because the drain is single-flight, which matters —
-   * "London" arriving before "what's the weather in" is worse than either.
-   */
-  const pendingAudio: Blob[] = []
-  let draining = false
+  let listener: Listener | null = null
+  let fallback: Voice | null = null
+  let lastMode: VoiceMode | '' = ''
+  /** A partial has arrived for the segment being spoken — the caption has words. */
+  let worded = false
 
   /**
    * Transcripts become turns here rather than one-per-segment.
@@ -419,150 +414,128 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
   })
 
   /**
-   * Send one captured segment to the bridge and act on the words.
-   *
-   * The mode is re-read here, not at capture time, because a barge-in flips the
-   * machine from 'guard' to 'listening' between the segment starting and its
-   * transcript arriving — and the transcript belongs to the mode the user is in
-   * now, not the one they interrupted.
+   * The finished words of one segment. The mode is read now, not when the
+   * speech began: a barge-in flips 'guard' to 'listening' in between, and the
+   * words belong to the mode the user is in now.
    */
-  const transcribe = async (blob: Blob) => {
+  const hear = (said: string) => {
     const mode = h.mode()
     if (mode === 'deaf') return
-    const t0 = performance.now()
-    try {
-      const res = await fetch(`${BRIDGE_HTTP_URL}/stt`, {
-        method: 'POST',
-        headers: { 'content-type': blob.type || 'audio/webm' },
-        body: blob,
-      })
-      diag.idleMs = Math.round(performance.now() - t0)
-      if (!res.ok) {
-        diag.restarts++
-        diag.lastError = `stt ${res.status}`
-        drop(`transcription failed (${res.status})`)
-        return
-      }
-      const { text } = (await res.json()) as { text?: string }
-      const said = (text ?? '').trim()
-      diag.lastError = ''
-
-      if (!said) {
-        drop('nothing intelligible in the segment')
-        return
-      }
-
-      // His own voice, come back through the microphone. The raised guard
-      // threshold stops most of it at the door; this catches the rest.
-      if (isEcho(said, speakingNow())) {
-        drop('echo of his own voice')
-        return
-      }
-
-      diag.heard = said
-      diag.heardAt = Date.now()
-
-      if (mode === 'wake') {
-        if (WAKE.test(said) && Date.now() - lastWake > WAKE_DEBOUNCE) {
-          lastWake = Date.now()
-          diag.wakes++
-          diag.dropped = ''
-          diag.accepted++
-          h.onWake(afterWake(said))
-        } else {
-          drop(`heard "${said.slice(-40)}" — not his name`)
-        }
-        return
-      }
-
-      // Not a turn yet — a piece of one. The assembler decides when the thought
-      // is finished, reading the words and whether the room is still noisy.
-      assemble.feed(said, vad?.meter().speaking ?? false)
-    } catch (err) {
-      diag.restarts++
-      diag.lastError = String(err)
-      drop('could not reach the speech service')
+    if (!said) {
+      drop('nothing intelligible in the segment')
+      return
     }
+    // Her own voice, come back through the microphone. The raised guard
+    // threshold stops most of it at the door; this catches the rest.
+    if (isEcho(said, speakingNow())) {
+      drop('echo of his own voice')
+      return
+    }
+    diag.heard = said
+    diag.heardAt = Date.now()
+    diag.lastError = ''
+
+    if (mode === 'wake') {
+      if (WAKE.test(said) && Date.now() - lastWake > WAKE_DEBOUNCE) {
+        lastWake = Date.now()
+        diag.wakes++
+        diag.dropped = ''
+        diag.accepted++
+        // She is about to listen; have the transcriber ready before they speak.
+        listener?.warm()
+        h.onWake(afterWake(said))
+      } else {
+        drop(`heard "${said.slice(-40)}" — not his name`)
+      }
+      return
+    }
+
+    // Not a turn yet — a piece of one. The assembler decides when the thought
+    // is finished, reading the words and whether the user is still talking.
+    assemble.feed(said, listener?.meter().speaking ?? false)
   }
 
-  /** One transcription at a time, in the order the segments were spoken. */
-  const drain = async () => {
-    if (draining) return
-    draining = true
-    try {
-      while (pendingAudio.length) {
-        await transcribe(pendingAudio.shift()!)
-      }
-    } finally {
-      draining = false
-    }
+  const fallBack = (why: string) => {
+    if (fallback) return
+    clearInterval(guardPoll)
+    listener?.stop()
+    listener = null
+    assemble.cancel()
+    diag.engine = 'browser'
+    diag.lastError = why
+    h.onError(`Live hearing is unavailable (${why}) — switched to the browser's recogniser.`)
+    fallback = startBrowserVoice(h)
   }
 
-  vad = await startVad({
-    onStart: () => {
-      const mode = h.mode()
-      diag.mode = mode
-      diag.sessions++
-      if (mode === 'deaf') return
-      // Standing down mid-thought throws the thought away with it. Otherwise
-      // held text would surface as the opening of the *next* conversation.
-      if (mode === 'wake') assemble.cancel()
-      // The barge-in. In guard mode the user has started talking over him, and
-      // because the guard threshold is high this is a real interruption rather
-      // than leaked playback — so cut him off now, do not wait for the words.
-      if (mode === 'guard') {
-        const since = speakingSince()
-        if (since && Date.now() - since < SELF_GUARD_MS) {
-          diag.selfGuarded++
-          return
-        }
-        h.onSpeechStart()
-      }
-    },
-    onEnd: (blob) => {
-      pendingAudio.push(blob)
-      void drain()
-    },
-    onLevel: (v) => {
-      // Only paint the live level while actually listening for a command, so a
-      // dormant reactor stays calm and does not twitch at every room noise.
-      const mode = h.mode()
-      if (mode !== 'command') return
-      // Never over the assembled text. This used to run unconditionally and
-      // overwrote a half-built sentence with an ellipsis sixty times a second,
-      // so a pause looked like the interface had forgotten what you just said.
-      if (assemble.held()) return
-      h.onPartial(v > 0.04 ? '…' : '')
-    },
-    onError: (message) => {
-      diag.lastError = 'capture'
-      diag.running = false
-      h.onError(message)
-    },
-  })
-  diag.running = vad.live()
-
-  // Raise the trigger bar exactly while he speaks. The mode is polled rather
-  // than pushed because nothing in the app pushes phase changes here, and a
-  // 200ms lag on the echo gate is imperceptible.
   const guardPoll = setInterval(() => {
     const mode = h.mode()
-    vad?.setGuard(mode === 'guard')
-    // He has stood down — by Escape, by the idle timeout, or by dropping back
-    // to the wake word. Anything half-said belonged to a conversation that is
-    // over, and letting the hold expire later would open the next one with a
-    // fragment of the last.
+    diag.mode = mode
+    // Raise the trigger bar exactly while she speaks.
+    listener?.setGuard(mode === 'guard')
+    // A listening window has opened: get the transcriber ready (≈0.5 s).
+    if (mode === 'command' && lastMode !== 'command') listener?.warm()
+    lastMode = mode
+    // She has stood down — anything half-said belonged to a conversation that
+    // is over, and must not open the next one.
     if ((mode === 'wake' || mode === 'deaf') && assemble.held()) assemble.cancel()
   }, 200)
+
+  try {
+    listener = await startListening(await getMic(), {
+      onStart: () => {
+        const mode = h.mode()
+        diag.mode = mode
+        diag.sessions++
+        worded = false
+        if (mode === 'deaf') return
+        // Standing down mid-thought throws the thought away with it.
+        if (mode === 'wake') assemble.cancel()
+        // The barge-in: the user has started talking over her, and because the
+        // guard threshold is high this is a real interruption, not playback.
+        if (mode === 'guard') {
+          const since = speakingSince()
+          if (since && Date.now() - since < SELF_GUARD_MS) {
+            diag.selfGuarded++
+            return
+          }
+          h.onSpeechStart()
+        }
+      },
+      onEnd: () => {},
+      onPartial: (text) => {
+        if (h.mode() !== 'command' || !text.trim()) return
+        worded = true
+        const carried = assemble.held()
+        h.onPartial(carried ? `${carried} ${text}` : text)
+      },
+      onFinal: (text) => hear(text.trim()),
+      onLevel: (v) => {
+        // Before the first words arrive, show that she can hear something.
+        if (h.mode() !== 'command' || worded || assemble.held()) return
+        h.onPartial(v > 0.04 ? '…' : '')
+      },
+      onError: (code, message) => {
+        diag.restarts++
+        diag.lastError = `${code}: ${message}`
+        // Moments, not failures: a segment with nothing in it, a burst limit.
+        if (code === 'insufficient_audio_activity' || code === 'commit_throttled') return
+        fallBack(code)
+      },
+    })
+  } catch (err) {
+    fallBack(`could not start: ${(err as Error)?.message ?? err}`)
+  }
+  diag.running = Boolean(listener?.live())
 
   return {
     stop: () => {
       clearInterval(guardPoll)
       assemble.cancel()
-      vad?.stop()
+      listener?.stop()
+      fallback?.stop()
       diag.running = false
     },
-    live: () => vad?.live() ?? false,
+    live: () => (fallback ? fallback.live() : (listener?.live() ?? false)),
   }
 }
 

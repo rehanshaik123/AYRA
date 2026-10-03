@@ -95,6 +95,12 @@ if (typeof window !== 'undefined') {
  * the bridge's speech proxy instead, which holds an ElevenLabs key already.
  */
 let nativeBroken = false
+/**
+ * ElevenLabs said no for good — out of credits (402/429) or a bad key
+ * (401/403). Latched for the session so every later sentence goes straight to
+ * the browser voice instead of waiting on a request that will fail again.
+ */
+let cloudRefused = false
 
 let speakingAt = 0
 
@@ -252,7 +258,7 @@ function pickVoice(): SpeechSynthesisVoice | null {
  *  always naming a speechSynthesis voice that a cloud or neural engine has
  *  quietly replaced. */
 export function currentVoiceName(): string {
-  if (caps().tts) return 'ElevenLabs'
+  if (caps().tts && !cloudRefused) return 'ElevenLabs'
   return pickVoice()?.name ?? 'default'
 }
 
@@ -377,7 +383,7 @@ export function createSpeaker(): Speaker {
     // premium path automatic with no flag to set. It falls back to the browser
     // voice on any failure, so a student without a key still hears him speak.
     // `nativeBroken` latches on once the system voice has proved unusable.
-    if (caps().tts || nativeBroken) {
+    if (!cloudRefused && (caps().tts || nativeBroken)) {
       // Recorded at the moment the tier is chosen rather than only when the
       // native voice latches over. Without this the panel reported 'system'
       // for a session that had spoken every one of its sentences through
@@ -739,6 +745,10 @@ async function fetchCloudAudio(text: string): Promise<string | null> {
       body: JSON.stringify({ text }),
     })
     if (res.ok) return URL.createObjectURL(await res.blob())
+    if ([401, 402, 403, 429].includes(res.status)) {
+      cloudRefused = true
+      console.warn(`[ayra] ElevenLabs refused speech (${res.status}) — using the browser voice from now on`)
+    }
   } catch {
     /* fall through */
   }
