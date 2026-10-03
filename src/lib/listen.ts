@@ -37,6 +37,10 @@ export type Listener = {
   meter: () => { energy: number; floor: number; threshold: number; speaking: boolean }
 }
 
+/** The microphone level the worklet last reported, 0..1 — for the face. */
+let level = 0
+export const inputLevel = () => level
+
 /** Socket re-dial delays; the bridge restarting is the usual reason for a drop. */
 const RECONNECT_MS = [300, 1000, 2000, 4000, 8000]
 /** Audio held while the socket is down: a few seconds, so one sentence survives a re-dial. */
@@ -118,13 +122,15 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
       h.onEnd()
     } else if (ev.type === 'level') {
       meter = { energy: ev.energy, floor: ev.floor, threshold: ev.threshold, speaking: ev.speaking }
-      h.onLevel(ev.v ?? 0)
+      level = ev.v ?? 0
+      h.onLevel(level)
     }
   }
 
   return {
     stop: () => {
       stopped = true
+      level = 0
       socket?.close()
       socket = null
       try {

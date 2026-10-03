@@ -142,6 +142,40 @@ function DecodeText({ text }: { text: string }) {
   )
 }
 
+/* ------------------------------------------------------------------- meter */
+
+/**
+ * The SIGNAL meter, painting itself.
+ *
+ * It used to read the level through the HUD, which re-rendered the whole HUD —
+ * transcript, rails, badges — on every change, up to sixty times a second while
+ * the microphone heard anything. Now only these two elements change, written
+ * directly, the way the avatar's mouth is.
+ */
+function Meter() {
+  const fill = useRef<HTMLDivElement>(null)
+  const pct = useRef<HTMLDivElement>(null)
+  useEffect(
+    () =>
+      useStore.subscribe((s, prev) => {
+        if (s.level === prev.level) return
+        if (fill.current) fill.current.style.height = `${s.level * 100}%`
+        if (pct.current) pct.current.textContent = `${(s.level * 100).toFixed(0).padStart(3, '0')}%`
+      }),
+    [],
+  )
+  return (
+    <>
+      <div className="meter">
+        <div className="meter-fill" ref={fill} style={{ height: '0%' }} />
+      </div>
+      <div className="rail-item mono" ref={pct}>
+        000%
+      </div>
+    </>
+  )
+}
+
 /* --------------------------------------------------------------------- hud */
 
 export function Hud() {
@@ -151,7 +185,6 @@ export function Hud() {
   const activeTool = useStore((s) => s.activeTool)
   const connected = useStore((s) => s.connected)
   const error = useStore((s) => s.error)
-  const level = useStore((s) => s.level)
   const voice = useStore((s) => s.voice)
 
   // One variable on the root carries the phase colour into every .hud-* rule.
@@ -199,10 +232,7 @@ export function Hud() {
       {/* Right rail: live telemetry, mostly for flavour */}
       <aside className="rail rail-right">
         <div className="rail-title">SIGNAL</div>
-        <div className="meter">
-          <div className="meter-fill" style={{ height: `${level * 100}%` }} />
-        </div>
-        <div className="rail-item mono">{(level * 100).toFixed(0).padStart(3, '0')}%</div>
+        <Meter />
       </aside>
 
       <AnimatePresence>
@@ -277,7 +307,7 @@ export function Hud() {
 
       <footer className="hud-bottom">
         <span className="hint">
-          say <b>“hey {IDENTITY.name.toLowerCase()}”</b> · <kbd>Space</kbd> to talk
+          say <b>“hey {IDENTITY.name.toLowerCase()}”</b> · <kbd>Space</kbd> to talk · <kbd>L</kbd> still
           {voice && (
             <>
               {' · '}

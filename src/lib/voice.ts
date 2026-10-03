@@ -44,6 +44,8 @@ export type VoiceHandlers = {
   onWake: (trailing: string) => void
   /** The user has genuinely started talking. This is the barge-in trigger. */
   onSpeechStart: () => void
+  /** Any speech at all, whatever the mode — time to wake a sleeping brain. */
+  onHearing?: () => void
   /** Live transcript, for the caption under the reactor. */
   onPartial: (text: string) => void
   /** A complete, endpointed utterance. */
@@ -488,6 +490,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
         diag.sessions++
         worded = false
         if (mode === 'deaf') return
+        h.onHearing?.()
         // Standing down mid-thought throws the thought away with it.
         if (mode === 'wake') assemble.cancel()
         // The barge-in: the user has started talking over her, and because the

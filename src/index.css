@@ -1257,3 +1257,14 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .ignition-ring { animation: none }
 }
+
+/* ---------------------------------------------------------------- still mode */
+
+/* The L key: everything holds its pose — no animation, no transitions — so an
+   old laptop spends nothing on the face while it works on something else. */
+html[data-still='1'] *,
+html[data-still='1'] *::before,
+html[data-still='1'] *::after {
+  animation-play-state: paused !important;
+  transition: none !important;
+}

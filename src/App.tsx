@@ -12,13 +12,14 @@ import { forTool, attention } from './lib/fillers'
 import {
   ask,
   warmBridge,
+  warmBrain,
   interrupt,
   watchServers,
   watchBlades,
   watchConnection,
   bridgeServers,
 } from './lib/bridge'
-import { startAnalyser, micLevel } from './lib/audio'
+import { inputLevel } from './lib/listen'
 import { probeCapabilities } from './lib/capabilities'
 import { BARE_NAME, LEADING_NAME } from './lib/wake'
 import { withHonorific } from './identity'
@@ -48,6 +49,23 @@ const FOLLOW_UP_MS = 60000
 /** How long the boot sequence (Boot.tsx) stays up. It only has to cover the
  *  bridge connecting and the voice probe; the old nine seconds were pure wait. */
 const BOOT_MS = 2400
+
+/** "Still" mode (the L key): no animation, no level pump. Remembered per browser. */
+const STILL_KEY = 'ayra.still'
+const still = () => document.documentElement.dataset.still === '1'
+function setStill(on: boolean) {
+  document.documentElement.dataset.still = on ? '1' : '0'
+  try {
+    localStorage.setItem(STILL_KEY, on ? '1' : '0')
+  } catch {
+    /* not remembered this time, nothing worse */
+  }
+}
+try {
+  setStill(localStorage.getItem(STILL_KEY) === '1')
+} catch {
+  setStill(false)
+}
 
 /** crypto.randomUUID needs a secure context, which a LAN address over plain
  *  http is not. Not worth failing a whole turn over an id. */
@@ -346,19 +364,6 @@ export default function App() {
     store.getState().setConnected(bridgeServers())
     store.getState().setVoice(currentVoiceName())
 
-    // The analyser is what makes the signal meter move with your voice. It
-    // needs a getUserMedia stream; speech recognition does not, and gets its
-    // own. So a failure here costs the meter and nothing else — saying "voice
-    // input is unavailable" was both alarming and untrue.
-    try {
-      await startAnalyser()
-    } catch {
-      console.warn(
-        '[ayra] no microphone stream — the signal meter will not move with ' +
-          'your voice. Speech recognition is unaffected.',
-      )
-    }
-
     // Ask the bridge which speech engines exist before the loop starts, so the
     // first turn already uses ElevenLabs when a key is present and the browser
     // fallback when it is not — no flag, no reload.
@@ -372,6 +377,7 @@ export default function App() {
       mode,
       onWake,
       onSpeechStart,
+      onHearing: warmBrain,
       onPartial,
       onUtterance,
       onError: onVoiceError,
@@ -385,16 +391,26 @@ export default function App() {
   useEffect(() => {
     let raf = 0
 
+    /**
+     * The voice level, for her mouth and the SIGNAL meter.
+     *
+     * Light on purpose (task 5.3): only while she listens or speaks, rounded to
+     * steps the eye can tell apart, and written only when it changes — on
+     * standby, or with the room quiet, this does no work at all. Animation
+     * frames also stop by themselves while her window is hidden or minimised.
+     */
     const pump = () => {
-      const st = store.getState()
-      // While speaking, follow AYRA's own output rather than the mic, so her
-      // mouth follows her voice instead of reacting to room noise.
-      const lvl =
-        st.phase === 'speaking' && speaker.current
-          ? speaker.current.level()
-          : micLevel()
-      st.setLevel(lvl)
       raf = requestAnimationFrame(pump)
+      const st = store.getState()
+      let lvl = 0
+      if (!still()) {
+        // While speaking, follow AYRA's own output rather than the mic, so her
+        // mouth follows her voice instead of reacting to room noise.
+        if (st.phase === 'speaking' && speaker.current) lvl = speaker.current.level()
+        else if (st.phase === 'listening' || st.phase === 'waking') lvl = inputLevel()
+      }
+      lvl = Math.round(lvl * 20) / 20
+      if (lvl !== st.level) st.setLevel(lvl)
     }
     pump()
 
@@ -442,6 +458,14 @@ export default function App() {
             )
           }
         })
+        return
+      }
+
+      // L holds her still: every animation paused, the level pump idle — for
+      // when the laptop is busy. Remembered across reloads.
+      if (e.key === 'l' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        setStill(!still())
         return
       }
 

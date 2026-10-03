@@ -419,6 +419,17 @@ export function cancel(): void {
   pending?.finish()
 }
 
+/**
+ * The owner has started talking: wake a sleeping brain now, so its start-up
+ * overlaps the question instead of following it. At most every few seconds.
+ */
+let lastWarm = 0
+export function warmBrain(): void {
+  if (Date.now() - lastWarm < 5000) return
+  lastWarm = Date.now()
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'warm' }))
+}
+
 /** The older name for `cancel()`. */
 export function interrupt(): void {
   cancel()

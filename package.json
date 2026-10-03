@@ -10,6 +10,7 @@
   },
   "scripts": {
     "start": "node scripts/start.mjs",
+    "start:dev": "node scripts/start.mjs --dev",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
