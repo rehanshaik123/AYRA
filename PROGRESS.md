@@ -2,11 +2,12 @@
 
 ## ▶ Continue here
 
-- **Phase:** 3 — AYRA Anywhere · branch `phase-3-anywhere` (Phases 1–2 ✅ on `main`)
-- **Next task:** 3.1 🧑 owner creates the Telegram bot + finds their user ID (steps in chat), then 3.2 Telegram channel
-- **Blockers:** 3.1 needs the owner (Telegram bot token + user ID)
-- **Waiting on owner:** 3.1 Telegram bot · 1.15 voice test · decisions Q1–Q7 (Q5 needed before 3.4, Q6 before 3.6)
-- **Health:** build ✓ · lint 0 · `npm test` 27/27 · smoke ✓ on `claude-opus-5-5`
+- **Plan:** redesigned 2026-10-02 — goals in `docs/VISION.md`, design in `docs/ARCHITECTURE.md` (cloud core + laptop desk), working agreement in CLAUDE.md §2
+- **Phase:** 4 — Always-on core (thin slice: an idea check from the phone with the laptop shut) · not started · Phases 0–3 ✅; `phase-3-anywhere` (Telegram + the redesign docs) waits for the owner's OK to merge into `main`
+- **Next:** Phase 4 intent check — restate the goal, then settle the idea-check answer format, the host (D1), Tailscale (D2) and three test ideas → then 4.1
+- **Blockers:** none for Phase 4. Laptop only: the page file is still off — the HUD in Chrome waits on it (5.6–5.7)
+- **Waiting on owner:** merge OK for Phase 3 · "go" for Phase 4's intent check · page file on → then a HUD re-test in Chrome
+- **Health:** QA 2026-10-03 ([docs/TEST-REPORT.md](docs/TEST-REPORT.md)): 50 / 51 pass — build ✓ · lint 0 · `npm test` 39/39 · API 16/16 · brain 16/16 · Telegram 8/8 · Gmail/Calendar/Drive ✓ · Chrome browsing ✗ unattended · HUD ✓ in-app, untested in Chrome
 
 ## Log — one line per task (what changed — why)
 
@@ -34,6 +35,12 @@
 - 2026-10-02 · 2.5 New `bridge/audit.mjs`: every question, tool run, gate decision, answer, failure and session event → `data/logs/YYYY-MM-DD.jsonl` (owner's local date; text clipped, never tool inputs); `open()` now takes `channel` + `resume` — so "what did AYRA do and why was it allowed?" always has an answer.
 - 2026-10-02 · 2.6 Origin check moved to `bridge/origin.mjs`; tests for wake phrase, identity + persona, origin, state, audit, time; `npm test` (tsx loader for .ts) = 27/27 and part of the Definition of Done — the core now has a safety net. Live: foreign page 403 (HTTP + WebSocket), own page 200.
 - 2026-10-02 · Phase 2 ✅ merged to `main` and pushed — one reusable brain, connector policy, time awareness, reload-proof conversations, audit log, tests.
+- 2026-10-02 · 3.0 Excited personality with light roasting + flirting (owner: "a little more flirty", call me "boss"); voice = ElevenLabs Lily (owner's pick of free voices — Blondie is Voice Library = paid plan) — the owner wanted AYRA lively, not a dry butler.
+- 2026-10-02 · 3.1 Owner made @Ayra_rehan_bot; token in `.env.local`; owner id 1300190813 ("Starboy") read from their first message and saved — only that account can talk to AYRA.
+- 2026-10-02 · 3.2 New `bridge/telegram.mjs` + `TEXT_PROMPT`: AYRA answers the owner on Telegram (long polling, no open ports, typing indicator, late-message note); live test answered the owner's real messages. Bug found live — a burst of messages left "typing…" stuck — fixed by one-question-at-a-time batching, covered by tests (38/38).
+- 2026-10-02 · 3.2+ Owner confirmed "Starboy" is their account, and asked for emoji: `TEXT_PROMPT` now allows usually one, never more than two, none in serious moments; the voice prompt stays emoji-free (TTS would read them), guarded by a test (39/39). Live check: 🎉 on exam news, none on a stressed message.
+- 2026-10-02 · Redesign (docs only): new `docs/VISION.md` (the owner's goals in their words) and `docs/ARCHITECTURE.md` (cloud core + laptop desk; Anthropic terms and prices checked), CLAUDE.md's working agreement replaces "the owner decides everything", PLAN.md rebuilt (Phase 4 thin slice first, every old task mapped, nothing dropped) — the old plan was a generic feature list that stopped for small things and wasn't built around the owner's needs.
+- 2026-10-03 · QA pass on Phases 0–3 → `docs/TEST-REPORT.md`: 50 of 51 checks pass (API 16/16, brain 16/16, Telegram 8/8, HUD 4/4); the one failure is Chrome browsing unattended (the extension's per-site Allow prompt); 5 small defects queued as task 4.7 — the owner asked for an honest picture of what works before Phase 4.
 
 ## Findings worth remembering
 
@@ -42,9 +49,17 @@
 - AYRA's brain session inherits 10 claude.ai connectors (Gmail, Google Calendar, Google Drive, Figma, Canva, Lucid, draw.io, Beautiful.ai, Wispr Flow, Claude Docs). Default-deny blocks their effectful tools today; with writes on, mail could be sent unconfirmed → task 2.1.
 - Windows Chrome control = named pipe `\\.\pipe\claude-mcp-browser-bridge-<user>`; discovery + connect verified, no tool call sent yet.
 - The Claude app's preview pane blocks the microphone — voice must be tested in a real Chrome/Edge window.
+- Keys tested 2026-10-02: ElevenLabs key OK (free plan, 0/10000 credits); voice si0svtk05vPEuvwAW93c = "Blondie - Intense Woman" (Voice Library, professional) → HTTP 402 "Free users cannot use library voices via the API". Premade voices work; Scribe speech-to-text works. Telegram token OK → bot AYRA (@Ayra_rehan_bot), no messages yet.
 - The owner's GitHub repo had one commit ("Initial commit", README `# my_own_jarvis`) with no shared history — merged in, never force-pushed.
+- Laptop power (read 2026-10-02): lid close = **Sleep** on charger and battery, idle sleep = never, Modern Standby (S0) — so closing the lid stops AYRA today; 3.6 needs lid = "Do nothing" on charger (owner changes it). Telegram keeps unread messages 24 h.
+- First owner test in Chrome (2026-10-02 16:39) failed: Claude Code exited 0xC0000409 on every HUD connect, and the reactor's WebGL context was lost (blank page). Cause: Windows hit its memory limit — no page file, 15.3 GB RAM, Chrome 5.5 GB + Claude app 2.5 GB, and Vite's dependency re-optimisation took 1.2 GB at start; System log "low virtual memory" at 16:38:58. The same code passes every probe once memory is free. C: has 417 GB free, so a page file costs nothing.
+- Retest 16:56 with memory freed (commit 8.8/15.3 GB): the brain starts cleanly ("14 MCP servers available"), but Chrome now reports `GL_VENDOR = Disabled` — its GPU process crashed in the low-memory events and Chrome keeps WebGL off until it is fully restarted.
+- QA 2026-10-03: Gmail, Calendar and Drive reads work through AYRA (their first real use). The Claude extension only shows tabs AYRA opened itself, and asks a person to "Allow" every new site — unattended browsing times out (T13). Chrome was restarted 2026-10-02 17:50 (3D back); the page file is still off.
+- The Claude app's Terminal panel can't run commands here (its shell-integration script is missing); start AYRA for the owner with a minimized `cmd /c title AYRA & npm start` window instead.
 
 ## Known issues
 
 - `index.html` CSP hard-codes `localhost:8787` — must change for phone access (3.7).
 - `@picovoice/*` packages are installed but unused (wake word is speech-based) — revisit at 7.3.
+- From the QA pass (task 4.7): the HUD footer says "VOICE: MICROSOFT ZIRA" while Lily speaks; "SYSTEMS: NONE LINKED" ignores claude.ai connectors; an interrupted turn is logged as "The turn failed part way through."; `setup.mjs` and `.env.example` point to `decideTool()` in server.mjs (now `gate.mjs`); README and `.env.example` still say voice "George" and no honorific; Vite re-optimises on every port change (1.2 GB spike).
+- AYRA sometimes offers things it cannot do yet — reminders (no scheduler until 5.1), drafting mail (read-only until 3.3) — fix with those tasks, or a persona line if the owner wants it sooner.

@@ -5,17 +5,17 @@
  * AYRA says something the instant work starts — then goes quiet until there is
  * an answer. One acknowledgement, no progress chatter.
  *
- * The phrasing follows the character's actual grammar rather than generic
- * assistant-speak, which matters more than it sounds:
+ * The lines carry AYRA's character — excited, warm, quick — the same voice as
+ * the persona in bridge/persona.mjs:
  *
- *   - Working lines are subjectless present participles: "Compiling.",
- *     "Cross-referencing." Not "I'm now checking" and never "let me".
- *   - There is no snap-to compliance formula. "Right away" and "At once" are
- *     not in his vocabulary; acknowledgement is deferential, not eager.
- *   - No filler words, no enthusiasm, no apology, no exclamation marks.
- *   - The honorific (config/identity.json — "sir", "boss", or none at all)
- *     fronted means urgency; final means routine. These are all routine, so
- *     it goes at the end, and only sometimes. `h()` attaches it when one is
+ *   - Short and bright: "On it!", "Ooh, digging in." Never "let me check".
+ *   - Eager is fine; padding is not. Every line is a few words at most,
+ *     because the answer is what they are waiting for.
+ *   - No roasting or flirting here: a filler fires on every tool call, and a
+ *     tease that repeats on schedule stops being charming. The persona keeps
+ *     those for the right moment.
+ *   - The owner's name or title (config/identity.json, empty for none) goes
+ *     at the end, and only sometimes. `h()` attaches it when one is
  *     configured and leaves the line bare when not.
  */
 
@@ -25,34 +25,32 @@ const HONORIFIC = IDENTITY.honorific.trim()
 
 /** Said as soon as the first tool fires, before any answer exists. */
 const WORKING = [
-  h('Working on it.'),
-  'Compiling.',
-  'Retrieving.',
-  'Accessing the archive.',
-  'Cross-referencing.',
-  'Running the query now.',
-  'Searching.',
-  'Under way.',
+  h('On it!'),
+  'Ooh, digging in.',
+  'Looking now!',
+  'Hunting it down.',
+  'Pulling it up.',
+  'Okay, searching!',
+  'Give me two seconds.',
 ]
 
 /** Acknowledging an order where no tool is involved. */
 const ACKNOWLEDGE = [
-  h('As you wish.'),
-  h('Very good.'),
-  'Certainly.',
-  'Understood.',
-  'Consider it done.',
-  h('Directly.'),
+  h('You got it!'),
+  'Done and done.',
+  'Ooh, okay!',
+  'Consider it handled.',
+  h('On it!'),
 ]
 
 /** Answering to the name, before the user has said what they want. */
 const ATTENTION = [
-  h('Yes?'),
-  // The bare vocative only exists when there is something to say: "Sir?"
-  ...(HONORIFIC ? [`${HONORIFIC[0].toUpperCase()}${HONORIFIC.slice(1)}?`] : []),
-  h('At your service.'),
-  'Standing by.',
-  HONORIFIC ? h('Awake.') : 'Listening.',
+  h('Hey!'),
+  // Just their name, bright, when there is a name to say: "Rehan!"
+  ...(HONORIFIC ? [`${HONORIFIC[0].toUpperCase()}${HONORIFIC.slice(1)}!`] : []),
+  "I'm here!",
+  'Hi! What do you need?',
+  'Listening!',
 ]
 
 /**
@@ -98,7 +96,7 @@ type Rule = {
   lines: string[]
 }
 
-const FOOTAGE = ['Assembling the footage.', 'Rendering the sequence.']
+const FOOTAGE = ['Rolling the footage!', 'Cutting it together.']
 
 const BY_TOOL: Rule[] = [
   // Video sits above image because higgsfield and palmier both do either, so
@@ -108,50 +106,50 @@ const BY_TOOL: Rule[] = [
   {
     server: /higgsfield|openrouter-image|dalle|flux|midjourney/,
     tool: /image|photo|thumbnail|render|upscale|seedream/,
-    lines: ['Rendering.', 'Composing it now.'],
+    lines: ['Ooh, making something pretty.', 'Painting it now!'],
   },
   // The editors, once the two rules that read the verb have had their turn.
   { server: /palmier|heygen|runway|descript/, lines: FOOTAGE },
   {
     server: /playwright|puppeteer|browserbase|chrome/,
     tool: /\bbrowser\b|navigate/,
-    lines: ['Opening the browser.', 'Navigating.'],
+    lines: ['Opening the browser!', 'Heading there now.'],
   },
   {
     server: /android|\badb\b|simulator/,
     tool: /\bdevice\b|\bapk\b|\bphone\b/,
-    lines: ['Reaching the device.', 'Connecting to your phone.'],
+    lines: ['Poking your phone.', 'Reaching your phone!'],
   },
   {
     server: /gmail|\bmail\b/,
     tool: /gmail|\bmail\b|email|inbox/,
-    lines: ['Checking your mail.', 'Reading the inbox.'],
+    lines: ['Peeking at your inbox.', 'Checking your mail!'],
   },
   // Calendar keys off "calendar" alone. "event" used to live here, which is how
   // a Mixpanel event query came out as "Checking your calendar."
   {
     tool: /calendar|\bdiary\b|\bmeeting\b/,
-    lines: ['Checking your calendar.', 'Consulting the diary.'],
+    lines: ['Checking your calendar!', 'Looking at your day.'],
   },
   {
     server: /elevenlabs|openai-tts/,
     tool: /speech|\bvoice\b|\btts\b|text_to_sound/,
-    lines: ['Synthesising.', h('Working on it.')],
+    lines: ['Warming up my voice.', h('On it!')],
   },
   {
     server: /spotify|sonos/,
     tool: /\bplay\b|\bmusic\b|playlist|\btrack\b/,
-    lines: ['Queuing it up.', 'Putting it on.'],
+    lines: ['Queuing it up!', 'Ooh, good choice.'],
   },
   {
     server: /^home|homeassistant|\bhue\b|\bhass\b/,
     tool: /\blights?\b|thermostat|\bdimmer\b/,
-    lines: ['Adjusting it now.', h('Seeing to it.')],
+    lines: ['Adjusting it now!', h('On it!')],
   },
   {
     server: /github|linear|jira|sentry/,
     tool: /\brepo\b|repository|\bissues?\b|pull_request|\bcommit\b/,
-    lines: ['Checking the repository.', 'Consulting the tracker.'],
+    lines: ['Checking the repo.', 'Looking at the tracker!'],
   },
   // Also where the anonymously named analytics servers land — theirs are bare
   // UUIDs, so only the tool half says anything: Get-Report, Get-Events,
@@ -160,12 +158,12 @@ const BY_TOOL: Rule[] = [
   {
     server: /mixpanel|clarity|posthog|amplitude/,
     tool: /analytic|\bmetrics?\b|\breports?\b|\bevents?\b|cohort|funnel|dashboard|\bquery\b/,
-    lines: ['Running the query.', 'Pulling the figures.'],
+    lines: ['Crunching the numbers!', 'Pulling the figures.'],
   },
   {
     server: /\bexa\b|serper|serpapi|perplexity|tavily|brave/,
     tool: /search|\bweb\b|\bfetch\b|crawl|research/,
-    lines: ['Searching.', 'Consulting the record.'],
+    lines: ['Searching!', 'Ooh, looking it up.'],
   },
 ]
 

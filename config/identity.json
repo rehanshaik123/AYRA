@@ -3,12 +3,13 @@
   "name": "AYRA",
   "wordmark": "A.Y.R.A.",
   "tagline": "Personal Intelligence System",
-  "honorific": "",
+  "honorific": "boss",
   "language": "en-IN",
   "timezone": "Asia/Kolkata",
   "voice": {
     "gender": "female",
-    "prefer": []
+    "prefer": [],
+    "elevenLabsId": "pFZP5JQG7iQjIQuC4Bku"
   },
   "wake": {
     "names": ["ayra", "ayrah", "aira", "airah", "eyra", "eira", "aiyra", "ayira", "ayera", "heyra", "haira", "hera"],

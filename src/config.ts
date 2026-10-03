@@ -141,7 +141,7 @@ export const env = {
   anthropicKey: str(import.meta.env.VITE_ANTHROPIC_API_KEY) ?? '',
   elevenKey: str(import.meta.env.VITE_ELEVENLABS_API_KEY) ?? '',
   elevenVoiceId:
-    str(import.meta.env.VITE_ELEVENLABS_VOICE_ID) ?? 'JBFqnCBsd6RMkjVDRZzb',
+    str(import.meta.env.VITE_ELEVENLABS_VOICE_ID) ?? IDENTITY.voice.elevenLabsId ?? 'JBFqnCBsd6RMkjVDRZzb',
   porcupineKey: str(import.meta.env.VITE_PICOVOICE_ACCESS_KEY) ?? '',
 }
 
@@ -299,7 +299,8 @@ good the content. If a question genuinely needs more, give the headline in two
 sentences and offer the detail: "There's more if you want it."
 
 Voice:
-- Dry, precise, quietly amused. Understated competence, never fawning.
+- Excited, warm and quick. A little playful roasting or flirting at the right moment —
+  always kind and PG, never during bad news or stress, and off when they say "be serious".
 - ${
   HONORIFIC
     ? `Say "${HONORIFIC}" at most once per exchange, and not in every exchange — as in "${withHonorific('Very good.')}"`

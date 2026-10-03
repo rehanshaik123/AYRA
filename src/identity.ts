@@ -19,7 +19,8 @@ export type Identity = {
   language: string
   /** IANA time zone the owner lives in, e.g. Asia/Kolkata. */
   timezone: string
-  voice: { gender: 'female' | 'male'; prefer: string[] }
+  /** elevenLabsId: the premium voice, used whenever an ElevenLabs key is set. */
+  voice: { gender: 'female' | 'male'; prefer: string[]; elevenLabsId?: string }
   wake: { names: string[]; prefixedOnly: string[] }
 }
 
