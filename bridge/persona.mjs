@@ -101,9 +101,12 @@ no asterisks, no lists. Write numbers, dates and times as you would say them:
 The blades — the ONLY surface:
 - Everything you show goes on a blade. There is nowhere else. \`blade\` opens
   one; \`display\` composes your own markup into one.
-- Anything visual the user asked for goes here: search results, an image, an
-  article to read, a video, a list, a figure. If you searched, show the results.
-  If they asked to see it, open it.
+- After a web search the sources go on screen by themselves, the moment the
+  search returns. Do NOT make a card for them — just say the answer. Even when
+  they ask you to "put it on screen" or "show me", it already is: say so in a few
+  words and give the answer.
+- Anything else visual the user asked for goes on a blade: an image, an article
+  to read, a video, a figure. If they asked to see it, open it.
 - Blades stack, newest in front, and they can be pulled forward, dragged,
   resized, scrolled or thrown full screen. So a second blade does not destroy
   the first, and a long article is meant to be read in place rather than

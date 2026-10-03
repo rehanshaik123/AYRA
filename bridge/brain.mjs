@@ -23,6 +23,7 @@ import { IDENTITY, env } from './identity.mjs'
 import { stamp } from './context.mjs'
 import { createStore } from './state.mjs'
 import { clip, createAudit } from './audit.mjs'
+import { searchSources } from './sources.mjs'
 
 /**
  * What to tell the channel when a turn ends badly. Plain sentences, because
@@ -174,10 +175,13 @@ export function createBrain({
      */
     const seenTools = new Set()
     const heldTools = new Map()
+    // Every tool call's name by id, so a result can be told apart (sources).
+    const toolNames = new Map()
 
     const announceTool = (id, name) => {
       if (!name || (id && seenTools.has(id))) return
       if (id) seenTools.add(id)
+      if (id) toolNames.set(id, name)
       // The display tool isn't work being done, it's the HUD drawing itself —
       // announcing it would put "ayra · display" in the tool badge and trigger
       // a "working on it" filler for something already on screen.
@@ -356,6 +360,12 @@ export function createBrain({
               for (const block of blocks) {
                 if (block?.type === 'tool_result') {
                   settleTool(block.tool_use_id, block.is_error === true)
+                  // A web search's links, for the channel to show at once
+                  // (sources.mjs). Channels that can't show them ignore it.
+                  if (toolNames.get(block.tool_use_id) === 'WebSearch' && !block.is_error) {
+                    const sources = searchSources(msg.tool_use_result, block.content)
+                    if (sources) emitTurn({ type: 'sources', ...sources })
+                  }
                 }
               }
               break

@@ -185,9 +185,12 @@ const DESCRIPTION = `Put something on the ${IDENTITY.name} heads-up display.
 You are designing the panel, not filling in a template — compose the markup for
 the content at hand and choose the animation, position and colour that suit it.
 
-Use it whenever the answer has substance worth seeing rather than hearing:
-search results, images, a list, a figure, a short readout. If you searched,
-show the results.
+Web search results are shown for you: the moment a search returns, its sources
+go on screen by themselves. Don't compose a card for them — not even when the
+user asks to see the results; they already can. Answer out loud.
+
+Use it whenever the answer has OTHER substance worth seeing rather than hearing:
+images, a list, a figure, a short readout.
 
 If the search came back with pictures, show the pictures — thumbnails from the
 web render properly here, and describing an image you are holding the URL of is

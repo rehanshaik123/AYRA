@@ -22,6 +22,7 @@ import { createOriginCheck } from './origin.mjs'
 import { createAudit } from './audit.mjs'
 import { startTelegram } from './telegram.mjs'
 import { displayServer } from './panels.mjs'
+import { sourcesCard } from './sources.mjs'
 import { homedir } from 'node:os'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -63,19 +64,24 @@ const MODEL = env('MODEL', 'claude-opus-5-5')
 /**
  * How hard the model thinks before answering.
  *
- * This was 'low', on the reasoning that a voice assistant is judged on latency
- * — and that is true right up until the answer is thin. Low effort scopes the
- * work tightly to what was literally asked: fewer tool calls, less
- * cross-referencing, no second look. On a model of this tier that is leaving
- * most of it on the table.
- *
- * 'medium' is the compromise worth having here. It reasons and reaches for
- * tools noticeably more than 'low' while still answering inside the window a
- * spoken conversation tolerates. Raise it to 'high' or 'xhigh' when quality
- * matters more than pace; drop back to 'low' when every second of dead air
- * shows. Set explicitly: Opus 5.5 defaults to 'medium' but other models do not.
+ * 'low', measured (PROGRESS.md, task 4.4): on a search question 'medium' spent
+ * about four and a half seconds thinking before it said a word, and the answers
+ * were no better for a spoken reply of two sentences. The owner wants no lag,
+ * so the default is the fastest setting that still answers well; raise it with
+ * AYRA_EFFORT when a task genuinely needs the depth.
  */
-const EFFORT = env('EFFORT', 'medium')
+const EFFORT = env('EFFORT', 'low')
+
+/**
+ * Every tool loaded up front, none deferred behind ToolSearch.
+ *
+ * Claude Code defers built-ins like WebSearch and WebFetch behind a search step
+ * to save context on big tool lists. AYRA's list is five tools, so the saving
+ * is nothing and the cost is a whole extra model round trip — measured at 1–3
+ * seconds — before her first search of a conversation. The SDK hands this
+ * process's environment to Claude Code, so setting it here is enough.
+ */
+process.env.ENABLE_TOOL_SEARCH ??= 'false'
 
 /**
  * Every claude.ai connector on the owner's account, as Claude Code itself
@@ -654,12 +660,16 @@ wss.on('connection', (socket) => {
   // display server. Neither is something the owner can use, so the SYSTEMS rail
   // shows only what is really live.
   const removed = new Set(GATE.excludedConnectors.map((n) => `claude.ai ${n}`))
-  const emit = (msg) =>
-    send(
-      msg.type === 'ready' && Array.isArray(msg.servers)
-        ? { ...msg, servers: msg.servers.filter((n) => n !== 'ayra' && !removed.has(n)) }
-        : msg,
-    )
+  const emit = (msg) => {
+    if (msg.type === 'ready' && Array.isArray(msg.servers)) {
+      return send({ ...msg, servers: msg.servers.filter((n) => n !== 'ayra' && !removed.has(n)) })
+    }
+    // A web search's links go straight onto a blade — see sources.mjs.
+    if (msg.type === 'sources') {
+      return send({ type: 'blade', blade: sourcesCard(msg), ask: msg.ask })
+    }
+    send(msg)
+  }
 
   // Answer the HUD straight away rather than making it wait for the agent's
   // first turn. Refined later by the real init message.
