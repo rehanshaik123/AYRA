@@ -137,7 +137,7 @@ const RIGHT_EYE = { cx: 237, cy: 190 }
 export function Avatar() {
   const phase = useStore((s) => s.phase)
   const error = useStore((s) => s.error)
-  const accent = useStore((s) => accentFor(s.phase, s.ui))
+  const accent = useStore((s) => accentFor(s.phase))
   const root = useRef<HTMLDivElement>(null)
   const [blink, setBlink] = useState(false)
   const [oops, setOops] = useState(false)

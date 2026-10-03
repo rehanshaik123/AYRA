@@ -1,14 +1,10 @@
-import type { AskHandlers } from './anthropic'
-import type { Blade, Panel } from '../store'
+import type { Blade } from '../store'
 import { BRIDGE_WS_URL } from '../config'
 import { withHonorific } from '../identity'
 
 /**
- * Client for the local bridge (see bridge/server.mjs).
- *
- * Same `ask()` shape as the browser-direct path, so App.tsx doesn't care which
- * brain is behind it. The difference is what's reachable: this one runs on your
- * machine, so every MCP server in your Claude Code config is in play.
+ * Client for the local bridge (see bridge/server.mjs) — the face's only way to
+ * reach the brain.
  *
  * The socket is the session. The bridge holds one Claude Agent SDK query per
  * connection and the whole conversation lives inside it, so a dropped socket
@@ -16,6 +12,13 @@ import { withHonorific } from '../identity'
  * still shows it. That is why the reconnect below is loud rather than
  * invisible: `watchConnection` exists so the HUD can say so.
  */
+
+export type AskHandlers = {
+  /** Fires for each chunk of the spoken answer. */
+  onText: (delta: string) => void
+  /** Fires when Claude starts running a tool. */
+  onTool: (name: string) => void
+}
 
 /** Anything the bridge sends. Deliberately loose — a frame from a future
  *  bridge build should be ignored, not crash the turn. */
@@ -25,16 +28,8 @@ type Frame = {
   name?: string
   text?: string
   message?: string
-  panel?: Panel
   blade?: Blade
-  op?: string
-  args?: unknown
-  id?: string
   ask?: string
-  reason?: string
-  mode?: string
-  seconds?: number
-  when?: string
   servers?: Array<string | { name?: string }>
 }
 
@@ -55,50 +50,11 @@ export function watchServers(fn: (s: string[]) => void) {
   onServers = fn
 }
 
-/** Panels arrive out of band — they're pushed while a turn is in flight,
- *  not returned by it. */
-let onPanel: ((panel: Panel) => void) | null = null
-export function watchPanels(fn: (panel: Panel) => void) {
-  onPanel = fn
-}
-
-/**
- * The one request the bridge makes of us rather than the other way round.
- *
- * Everything else on this socket is pushed at the browser and needs no answer.
- * A camera frame has to travel back, so this handler is registered by the app
- * and its result is returned against the request's id.
- */
-export type CaptureRequest = {
-  /** 'look' for a single frame, 'watch' for a grid over time. */
-  mode: 'look' | 'watch'
-  reason: string
-  seconds: number
-  /** 'now' records forward; 'past' reads the rolling buffer. */
-  when: 'now' | 'past'
-}
-export type CaptureResult = { data?: string; mimeType?: string; error?: string }
-
-let onCapture: ((req: CaptureRequest) => Promise<CaptureResult>) | null = null
-export function watchCapture(fn: (req: CaptureRequest) => Promise<CaptureResult>) {
-  onCapture = fn
-}
-
-/** Blades arrive the same way panels do — pushed mid-turn, so the article is
- *  already open as he starts the sentence about it. */
+/** Blades arrive out of band — pushed mid-turn by the `display` and `blade`
+ *  tools, so the result is already open as she starts the sentence about it. */
 let onBlade: ((blade: Blade) => void) | null = null
 export function watchBlades(fn: (blade: Blade) => void) {
   onBlade = fn
-}
-
-/** Commands that redress the interface — theme, reactor, orbits, effects. Same
- *  out-of-band route as panels: JARVIS issues them while he is still mid-answer
- *  so the change is on screen as he says it, which means they cannot ride back
- *  on the turn's result. The op/args pair stays untyped here on purpose — this
- *  module is a transport, and the store is where the shape is decided. */
-let onUi: ((op: string, args: any) => void) | null = null
-export function watchUi(fn: (op: string, args: any) => void) {
-  onUi = fn
 }
 
 /**
@@ -178,36 +134,8 @@ function dispatch(ws: WebSocket) {
         .filter(Boolean)
       onServers?.(servers)
       firstReady.resolve()
-    } else if (msg.type === 'panel' && msg.panel) {
-      onPanel?.(msg.panel)
     } else if (msg.type === 'blade' && msg.blade) {
       onBlade?.(msg.blade)
-    } else if (msg.type === 'capture' && msg.id) {
-      const id = msg.id
-      const reply = (payload: Record<string, unknown>) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'reply', id, ...payload }))
-        }
-      }
-      if (!onCapture) {
-        reply({ error: 'The interface has no camera handler.' })
-      } else {
-        // Always answers, even on failure: the bridge is holding a turn open
-        // waiting for this, and a rejection that never arrives is a turn that
-        // hangs until the idle timer notices.
-        onCapture({
-          mode: msg.mode === 'watch' ? 'watch' : 'look',
-          reason: msg.reason ?? '',
-          seconds: Math.max(2, Math.min(15, Number(msg.seconds) || 6)),
-          when: msg.when === 'past' ? 'past' : 'now',
-        })
-          .then(reply)
-          .catch((err) => reply({ error: String(err?.message ?? err) }))
-      }
-    } else if (msg.type === 'ui' && msg.op) {
-      // A `ui` frame with no args is normal — reset and clear take none — so an
-      // absent args object is an empty one, not a reason to drop the command.
-      onUi?.(msg.op, (msg.args ?? {}) as Record<string, unknown>)
     }
   })
 }
@@ -496,7 +424,7 @@ export function interrupt(): void {
   cancel()
 }
 
-/** `mcp__higgsfield__generate_image` -> `higgsfield · generate image` */
+/** `mcp__ayra__display` -> `ayra · display` */
 function prettyToolName(raw: string): string {
   if (!raw.startsWith('mcp__')) return raw
   const [, server, ...rest] = raw.split('__')

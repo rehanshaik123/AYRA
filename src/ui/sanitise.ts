@@ -14,23 +14,7 @@ import { BRIDGE_HTTP_URL } from '../config'
  */
 
 /**
- * Paths that are genuinely on this machine's disk, as opposed to app-relative
- * URLs that happen to start with a slash. `/vite.svg` is one of our own static
- * assets; `/Users/you/shot.png` is a screenshot JARVIS just took.
- */
-const DISK_PATH =
-  /^\/(Users|home|root|Volumes|Applications|System|Library|private|tmp|var|opt|mnt|media|srv|data)\//
-
-/**
- * Every media URL is rewritten to point at the bridge. Two destinations, for
- * different reasons.
- *
- * `/file` — a page served over http can't load `file:///…`, and the interesting
- * images (phone screenshots, generated art) land on disk as absolute paths.
- *
- * Only real disk paths qualify. Rewriting every src beginning with a slash also
- * caught the app's own assets, so `<img src="/vite.svg">` turned into a read of
- * `/vite.svg` on the host, 404'd, and rendered as 'image unavailable'.
+ * Every remote media URL is rewritten to point at the bridge.
  *
  * `/img` and `/media` — remote http(s) sources, proxied rather than refused. The
  * browser still only ever talks to localhost, which is what lets the page CSP
@@ -44,12 +28,6 @@ const DISK_PATH =
 function rewriteSrc(el: Element, attr: 'src' | 'poster', route: 'img' | 'media') {
   const raw = el.getAttribute(attr) ?? ''
   if (!raw) return
-
-  const path = raw.replace(/^file:\/\//, '')
-  if (DISK_PATH.test(path)) {
-    el.setAttribute(attr, `${BRIDGE_HTTP_URL}/file?path=${encodeURIComponent(path)}`)
-    return
-  }
 
   if (!/^https?:\/\//i.test(raw)) return
   // Already ours. Proxying the proxy would ask the bridge to fetch itself.
@@ -251,7 +229,8 @@ export function sanitisePanelHtml(html: string): string {
       // allowlisted embed. Supplying ALLOWED_TAGS/ALLOWED_ATTR replaces
       // DOMPurify's defaults wholesale, so there is deliberately no FORBID_*
       // list here — one would read as defence in depth while doing nothing.
-      ALLOWED_URI_REGEXP: /^(?:data:(?:image|video|audio)\/|file:\/\/|https?:\/\/|\/)/i,
+      // file:// is not on it: AYRA has no access to the laptop's files yet.
+      ALLOWED_URI_REGEXP: /^(?:data:(?:image|video|audio)\/|https?:\/\/|\/)/i,
     }),
     'text/html',
   )

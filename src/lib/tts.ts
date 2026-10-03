@@ -1,12 +1,4 @@
-import {
-  env,
-  USE_ELEVENLABS,
-  BACKEND,
-  TTS_ENGINE,
-  KOKORO_VOICE,
-  BRIDGE_HTTP_URL,
-} from '../config'
-import * as kokoro from './kokoro'
+import { BRIDGE_HTTP_URL } from '../config'
 import { caps } from './capabilities'
 import { IDENTITY } from '../identity'
 import { setOffHonorific } from './vocative'
@@ -14,11 +6,10 @@ import { setOffHonorific } from './vocative'
 /**
  * Speech output.
  *
- * The browser's own speechSynthesis is the default because it is by far the
- * fastest thing available: it runs on-device, so there is no request, no
- * generation wait and no download — speech starts on the next frame. A cloud
- * voice sounds better but costs a few hundred milliseconds per sentence, and in
- * conversation that gap is much more noticeable than the timbre.
+ * AYRA speaks with her ElevenLabs voice whenever the bridge has a key (it
+ * holds the key and makes the call; the browser never sees it). The browser's
+ * own speechSynthesis is the fallback — no key, or a sentence ElevenLabs
+ * refused or failed — so she is never silent.
  *
  * Either way, text is cut at sentence boundaries as it streams in and spoken a
  * sentence at a time, so JARVIS starts talking while Claude is still writing.
@@ -64,7 +55,7 @@ const ECHO_TAIL_MS = 1800
  * indistinguishable. This tells them apart at a glance.
  */
 export const diag = {
-  engine: 'system' as 'system' | 'kokoro' | 'elevenlabs',
+  engine: 'system' as 'system' | 'elevenlabs',
   /** Utterances handed to an engine — the OS voice or an audio element. */
   spoken: 0,
   /**
@@ -261,10 +252,7 @@ function pickVoice(): SpeechSynthesisVoice | null {
  *  always naming a speechSynthesis voice that a cloud or neural engine has
  *  quietly replaced. */
 export function currentVoiceName(): string {
-  if (USE_ELEVENLABS || caps().tts) return 'ElevenLabs'
-  if (TTS_ENGINE === 'kokoro' && !kokoro.isUnavailable()) {
-    return KOKORO_VOICE.replace(/^[ab][mf]_/, '')
-  }
+  if (caps().tts) return 'ElevenLabs'
   return pickVoice()?.name ?? 'default'
 }
 
@@ -389,7 +377,7 @@ export function createSpeaker(): Speaker {
     // premium path automatic with no flag to set. It falls back to the browser
     // voice on any failure, so a student without a key still hears him speak.
     // `nativeBroken` latches on once the system voice has proved unusable.
-    if (USE_ELEVENLABS || caps().tts || nativeBroken) {
+    if (caps().tts || nativeBroken) {
       // Recorded at the moment the tier is chosen rather than only when the
       // native voice latches over. Without this the panel reported 'system'
       // for a session that had spoken every one of its sentences through
@@ -397,10 +385,6 @@ export function createSpeaker(): Speaker {
       // exactly when you are trying to work out which engine is at fault.
       diag.engine = 'elevenlabs'
       return fetchCloudAudio(text).catch(() => null)
-    }
-    if (TTS_ENGINE === 'kokoro' && !kokoro.isUnavailable()) {
-      diag.engine = 'kokoro'
-      return kokoro.speak(text).catch(() => null)
     }
     diag.engine = 'system'
     return null
@@ -600,7 +584,7 @@ export function createSpeaker(): Speaker {
       // see the onplaying handler below.
       diag.spoken++
       diag.lastText = text.slice(0, 60)
-      diag.voice = diag.engine === 'kokoro' ? KOKORO_VOICE : 'ElevenLabs'
+      diag.voice = 'ElevenLabs'
 
       let read: (() => number) | null = null
       const ctx = outputContext()
@@ -745,49 +729,18 @@ export function createSpeaker(): Speaker {
   }
 }
 
-/** Only used when USE_ELEVENLABS is on. Bridge proxy first (it already holds
- *  the key), then a direct key, then null to fall back to the native voice. */
+/** ElevenLabs through the bridge, which holds the key. null on any failure,
+ *  which falls back to the browser's own voice for that sentence. */
 async function fetchCloudAudio(text: string): Promise<string | null> {
-  if (BACKEND === 'bridge') {
-    try {
-      const res = await fetch(`${BRIDGE_HTTP_URL}/tts`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text }),
-      })
-      if (res.ok) return URL.createObjectURL(await res.blob())
-    } catch {
-      /* fall through */
-    }
+  try {
+    const res = await fetch(`${BRIDGE_HTTP_URL}/tts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+    if (res.ok) return URL.createObjectURL(await res.blob())
+  } catch {
+    /* fall through */
   }
-
-  if (env.elevenKey) {
-    try {
-      const res = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${env.elevenVoiceId}/stream` +
-          `?output_format=mp3_22050_32&optimize_streaming_latency=3`,
-        {
-          method: 'POST',
-          headers: {
-            'xi-api-key': env.elevenKey,
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify({
-            text,
-            model_id: 'eleven_flash_v2_5',
-            voice_settings: {
-              stability: 0.4,
-              similarity_boost: 0.75,
-              speed: 1.05,
-            },
-          }),
-        },
-      )
-      if (res.ok) return URL.createObjectURL(await res.blob())
-    } catch {
-      /* fall through */
-    }
-  }
-
   return null
 }

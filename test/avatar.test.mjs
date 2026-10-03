@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  poseFor, mouthOpen, nextBlinkMs, pickFace, poseOverride, snacking,
+  poseFor, mouthOpen, nextBlinkMs, poseOverride, snacking,
   SNACK_AFTER_MS, SNACK_EVERY_MS, SNACK_FOR_MS, POSES, LOOKS,
 } from '../src/lib/avatar.ts'
 
@@ -45,13 +45,6 @@ test('blinks come every 2.4–6 s', () => {
   assert.equal(nextBlinkMs(0), 2400)
   assert.equal(nextBlinkMs(1), 6000)
   assert.equal(nextBlinkMs(7), 6000)
-})
-
-test('the face: last choice, then the setting, then the avatar', () => {
-  assert.equal(pickFace(null, undefined), 'avatar')
-  assert.equal(pickFace(null, 'reactor'), 'reactor')
-  assert.equal(pickFace('avatar', 'reactor'), 'avatar')
-  assert.equal(pickFace('nonsense', 'REACTOR'), 'reactor')
 })
 
 test('every pose has a complete look, and only talking moves the mouth with the voice', () => {

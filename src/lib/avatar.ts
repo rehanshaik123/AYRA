@@ -1,15 +1,14 @@
 /**
  * The avatar face's decisions, kept apart from its drawing so they can be
  * tested without a browser: which pose AYRA takes for what the app is doing,
- * how far her mouth opens for a given loudness, and which face is on screen.
+ * how far her mouth opens for a given loudness.
  *
- * The avatar exists because the 3D reactor is heavy on the owner's laptop
- * (about 1.5 CPU cores and 1 GB in Chrome, 48 fps, measured 2026-10-03). An
- * SVG character animated with CSS transforms costs a small fraction of that.
+ * The avatar replaced the upstream 3D reactor, which was heavy on the owner's
+ * laptop (about 1.5 CPU cores and 1 GB in Chrome, 48 fps, measured
+ * 2026-10-03). An SVG character animated with CSS transforms costs a small
+ * fraction of that.
  */
 import type { Phase } from '../store'
-
-export type Face = 'avatar' | 'reactor'
 
 export type Pose =
   | 'sleep' // before INITIALISE — dozing
@@ -100,15 +99,6 @@ export function mouthOpen(level: number): number {
 /** Milliseconds until the next blink: people blink every 2–6 s, irregularly. */
 export function nextBlinkMs(random: number): number {
   return Math.round(2_400 + Math.min(1, Math.max(0, random)) * 3_600)
-}
-
-/** The face to show: what the owner picked last (F key), else the setting, else the avatar. */
-export function pickFace(stored: string | null | undefined, setting: string | null | undefined): Face {
-  for (const v of [stored, setting]) {
-    const f = String(v ?? '').trim().toLowerCase()
-    if (f === 'avatar' || f === 'reactor') return f
-  }
-  return 'avatar'
 }
 
 /** A `?pose=` URL override, for previewing a pose without talking. */
