@@ -1,5 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Scene } from './scene/Scene'
+import { Avatar } from './ui/Avatar'
+import { pickFace, type Face } from './lib/avatar'
 import { Hud } from './ui/Hud'
 import { Boot } from './ui/Boot'
 import { Ignition } from './ui/Ignition'
@@ -73,6 +75,25 @@ export default function App() {
   const history = useRef<Msg[]>([])
   const speaker = useRef<ReturnType<typeof createSpeaker> | null>(null)
   const voice = useRef<Voice | null>(null)
+
+  // Which face is on screen: the light avatar (default) or the 3D reactor.
+  const [face, setFace] = useState<Face>(() => {
+    let stored: string | null = null
+    try {
+      stored = localStorage.getItem('ayra.face')
+    } catch {
+      /* storage blocked — fall back to the setting */
+    }
+    return pickFace(stored, import.meta.env.VITE_FACE)
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem('ayra.face', face)
+    } catch {
+      /* not remembered this time, nothing worse */
+    }
+    document.documentElement.dataset.face = face
+  }, [face])
 
   /**
    * Monotonic turn counter. Every await in a turn checks it on the way out:
@@ -511,6 +532,9 @@ export default function App() {
     // first turn already uses ElevenLabs when a key is present and the browser
     // fallback when it is not — no flag, no reload.
     await probeCapabilities()
+    // Again, now that the engines are known: set before the probe, the label named
+    // the browser's voice while every sentence was spoken by ElevenLabs.
+    store.getState().setVoice(currentVoiceName())
 
     // One voice loop, started once, running until the page closes.
     voice.current = await startVoice({
@@ -649,6 +673,14 @@ export default function App() {
         return
       }
 
+      // F swaps the face: the light avatar or the 3D reactor. Remembered across
+      // reloads, because the reactor costs about 1.5 CPU cores on this laptop.
+      if (e.key === 'f' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        setFace((was) => (was === 'avatar' ? 'reactor' : 'avatar'))
+        return
+      }
+
       // Escape stands the whole thing down — the one thing the old build had
       // no key for at all.
       if (e.key === 'Escape') {
@@ -695,7 +727,7 @@ export default function App() {
 
   return (
     <>
-      <Scene />
+      {face === 'reactor' ? <Scene /> : <Avatar />}
       <Hud />
       <Boot />
       <Diagnostics />
