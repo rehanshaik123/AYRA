@@ -10,10 +10,11 @@ README for GitHub).
 
 - Rehan's (the owner's) **personal central system**: it knows and remembers them, cares about their
   goals, takes their commands, routes each job, and runs specialist agents added one at a time.
-- **Today (Phase 4, clean interface):** one bridge on the laptop (`bridge/server.mjs`) — the brain,
-  the HUD's WebSocket and Telegram. The face is an avatar with the ElevenLabs voice Lily. AYRA's
-  tools are **web search, reading web pages and the HUD display — nothing else yet.** Features come
-  back one at a time, each with the owner (PLAN.md).
+- **Today (Phase 5, light AYRA with hands):** one bridge on the laptop (`bridge/server.mjs`) — the
+  brain, the HUD's WebSocket, live hearing and Telegram. The face is an avatar with the ElevenLabs
+  voice Lily. Her tools so far: **web search, web pages and the HUD display**; laptop control (shell,
+  files, her Chrome, apps — four things ask first) is being added in Phase 5. No cloud until the owner
+  has the budget.
 - **Target:** two homes, one AYRA. **AYRA Core** in the cloud, always on (brain, one conversation,
   memory, Telegram, gate, guardian, audit, scheduler, agents). **AYRA Desk** on the laptop while
   it's on (HUD + voice, AYRA's own Chrome, files, PC control), dialling out to the core over
@@ -64,11 +65,12 @@ npm run lint           # oxlint (must stay at 0 warnings)
 npm run setup          # preflight: login, SDK binary, identity, ElevenLabs key
 npm run smoke          # one real end-to-end turn; needs a running bridge
 npm run bench          # times five standard questions (first word, done); needs a running bridge
+npm run bridge:test    # a test copy of the bridge: port 8788, Telegram off
 npm test               # unit tests (gate, wake phrase, identity, avatar, …)
 ```
 
-- A test bridge must not read the owner's Telegram bot:
-  `AYRA_BRIDGE_PORT=8788 AYRA_TELEGRAM=off node bridge/server.mjs` (Git Bash), then
+- A test bridge must not read the owner's Telegram bot: `npm run bridge:test` (port 8788, Telegram
+  off; Claude Code may run it here — `.claude/settings.local.json`), then
   `AYRA_BRIDGE_PORT=8788 npm run smoke` (or `npm run bench`; add `AYRA_RESUME_HOURS=0` to the
   bridge for a fresh conversation). To look at the face against a Telegram-off bridge on
   :8787, `preview_start` the `face` entry in `.claude/launch.json` (port 5181).
@@ -93,24 +95,29 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/identity.mjs` | Loads identity + `.env.local`; `env('X')` reads `AYRA_X` |
 | `bridge/persona.mjs` · `bridge/context.mjs` | AYRA's personality: `SYSTEM_PROMPT` (voice + HUD) and `TEXT_PROMPT` (Telegram), one character, plus what she can do today · the "[Now: …]" local-time stamp |
 | `bridge/telegram.mjs` | Telegram channel: long polling, owner-only, one question at a time, text persona |
+| `bridge/listen.mjs` | Live hearing: relays the face's microphone stream (`/listen` socket) to ElevenLabs Scribe Realtime and the words back |
 | `bridge/panels.mjs` · `bridge/sources.mjs` | Tool server `ayra`: `display`, `blade`, `probe_url` — what appears on the HUD · a web search's links turned into a card by the bridge, no model in the way |
 | `bridge/origin.mjs` · `bridge/net.mjs` · `bridge/page.mjs` | Which pages may talk to the bridge · SSRF-safe outbound fetching (use for EVERY server-side fetch) · web pages for blades |
 | `src/App.tsx` · `src/identity.ts` · `src/config.ts` | The face's conductor (boot, phases, voice loop, turns) · identity for the face · the bridge address |
 | `src/lib/bridge.ts` · `capabilities.ts` | WebSocket client to the bridge · `/health` probe (is ElevenLabs there?) |
-| `src/lib/wake.ts` · `voice.ts` · `vad.ts` · `audio.ts` | "Hey AYRA" phrase · speech recognition (ElevenLabs Scribe or the browser) + barge-in · voice-activity detection · mic analyser |
+| `src/lib/wake.ts` · `voice.ts` · `listen.ts` · `audio.ts` | "Hey AYRA" phrase · the voice loop (wake, conversation, barge-in, echo, browser fallback) · live hearing to the bridge · mic analyser |
+| `public/listen-worklet.js` | AYRA's ears on the audio thread: speech detection + 16 kHz PCM, never throttled in a background tab |
 | `src/lib/tts.ts` · `fillers.ts` · `vocative.ts` · `sfx.ts` | Speaking (ElevenLabs, browser voice as fallback) · short "On it!" lines · the comma before "boss" · synthesised interface beeps |
 | `src/ui/Avatar.tsx` · `src/ui/avatar.css` · `src/lib/avatar.ts` | **The avatar face**: the SVG character · her poses and animations · which pose for which phase, lip-sync, blinking |
 | `src/ui/Hud.tsx` · `Blades.tsx` · `sanitise.ts` | The HUD chrome and transcript · the blades (the one surface for results) · the sanitiser for model-written HTML |
 | `src/ui/Boot.tsx` · `Ignition.tsx` · `Diagnostics.tsx` · `Suggestions.tsx` | Start-up sequence · INITIALISE button · diagnostics (D) · rotating example questions |
 | `src/store.ts` · `src/index.css` | App state · all styles incl. the `.hud-*` design system blades use |
-| `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` · `bench.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test · `npm run bench` speed table |
+| `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` · `bench.mjs` · `bridge-copy.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test · `npm run bench` speed table · `npm run bridge:test` |
 | `test/*.test.mjs` | Unit tests, run by `npm test` |
 | `index.html` · `vite.config.ts` | Page shell + strict CSP · dev server, `%AYRA_WORDMARK%` title |
 | `data/` | AYRA's runtime data (logs, state; later memory) — gitignored, never committed |
 
-Planned, with their phase: `bridge/db.mjs`, `memory.mjs` (6) · `approvals.mjs`, `guardian.mjs`,
-`browser.mjs` (7) · `core.mjs`, `deploy/` (8) · `link.mjs`, `desk.mjs`, `jobs.mjs` (9) ·
-`notify.mjs`, `scheduler.mjs` (10) · `agents/<name>/` (11).
+Planned, with their phase: `approvals.mjs`, `browser.mjs`, `apps.mjs` (5) · `db.mjs`, `memory.mjs`
+(7) · `core.mjs`, `deploy/` (8) · `link.mjs`, `desk.mjs`, `jobs.mjs` (9) · `notify.mjs`,
+`scheduler.mjs` (10) · `agents/<name>/` (11).
+
+Live hearing (`/listen` WebSocket): face sends 16 kHz PCM (binary), `commit`, `warm`; bridge sends
+`partial {text}`, `final {text}`, `error {code,message}` — see `bridge/listen.mjs`.
 
 Face ↔ brain protocol (WebSocket): face sends `ask {id,text}`, `interrupt`; brain sends
 `ready {servers}`, `text {delta}`, `tool {name}`, `done {text}`, `error {message}`, `blade` — turn

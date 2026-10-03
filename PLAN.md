@@ -9,8 +9,8 @@ points, wait for "go") → tasks, each done when its **Check** passes (tick `[x]
 line) → a short demo the owner can try from the phone → merge after the owner's OK. 🧑 = the owner
 does this step; they get click-by-click instructions when it comes up.
 
-**Where we are:** Phase 4 — Clean interface. 4.1–4.4 done (avatar, cleanup, docs, speed); next 4.5
-voice fallback.
+**Where we are:** Phase 5 — Light AYRA with hands on the laptop. Done: live hearing, the ask-first
+rules. Next: 5.3 make her light.
 
 ---
 
@@ -144,7 +144,7 @@ API (`w_member_social`).
 
 ---
 
-## Phase 4 — Clean interface · branch `phase-4-clean` ← current
+## Phase 4 — Clean interface · branch `phase-4-clean` ✅ (owner, 2026-10-04: "working very well")
 
 **Goal:** one central AYRA that is fast and dependable: the avatar, the ElevenLabs voice and web
 search, at the desk (HUD) and from the phone (Telegram, while the laptop is on). Nothing else yet.
@@ -173,24 +173,59 @@ Phase 4 · repo stays public).
       card for the model to write), boot 9.2 s → 2.4 s.
       Check ✓: chat first word 1.6 s, date 0.9 s, quick search 8.9 s (sources on screen 7.1 s), read
       a page 5.1 s; "put it on screen" 16.1 s — Opus still draws its own card when asked outright.
-- [ ] 4.4b 🧑 Faster web search: the built-in WebSearch costs ~6–7 s per search because it runs its
-      own request on the main model. A search API (Brave Search, free tier, or similar) answers in
-      about a second — a new account and key, so the owner's call.
-      Check: a quick search's first word ≤ 5 s.
-- [ ] 4.5 A voice that never goes silent or deaf: when ElevenLabs refuses (free credits used up, key
-      wrong), speaking switches to the browser voice and hearing to the browser's recogniser for the
-      rest of the session, with one note on screen.
-      Check: with a broken key AYRA still hears "Hey AYRA" and answers out loud.
-- [ ] 4.6 Small fixes left from the QA pass: an interrupted answer is logged as "interrupted", not
-      "failed"; Vite stops re-optimising when the port changes (a 1.2 GB spike).
-      Check: each re-tested and gone.
-- [ ] 4.7 🧑 Owner test in a real Chrome window: "Hey AYRA" → a web question → spoken answer and
-      cards; a Telegram question from the phone.
-      Check: the owner's OK → merge to `main`.
+- [x] 4.5 Hearing in English: Scribe was guessing Hindi and writing "Hey AYRA" in Devanagari, so on
+      standby she ignored everything. Check ✓: a spoken clip comes back as English and wakes her.
+- [x] 4.7 🧑 Owner test in Chrome: "working very well and efficient… no stucking and stopping".
+- Moved on: 4.4b a faster search API (a new account) → Later · 4.6 the two QA leftovers → 5.9.
 
-**Demo:** at the desk, ask three web questions by voice; from the phone, one on Telegram.
+## Phase 5 — Light AYRA with hands on the laptop · branch `phase-5-hands` ← current
 
-## Phase 5 — Apps, one at a time · branch `phase-5-apps`
+**Goal:** AYRA runs light on the owner's laptop and works like a second pair of hands: her own
+Chrome (the one the owner browses in), files, apps and PowerShell — doing everything herself except
+four things she asks about first.
+
+**Why:** the owner, 2026-10-03/04: "I want the ayra to take control of everything in my laptop with a
+main AYRA guardrail over it", "I wanna automate everything I do… an intelligent working version of
+me", and "keep ayra very light so that I can use her in my laptop" — no cloud budget for now.
+
+**Intent check:** done (2026-10-03/04). Full control, answer "a": everything runs except spending
+money, sending or posting as the owner, deleting for good, passwords and security settings — those
+ask (Approve on the HUD, by voice, or on Telegram); a kill switch (Esc, "AYRA, stop", `/stop`). Light
+first ("1 yes"); one Chrome for both, her window is the owner's daily Chrome ("2a"); the brain sleeps
+after 10 idle minutes ("3 yes"). Claude Code may run AYRA's tests here ("allow it"). The app and site
+lists come in later phases.
+
+**🧑 Owner steps:** Windows microphone access for desktop apps · pin "Chrome (AYRA)" and sign in once
+(Google sync brings bookmarks and saved passwords) · the trusted-sites list for microphone and camera ·
+try Approve and the kill switch · optional: start AYRA at login.
+
+- [x] 5.1 Live hearing: speech detected on the audio thread (works with her tab in the background),
+      words streamed from ElevenLabs Scribe Realtime, a minute of conversation without the wake word,
+      browser fallback when ElevenLabs refuses. Check ✓: virtual-mic test — question 0.9 s after the
+      speaker stops, answer starts 2.5 s; the owner: "answers quickly, no stucking".
+- [x] 5.2 The ask-first rules: `gate.review()` — allow / deny / ask per call, from fast rules over
+      commands, file paths and page actions. Check ✓: 8 tests, 72/72.
+- [ ] 5.3 Light: the bridge serves the built face (no dev server in daily use), the brain sleeps after
+      10 idle minutes and wakes on the next question, the face redraws only on change and stops when
+      hidden, a "still" switch, her own small app window. Check: memory and CPU before/after, idle and
+      while answering; the first answer after a nap ≤ 3 s slower.
+- [ ] 5.4 Approve and the kill switch: `bridge/approvals.mjs`; a Yes/No card on the HUD (Y/N keys, or
+      say "yes"/"no"), buttons on Telegram, 2 minutes without an answer = no; Esc / "AYRA, stop" /
+      `/stop` halts every turn. Check: a delete asks; No cancels; `/stop` stops a running task; the
+      audit log shows each.
+- [ ] 5.5 Shell and files: PowerShell, read / write / edit / search files, writes on — each call
+      reviewed. Check: "open Notepad, write a note, save it to my Desktop" works; a delete asks.
+- [ ] 5.6 Her Chrome: `bridge/browser.mjs` attaches to the "Chrome (AYRA)" window over the DevTools
+      protocol — tabs, read, click, type, scroll, screenshot to a blade, sign in with Chrome's saved
+      passwords, site permissions for trusted sites. Check: open the owner's portal, read it, close the
+      tab, with nobody touching the laptop; "Buy" or "Send" asks.
+- [ ] 5.7 Windows apps: open and close apps, click and type in them through UI Automation, read the
+      window. Check: three everyday tasks.
+- [ ] 5.8 🧑 Setup and demo: the owner's steps above, then a live run at the desk and from the phone.
+- [ ] 5.9 Leftovers: an interrupted answer is logged as "interrupted", not "failed"; no Vite
+      re-optimising on a port change (gone with 5.3 for daily use).
+
+## Phase 6 — Apps, one at a time · branch `phase-6-apps`
 
 **Goal:** AYRA reads Gmail, Google Calendar and Google Drive again, then Notion — each added as its
 own small step, so the owner sees exactly what each one adds.
@@ -198,89 +233,51 @@ own small step, so the owner sees exactly what each one adds.
 **Why:** "then I wanna add tools/MCP…". These connectors already worked in Phase 2 (QA: reads ✓),
 so they are the cheapest real wins, and they set the pattern every later tool follows.
 
-**Intent check — settle:** the order · read-only until Approve exists (Phase 7) · what AYRA may do in
-Notion ("whatever it wants" — in its own pages, or everywhere?).
+**Intent check — settle:** the order · what may run without Approve (sending mail asks — Phase 5's
+rules) · what AYRA may do in Notion ("whatever it wants" — in its own pages, or everywhere?).
 
 **🧑 Owner steps:** connect Notion in claude.ai (a new integration).
 
-- [ ] 5.1 The "add a tool" recipe, written into CLAUDE.md: gate entry + test, one persona line, the
+- [ ] 6.1 The "add a tool" recipe, written into CLAUDE.md: gate entry + test, one persona line, the
       HUD's SYSTEMS rail, a PROGRESS line, a demo question.
-      Check: 5.2 follows it step by step.
-- [ ] 5.2 Gmail (read). Check: "anything important in my inbox today?" answered with cards.
-- [ ] 5.3 Google Calendar (read). Check: "what's on tomorrow?" is right.
-- [ ] 5.4 Google Drive (read). Check: "find my resume" opens the right file's details.
-- [ ] 5.5 🧑 Notion — AYRA's notebook, with the rules agreed at the intent check.
+      Check: 6.2 follows it step by step.
+- [ ] 6.2 Gmail. Check: "anything important in my inbox today?" answered with cards.
+- [ ] 6.3 Google Calendar. Check: "what's on tomorrow?" is right.
+- [ ] 6.4 Google Drive. Check: "find my resume" opens the right file's details.
+- [ ] 6.5 🧑 Notion — AYRA's notebook, with the rules agreed at the intent check.
       Check: AYRA writes a test note and finds it again.
 
-## Phase 6 — Knows me: memory · branch `phase-6-memory`
+## Phase 7 — Knows me: memory, and teach mode · branch `phase-7-memory`
 
 **Goal:** AYRA remembers what matters about the owner — goals, schedule, people, preferences,
-progress — across days and channels, and uses it without being reminded.
+progress — and learns the tasks they repeat: shown once, she does them on command or on a schedule.
 
 **Why:** "an intelligent central system which cares about my needs and wants and is personalized
-especially for me."
+especially for me" · "I wanna automate everything I do".
 
 **Intent check — settle:** what she remembers by herself vs only when told · what is off-limits ·
-the profile's shape · Notion's role.
+the profile's shape · Notion's role · the first tasks to teach her.
 
-**🧑 Owner steps:** approve the first profile · give the timetable, gym times and deadlines once.
+**🧑 Owner steps:** approve the first profile · give the timetable, gym times and deadlines once ·
+teach her the first tasks.
 
-- [ ] 6.1 `bridge/memory.mjs` + `bridge/db.mjs`: remember / recall / forget / list on SQLite
+- [ ] 7.1 `bridge/memory.mjs` + `bridge/db.mjs`: remember / recall / forget / list on SQLite
       (`data/ayra.db`); every write audited. Check: tell a fact on Telegram, ask about it a day later
       on the HUD.
-- [ ] 6.2 🧑 The owner profile in every session (stable, so it stays cached). Check: answers use it
+- [ ] 7.2 🧑 The owner profile in every session (stable, so it stays cached). Check: answers use it
       unprompted.
-- [ ] 6.3 🧑 Timetable, gym, exam and assignment deadlines, kept current. Check: "what's next today?"
+- [ ] 7.3 🧑 Timetable, gym, exam and assignment deadlines, kept current. Check: "what's next today?"
       is right.
-- [ ] 6.4 Nightly reflection: the day's conversations become memory updates, sent as a short digest
+- [ ] 7.4 Teach mode: "watch me" — AYRA records the steps of a task the owner does once (or is told
+      them), saves it as a named routine, and replays it on command. Check: three of the owner's real
+      tasks taught and replayed.
+- [ ] 7.5 Nightly reflection: the day's conversations become memory updates, sent as a short digest
       the owner can veto. Check: a vetoed item is gone.
-- [ ] 6.5 Privacy controls: "forget X", export, `/memory`, a HUD view. Check: a forgotten item can't
+- [ ] 7.6 Privacy controls: "forget X", export, `/memory`, a HUD view. Check: a forgotten item can't
       be recalled.
-- [ ] 6.6 Nightly encrypted backup of `data/`. Check: a restore test on a copy.
+- [ ] 7.7 Nightly encrypted backup of `data/`. Check: a restore test on a copy.
 
-## Phase 7 — Hands on the laptop, with a guardian · branch `phase-7-hands`
-
-**Goal:** AYRA can use the laptop — her own Chrome, files, apps, keyboard and mouse — while the main
-AYRA checks every action through a guardian and asks the owner before anything risky.
-
-**Why:** the owner, 2026-10-03: "I want AYRA to take control of everything in my laptop, with a main
-AYRA guardrail over it checking if it's doing anything I don't like." The Claude Chrome extension
-couldn't do this: it needs a person to click "Allow" for every new site (QA #1).
-
-**Proposed design — settled at the intent check:**
-- **Hands:** AYRA's own Chrome profile, driven directly (Playwright over the DevTools protocol), so
-  there is no extension and no per-site prompt; the owner signs it in once to the sites AYRA may
-  use. Files only in folders the owner lists. Windows apps through UI Automation, keyboard and mouse.
-- **Guardian — three locks on every action, in order:** (1) the gate's fixed rules — things AYRA never
-  does (pay, enter passwords, change security settings, delete for good); (2) a separate, fast Claude
-  model that reads the owner's request, the action and the owner's "things I don't like" list, and
-  answers allow / block / ask; (3) the owner's Approve tap — HUD or phone — for anything that sends,
-  posts, buys, deletes or can't be undone.
-- **Always:** a visible "AYRA is driving" banner, a kill switch (Esc, "AYRA, stop", `/stop`), the
-  audit log with a screenshot per action, and nothing read on a page or in a message can trigger an
-  action by itself.
-
-**Intent check — settle:** the first apps and sites · the "don't like" list · what may run without
-Approve · which accounts AYRA's Chrome may sign into · writes on for the laptop only.
-
-**🧑 Owner steps:** sign AYRA's Chrome into the agreed sites · write the first "don't like" list ·
-test from the desk and the phone.
-
-- [ ] 7.1 Approve / Deny on the HUD and on Telegram (`bridge/approvals.mjs`), 2 minutes without an
-      answer = deny; kill switch. Check: "email X" asks first; Deny cancels; `/stop` refuses the next
-      action; the audit log shows all three.
-- [ ] 7.2 The guardian (`bridge/guardian.mjs`) with the owner's rules list; tested on tricky cases —
-      a prompt injection on a page, a disguised delete, an off-topic purchase. Check: every tricky
-      case blocked or asked; ordinary actions pass without slowing AYRA down noticeably.
-- [ ] 7.3 AYRA's Chrome (`bridge/browser.mjs`): open, read, click, type, screenshot to a blade.
-      Check: the college portal opened and read with nobody at the laptop.
-- [ ] 7.4 Files: find, open, read, move inside the allowed folders; delete always asks. Check: "find
-      my resume and show it" works; a delete waits for Approve.
-- [ ] 7.5 PC control: open apps, type, click, read the screen. Check: three real tasks the owner picks.
-- [ ] 7.6 Security review of hands, guardian and approvals before writes go on. Check: every finding
-      fixed or accepted by the owner.
-
-## Phase 8 — Always-on core: laptop off · branch `phase-8-core`
+## Phase 8 — Always-on core: laptop off · branch `phase-8-core` — when the owner has the budget
 
 **Goal:** with the laptop shut, the owner messages AYRA on Telegram and she does a real daily task —
 checks whether an idea already exists and replies with a verdict and sources.
@@ -316,7 +313,7 @@ and Telegram as one shared conversation.
 
 - [ ] 9.1 `bridge/link.mjs`: token, hello, heartbeat, tool calls, reconnect. Check: unit tests; cut
       the network → offline within 45 s → back by itself.
-- [ ] 9.2 `bridge/desk.mjs` + `npm run desk`: the HUD socket and Phase 7's hands, served over the
+- [ ] 9.2 `bridge/desk.mjs` + `npm run desk`: the HUD socket and Phase 5's hands, served over the
       link; no Claude process on the laptop. Check: a HUD question answered by the cloud core.
 - [ ] 9.3 Routing + `[Laptop: …]` stamp + `LAPTOP_OFFLINE`. Check: a laptop job works when on; when
       off AYRA says so first.
@@ -326,13 +323,17 @@ and Telegram as one shared conversation.
       the HUD, continue on Telegram — she remembers.
 - [ ] 9.6 🧑 The desk starts at login and restarts on crash. Check: online within a minute of a reboot.
 
-## Phase 10 — Speaks first · branch `phase-10-proactive`
+## Phase 10 — Talks like a person, and speaks first · branch `phase-10-proactive`
 
-**Goal:** reminders, nudges and routines; voice notes; usage under control.
+**Goal:** real-time conversation (she starts speaking while still thinking, quicker turn-taking,
+natural interruptions); reminders, nudges and routines; voice notes; usage under control.
 
 **Intent check — settle:** quiet hours · reminder style · what the morning plan and night review
 contain.
 
+- [ ] 10.0 Real-time conversation: streamed speech both ways, shorter end-of-turn wait, a filler while
+      a tool runs that sounds like her, interruption mid-word. Check: the owner says it feels like a
+      person.
 - [ ] 10.1 `notify()` with quiet hours. Check: a test alert arrives; nothing in quiet hours.
 - [ ] 10.2 Scheduler: reminders and routines in SQLite, managed by text. Check: "remind me at 6 pm
       to call home" fires on the phone.
@@ -364,6 +365,7 @@ check) · watchers · files to the phone.
 
 ## Later — polish
 
+- A faster web search API (was 4.4b) — a new account and key; saves ~5 s per search.
 - HUD on the phone over Tailscale.
 - Custom "Hey AYRA" wake word and voice upgrades.
 - Visual identity; background music and sound with cleared rights.
@@ -385,7 +387,9 @@ check) · watchers · files to the phone.
 | 7.2–7.5, 7.7 | Phase 10 | Reminders, notify, morning plan, voice notes, usage meter |
 | 7.8 Security review | 7.6 | Before writes go on |
 | 8.1–8.4 Agents | Phase 11 | Same |
-| 9+ PC control | Phase 7, with the guardian | The owner's new ask |
+| 9+ PC control | Phase 5, with the ask-first rules | The owner's new ask (2026-10-03) |
+| Hands (old Phase 7) | Phase 5 | Full laptop control first; the cloud waits for budget (2026-10-04) |
+| Apps, memory (old 5, 6) | Phases 6, 7 | After the hands; teach mode added to memory |
 | Later: camera, gestures, music, clap | Removed, recoverable from git | The owner's cleanup |
 
 Nothing the owner asked for is dropped.
@@ -402,13 +406,14 @@ Nothing the owner asked for is dropped.
 | Q6 | Keep the laptop awake while out? | ✅ No — the cloud core will be always on |
 | Q7 | Which connectors? | Off since 2026-10-03; back one at a time in Phase 5 |
 | Q8 | Clean interface (2026-10-03) | ✅ avatar only · cards on screen · browser voice as fallback · Telegram web-only · short README · interview in git · Phase 4 · repo public |
-| D1 | Cloud host | Open — Phase 8 intent check (costs money) |
 | D2 | Tailscale account | Open — Phase 8 |
 | D3 | What each tool and agent may do alone | Open — at each intent check |
 | D4 | LinkedIn beyond posting, WhatsApp | Open — at their intent checks, risks written down |
-| D5 | Guardian rules and hands scope | Open — Phase 7 intent check |
+| D5 | Guardian rules and hands scope | ✅ full control; four things ask first (owner, 2026-10-03: "a") |
 | D6 | A faster web search provider (4.4b) | Open — a new account (Brave Search free tier, my pick) |
-| Q9 | Phase order and pushing | ✅ apps → memory → hands (owner, 2026-10-03: "1a"); push `phase-4-clean` ("2a") |
+| Q9 | Phase order and pushing | ✅ push `phase-4-clean` ("2a"); then the owner chose hands first, light, no cloud yet (2026-10-04) |
+| Q10 | Light AYRA | ✅ light first · one Chrome for both (AYRA's window is the owner's daily Chrome) · brain sleeps after 10 idle min (2026-10-04) |
+| D1 | Cloud host | Waiting — no budget yet; DigitalOcean Bangalore ≈ ₹1,050 is the pick when there is |
 
 ## Risks
 

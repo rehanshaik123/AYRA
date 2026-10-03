@@ -2,12 +2,12 @@
 
 ## ▶ Continue here
 
-- **Phase:** 4 — Clean interface · branch `phase-4-clean` (renamed from the unpushed `phase-4-core`; `origin/phase-4-core` is an empty pointer at `main`) · 4.1 avatar ✅ · 4.2 cleanup ✅ · 4.3 docs ✅ · 4.4 speed ✅ · Phases 0–3 ✅ on `main` · branch on GitHub
-- **What AYRA is right now:** avatar + ElevenLabs Lily + web search (WebSearch, WebFetch, cards on the HUD), on the HUD and on Telegram; no connectors, no Chrome, no files, writes off
-- **Next:** the owner's live demo in Chrome → 4.5 voice fallback when ElevenLabs runs out → 4.6 small fixes → 4.7 owner test → merge
-- **Waiting on owner:** a faster search provider (4.4b, a new account) · VISION's guesses (PLAN.md, Vision)
-- **Blockers:** none
-- **Health (2026-10-03, after 4.4):** build ✓ · lint 0 · `npm test` 51/51 · smoke ✓ · bench: chat 1.6 s, quick search 8.9 s, page 5.1 s to the first word · boot 2.8 s to ready · voice needs the owner's Chrome (4.7)
+- **Phase:** 5 — Light AYRA with hands on the laptop · branch `phase-5-hands` · 5.1 live hearing ✅ · 5.2 ask-first rules ✅ · Phase 4 ✅ merged to `main` (owner: "working very well") · Phases 0–4 on `main`
+- **Decided (2026-10-03/04):** full laptop control, four things ask first ("a") · no cloud until there is budget · light first · one Chrome for both ("2a") · brain sleeps after 10 idle min · Claude Code may run AYRA's tests here (`.claude/settings.local.json`, "allow it")
+- **Next:** 5.3 make her light (built face served by the bridge, brain sleep, face redraw on change, app window) → 5.4 Approve + kill switch → 5.5 shell and files → 5.6 her Chrome → 5.7 Windows apps → 5.8 owner setup + demo
+- **Waiting on owner:** nothing now; the setup steps (Windows mic access, "Chrome (AYRA)" sign-in, trusted sites) come with 5.6/5.8
+- **Blockers:** none. The Claude Code safety check blocked running the gate tests once (they contain example dangerous commands); the owner allowed the test commands for this project
+- **Health (2026-10-04):** build ✓ · lint 0 · `npm test` 72/72 · live hearing ✓ (owner) · ElevenLabs 3,242 / 10,000 credits this month (resets 1 Nov)
 
 ## Log — one line per task (what changed — why)
 
@@ -48,6 +48,10 @@
 - 2026-10-03 · 4.2 deps: removed three, @react-three/*, @mediapipe/tasks-vision, kokoro-js, @picovoice/*, @anthropic-ai/sdk, @types/three — nothing imports them; node_modules 1.1 GB → 409 MB, face bundle 411 KB.
 - 2026-10-03 · 4.4 Speed: new `npm run bench` (five standard questions, first word / speech / done); measured, then cut — `ENABLE_TOOL_SEARCH=false` (no ToolSearch hop), effort `low` (`medium` thought ~4.5 s first; Sonnet 5.5 measured no faster, so Opus stays), the bridge turns a WebSearch's links into the sources card itself (`bridge/sources.mjs` + 4 tests, a `sources` event from brain.mjs, the HUD channel renders it) so the model writes no card, boot 9.2 s → 2.4 s (two beats). First word, before → after: chat 1.8 → 1.6 s · date 1.5 → 0.9 s · quick search 12.7 → 8.9 s (card at 7.1 s) · "put it on screen" 18.6 → 16.1 s · read a page 10.3 → 5.1 s — the owner wants a product with no lag.
 - 2026-10-03 · fix: speech-to-text now asks Scribe for English (`language_code` from identity) — the owner's live test: Scribe guessed Hindi per clip and wrote "Hey AYRA" in Devanagari ("ए आएरा"), so on standby nothing matched the wake phrase and AYRA seemed deaf after the first answer; verified a spoken clip now returns "Hey Ira, what is the weather in Hyderabad?" (1.1 s).
+- 2026-10-03 · 5.1 Live hearing (`public/listen-worklet.js`, `src/lib/listen.ts`, `bridge/listen.mjs` + 13 tests): speech detected on the audio thread, 16 kHz PCM streamed through the bridge to ElevenLabs Scribe v2 Realtime (key stays in the bridge, "AYRA" as a keyterm), partial words while talking, final ~0.3 s after; a minute of conversation without the wake word; browser recogniser + voice when ElevenLabs refuses — the owner's test: answered once, then deaf (Chrome paused the old rAF detector for a background tab; each clip uploaded whole). Virtual-mic test: question at 0.9 s, answer starts 2.5 s after the speaker stops.
+- 2026-10-03 · 5.2 `gate.review(name, input)` + `ASK` + `riskOfCommand/Path/PageAction` (8 tests): everything runs, four things ask (money, sending as the owner, deleting for good, passwords/security) — the owner's answer "a" to full laptop control. Not switched on in the bridge yet.
+- 2026-10-04 · Phase 4 ✅ — the owner: "working very well and efficient… answers quickly, no stucking". Plan rebuilt: no cloud budget for now, so Phase 5 = light AYRA with hands on the laptop (one Chrome for both, brain sleeps when idle); apps → 6, memory + teach mode → 7, cloud → 8 when there is budget, real-time conversation joins 10.
+- 2026-10-04 · `.claude/settings.local.json` (gitignored) lets Claude Code run `npm test`, `node --test`, smoke, bench, build, lint and `npm run bridge:test` here — the owner's "allow it" after the safety check blocked the gate tests; new `npm run bridge:test` (`scripts/bridge-copy.mjs`, port 8788, Telegram off). Named so on purpose: `node --test` runs any `test-*.mjs`, and a first version hung the suite.
 - 2026-10-03 · 4.3 Docs merged: VISION and ARCHITECTURE condensed into PLAN.md (Vision, Target architecture), the QA report's results kept under Findings, REDESIGN finished; `docs/` deleted; README cut to a short GitHub page; PLAN rebuilt from beginning to end (apps → memory → laptop hands with a guardian → cloud core → two homes → proactive → agents) — the owner wanted only CLAUDE.md, PLAN.md and PROGRESS.md and a clear plan.
 
 ## Findings worth remembering
@@ -75,14 +79,15 @@
 - The brain's `ready` list names every claude.ai connector on the account even when the gate removed it; server.mjs filters the HUD's copy (brain.mjs left as it was). The image proxy refuses SVG on purpose (scriptable), so an SVG logo shows as a broken image.
 - Speed (4.4): Claude Code's WebSearch runs its own request on the main model and writes a summary — 6–7 s per search no matter what AYRA does; a direct search API is the next big cut (4.4b). Telling the model to "speak first, then draw the card" did not reorder it and made it say "it's on screen" instead of the answer — reverted. Asked outright to "put it on screen", Opus still writes its own card after the automatic one (~5 s). Timings vary ±2 s run to run; compare tables, not single numbers.
 - Vite's dev client creates a `blob:` worker to ping its server after a restart, so the CSP keeps `worker-src 'self' blob:`.
-- ElevenLabs Scribe failing (e.g. credits used up) currently drops every utterance — AYRA goes deaf, not just silent → 4.5.
+- Measured 2026-10-04 (Ryzen 7 5700U, 15 GB): AYRA's bridge ~80 MB, brain ~215 MB and growing, Vite dev server 110–165 MB; Chrome 3.0 GB and the Claude desktop app 2.7 GB are the big users. The Telegram channel opens its own brain process (a second ~200 MB+). ElevenLabs credits: 2,129 → 3,242 in one evening of testing.
+- ElevenLabs realtime STT: `wss://api.elevenlabs.io/v1/speech-to-text/realtime`, `xi-api-key` header, `input_audio_chunk` messages; a session starts in ~0.55 s and ElevenLabs closes an idle one after ~15 s.
 - Editing JS with scripts: template literals in the source carry backslash-escaped backticks, so a search string without them silently misses — assert every replacement. Inline `python - <<EOF` scripts break on some quoting; write the script to a file and run that.
 
 ## Known issues
 
 - `index.html` CSP hard-codes `localhost:8787` — must change for phone access (Later: HUD on the phone).
 - A web search still costs 6–7 s inside Claude Code's WebSearch → 4.4b. Asked outright to show results, AYRA draws a second card (~5 s).
-- ElevenLabs out of credits → AYRA can't hear (Scribe) and each sentence waits on a failed request first → 4.5.
+- ElevenLabs free credits will run out within days of daily use; hearing and speaking then fall back to the browser (lower quality).
 - From the QA pass (task 4.6): an interrupted turn is logged as "The turn failed part way through."; Vite re-optimises on every port change (1.2 GB spike).
 - AYRA may still offer things she can't do yet; the persona now tells her to say "not connected yet" — watch for it in 4.7.
 - `bridge/page.mjs` still injects a scroll shim the face no longer uses (it served hand-gesture scrolling); harmless, remove when page.mjs is next touched. `brain.mjs` still skips `mcp__ayra_ui__*` in the tool badge — dead, left because brain.mjs stays as it is.
