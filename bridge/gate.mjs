@@ -266,6 +266,12 @@ export function createGate({ allowWrites, laptop = false, connectors = DEFAULT_C
       // read `display` and `blade` as neither a read nor a write.
       if (server === 'ayra') return true
 
+      // Her Chrome (browser.mjs). It gates itself, twice over: without writes
+      // only the reading tools are built, and every click, submit and Enter is
+      // checked against the ask-first list with the element's real label —
+      // which only the tool can see, so the asking happens there.
+      if (server === 'ayra_browser') return true
+
       const tool = mcpToolOf(name)
       if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {
         return allowWrites

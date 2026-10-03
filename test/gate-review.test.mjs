@@ -96,3 +96,10 @@ test('on a web page: buying, sending, deleting and passwords ask; browsing does 
 test('a tool the gate refuses is denied before any review', () => {
   assert.deepEqual(readOnly.review('PowerShell', { command: 'Get-Date' }), { verdict: 'deny' })
 })
+
+test("her Chrome is allowed; it asks the owner itself, with the button's real label", () => {
+  for (const t of ['browser_open', 'browser_read', 'browser_click', 'browser_type']) {
+    assert.equal(laptop.decide(`mcp__ayra_browser__${t}`), true, t)
+    assert.deepEqual(laptop.review(`mcp__ayra_browser__${t}`, { ref: 3 }), { verdict: 'allow' }, t)
+  }
+})

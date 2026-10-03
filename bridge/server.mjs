@@ -26,6 +26,7 @@ import { sourcesCard } from './sources.mjs'
 import { relayListening } from './listen.mjs'
 import { serveFace } from './face.mjs'
 import { createApprovals } from './approvals.mjs'
+import { browserServer } from './browser.mjs'
 import { homedir } from 'node:os'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -625,7 +626,7 @@ console.log(
 console.log(`[ayra] model ${MODEL} · effort ${EFFORT}`)
 console.log(
   ALLOW_WRITES
-    ? '[ayra] tools: web, the HUD display, the laptop (PowerShell, files) · asks first: money, sending as you, deleting for good, passwords/security'
+    ? '[ayra] tools: web, the HUD display, the laptop (PowerShell, files, her Chrome) · asks first: money, sending as you, deleting for good, passwords/security'
     : '[ayra] tools: web, the HUD display, reading the laptop\'s files · writes off (AYRA_ALLOW_WRITES=0)',
 )
 console.log(
@@ -698,9 +699,15 @@ if (env('TELEGRAM', 'on') === 'off') {
     ownerId: TELEGRAM_OWNER,
     brain: BRAIN,
     systemPrompt: TEXT_PROMPT,
-    // No screen on the phone, so no display tool; the laptop's tools come with
-    // the brain itself.
-    servers: {},
+    // No screen on the phone, so no display tool; the laptop's shell and files
+    // come with the brain itself, and her Chrome is here too.
+    servers: {
+      ayra_browser: browserServer({
+        allowWrites: ALLOW_WRITES,
+        channel: 'telegram',
+        approve: (request) => APPROVALS.ask(request),
+      }),
+    },
     audit: AUDIT,
     // Approve buttons on the phone, and /stop.
     approvals: APPROVALS,
@@ -765,6 +772,13 @@ wss.on('connection', (socket, req) => {
       // The HUD as an in-process server. Its handler closes over this socket,
       // so a `display` call lands on screen directly.
       ayra: displayServer((blade) => send({ type: 'blade', blade })),
+      // Her Chrome — the owner's "Chrome (AYRA)" window (browser.mjs).
+      ayra_browser: browserServer({
+        allowWrites: ALLOW_WRITES,
+        channel: 'hud',
+        approve: (request) => APPROVALS.ask(request),
+        emitBlade: (blade) => send({ type: 'blade', blade }),
+      }),
     },
     emit,
     // Reloading the page carries on the same conversation (see brain.mjs).
