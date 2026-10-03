@@ -24,6 +24,7 @@
 
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { homedir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { IDENTITY, env } from './identity.mjs'
 import { stamp } from './context.mjs'
 import { createStore } from './state.mjs'
@@ -41,6 +42,7 @@ const RESULT_FAILURES = {
   error_max_structured_output_retries: 'The answer could not be assembled.',
   api_error: 'The model could not be reached. The details are in the bridge log.',
   resume_failed: 'The previous conversation could not be restored. Ask me again.',
+  interrupted: 'Stopped.',
   default: 'The turn ended without an answer.',
 }
 
@@ -56,17 +58,21 @@ const SETTLE_CAP_MS = 400
  * @param {{ model: string, effort: string, gate: ReturnType<import('./gate.mjs').createGate>,
  *           mcpServers: Record<string, object>, store?: ReturnType<typeof createStore>,
  *           audit?: ReturnType<typeof createAudit>, resumeHours?: number,
- *           sleepMinutes?: number }} config
+ *           sleepMinutes?: number,
+ *           approve?: (request: { channel: string, tool: string, reason: string, detail: string }) => Promise<boolean> }} config
  *   mcpServers   — the owner's own MCP servers, shared by every conversation
  *   store        — where each channel's last session id is kept (data/state.json)
  *   audit        — where every question, tool decision and answer is logged
  *   resumeHours  — a conversation idle longer than this starts fresh
  *   sleepMinutes — close an idle conversation's Claude process after this long
  *                  (0 = never); the next question wakes it
+ *   approve      — asks the owner about a call the gate marked "ask" (approvals.mjs);
+ *                  without one, every such call is declined
  */
 export function createBrain({
   model, effort, gate, mcpServers,
   store = createStore(), audit = createAudit(), resumeHours = 6, sleepMinutes = 10,
+  approve = async () => false,
 }) {
   /**
    * Open one conversation.
@@ -90,15 +96,25 @@ export function createBrain({
      */
     const stateKey = wantResume ? `session.${channel}` : null
     const saved = stateKey ? store.get(stateKey) : null
-    const resume =
-      saved?.id && Date.now() - Date.parse(saved.updatedAt) < resumeHours * 3_600_000
-        ? saved.id
-        : undefined
+    /**
+     * What this conversation can do and who she is in it. A conversation saved
+     * under different tools or instructions is not resumed: the model trusts
+     * its own history over a new system prompt, so after laptop control was
+     * switched on she kept answering "the laptop isn't connected to me" from
+     * an old session (measured, 2026-10-04).
+     */
+    const fingerprint = createHash('sha256')
+      .update(JSON.stringify([systemPrompt, gate.builtins, Object.keys(servers).sort()]))
+      .digest('hex')
+      .slice(0, 16)
+    const recent = saved?.id && Date.now() - Date.parse(saved.updatedAt) < resumeHours * 3_600_000
+    const resume = recent && saved.fingerprint === fingerprint ? saved.id : undefined
     if (resume) console.log(`[ayra] resuming the ${channel} conversation (${resume.slice(0, 8)}…)`)
+    else if (recent) console.log(`[ayra] ${channel}: her tools or instructions changed — starting a fresh conversation`)
     audit.log({ type: 'session', channel, event: resume ? 'resume' : 'open', session: resume ?? null })
     const remember = (sessionId) => {
       if (stateKey && sessionId) {
-        store.set(stateKey, { id: sessionId, updatedAt: new Date().toISOString() })
+        store.set(stateKey, { id: sessionId, updatedAt: new Date().toISOString(), fingerprint })
       }
     }
     /**
@@ -233,6 +249,8 @@ export function createBrain({
      * deadlocked assistant is not.
      */
     let settling = Promise.resolve()
+    /** The turn in flight was stopped on purpose — its end is not a failure. */
+    let interrupted = false
     let finishTurn = null
 
     const turnFinished = () =>
@@ -297,21 +315,33 @@ export function createBrain({
           // through a `Bash: echo hello` without asking, and only reaches us for
           // something with a consequence, like a `touch`. So a deny here is
           // reliable; an absence of a call here is not proof nothing ran.
-          canUseTool: async (toolName) => {
-            const ok = gate.decide(toolName)
-            audit.log({ type: 'decision', channel, tool: toolName, allowed: ok })
+          //
+          // Each call is reviewed with its input (gate.review): most just run; the
+          // four kinds the owner chose to be asked about wait here for their yes.
+          canUseTool: async (toolName, input) => {
+            const review = gate.review(toolName, input)
+            let ok = review.verdict === 'allow'
+            if (review.verdict === 'ask') {
+              console.log(`[ayra] tool ${toolName} -> asking the owner (${review.reason})`)
+              ok = await approve({ channel, tool: toolName, reason: review.reason, detail: review.detail })
+            }
+            audit.log({
+              type: 'decision', channel, tool: toolName, allowed: ok,
+              ...(review.verdict === 'ask' ? { asked: review.reason } : {}),
+            })
             console.log(`[ayra] tool ${toolName} -> ${ok ? 'allow' : 'deny'}`)
-            return ok
-              ? { behavior: 'allow' }
-              : {
-                  behavior: 'deny',
-                  // Every word of this can end up spoken, so it carries no
-                  // command to read out — the persona never says one aloud.
-                  message:
-                    `Blocked: ${IDENTITY.name} is running in read-only mode and cannot take` +
-                    ' actions that change anything. Tell the user this action is' +
-                    ' unavailable until they enable write access on the machine.',
-                }
+            if (ok) return { behavior: 'allow', updatedInput: input }
+            return {
+              behavior: 'deny',
+              // Every word of this can end up spoken, so it carries no command
+              // to read out — the persona never says one aloud.
+              message:
+                review.verdict === 'ask'
+                  ? `The owner did not approve this (it ${review.reason}). Tell them in one ` +
+                    'short sentence that you left it, and do not try to do it another way.'
+                  : `${IDENTITY.name} is not allowed to use this tool. Tell the user in one ` +
+                    'short sentence that it is not available.',
+            }
           },
         },
       })
@@ -428,6 +458,8 @@ export function createBrain({
               // ever starts — "No conversation found with session ID" — as an
               // error result, not an exception.
               const resumeFailed = Boolean(proc.resumeId) && !proc.started && msg.subtype !== 'success'
+              const wasInterrupted = interrupted
+              interrupted = false
               // A result is not automatically a success. The error subtypes
               // carry no `result` field at all, so reporting them as 'done'
               // with empty text is indistinguishable from a turn that simply
@@ -439,7 +471,12 @@ export function createBrain({
               // limit — arrives as subtype 'success' with is_error set and the
               // raw error as the result: "API Error: 400 …", which would be
               // read aloud as the answer. The detail goes to the log instead.
-              if (msg.subtype === 'success' && !msg.is_error) {
+              if (wasInterrupted && !(msg.subtype === 'success' && !msg.is_error)) {
+                // Stopped by a barge-in or the kill switch: logged as what it
+                // was, not as a failure, and said as one word.
+                audit.log({ type: 'interrupted', channel, ask: answering })
+                emitTurn({ type: 'error', message: RESULT_FAILURES.interrupted })
+              } else if (msg.subtype === 'success' && !msg.is_error) {
                 emitTurn({
                   type: 'done',
                   text: msg.result ?? '',
@@ -586,6 +623,7 @@ export function createBrain({
 
       /** Stop the answer in flight. Held so the next question can wait for it. */
       interrupt() {
+        if (busy) interrupted = true
         const stopped = turnFinished()
         settling = Promise.resolve(live?.session.interrupt?.())
           .catch(() => {})
