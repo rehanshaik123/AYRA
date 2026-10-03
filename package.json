@@ -15,6 +15,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "bridge": "node bridge/server.mjs",
+    "bridge:test": "node scripts/bridge-copy.mjs",
     "setup": "node scripts/setup.mjs",
     "smoke": "node scripts/smoke.mjs",
     "bench": "node scripts/bench.mjs",
