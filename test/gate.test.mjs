@@ -59,17 +59,24 @@ test('built-in tools: reads always, shells and edits only with writes', () => {
     assert.equal(readOnly.decide(tool), false, tool)
   }
   assert.equal(writes.decide('PowerShell'), true)
-  assert.deepEqual(readOnly.builtins, ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'ToolSearch'])
   assert.ok(writes.builtins.includes('PowerShell') && writes.builtins.includes('Write'))
 })
 
-test("AYRA's own tool servers are always allowed", () => {
-  for (const tool of [
-    'mcp__ayra__display', 'mcp__ayra_ui__ui_theme',
-    'mcp__ayra_chrome__chrome_navigate', 'mcp__ayra_eyes__look',
-  ]) {
-    assert.equal(readOnly.decide(tool), true, tool)
+test('AYRA is given the web and nothing on the laptop', () => {
+  assert.deepEqual(readOnly.builtins, ['WebFetch', 'WebSearch', 'ToolSearch'])
+  for (const tool of ['Read', 'Glob', 'Grep', 'Bash', 'PowerShell']) {
+    assert.ok(!readOnly.builtins.includes(tool), tool)
   }
+})
+
+test("AYRA's display is always allowed; removed servers get no free pass", () => {
+  assert.equal(readOnly.decide('mcp__ayra__display'), true)
+  assert.equal(readOnly.decide('mcp__ayra__blade'), true)
+  // Chrome, camera and interface control were removed. A server reusing one of
+  // those names now falls to the ordinary verb rules like any other.
+  assert.equal(readOnly.decide('mcp__ayra_chrome__chrome_navigate'), false)
+  assert.equal(readOnly.decide('mcp__ayra_ui__ui_theme'), false)
+  assert.equal(readOnly.decide('mcp__ayra_eyes__look'), false)
 })
 
 test('other MCP servers: read verbs pass, effectful verbs need writes', () => {

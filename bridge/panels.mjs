@@ -51,9 +51,6 @@ PICTURES AND VIDEO — these work. Use them.
     result gave it and it appears. The bridge fetches every remote image
     server-side and hands the bytes to the display, so hosts that refuse to be
     hotlinked still render — nothing is loaded by the page itself.
-  - Images off this machine work the same way: a render you generated, a
-    screenshot you took, any file on disk. Give it as file:///absolute/path or
-    a bare absolute path.
   - If a search came back with pictures, SHOW the pictures. A row of thumbnails
     down the side of the headlines beats headlines alone, every time — and a
     grid of results is the whole answer to an image search, not a decoration
@@ -65,16 +62,14 @@ PICTURES AND VIDEO — these work. Use them.
     A guessed address is a broken image, and a broken image is worse than none.
 
 WHERE THE CONTENT COMES FROM — read this before showing anything from the web.
-  - Fetch with exa. crawling_exa and web_fetch_exa return the page's actual
-    text and its image URLs; deep_search_exa and web_search_advanced_exa
-    return content alongside the results. That returned content is what you
-    render — rewritten into these classes, in your own words and this interface's
-    shape. You are not linking to an article, you are showing it.
+  - Search with WebSearch, then read the page with WebFetch. What comes back is
+    what you render — rewritten into these classes, in your own words and this
+    interface's shape. You are not linking to an article, you are showing it.
   - Do NOT put a bare source URL on screen and leave the page to fetch it for
     itself. Half the web refuses that: news CDNs answer 403 to anything that
-    is not their own page, and the panel renders as an empty rectangle. Going
-    through exa is what makes the difference between an article appearing and a
-    blank card.
+    is not their own page, and the panel renders as an empty rectangle. Reading
+    the page first is what makes the difference between an article appearing
+    and a blank card.
   - So: asked about a page, crawl it, then panel the substance — the headline,
     the two or three lines that matter, the figure, the photograph.
   - Image URLs that came back IN a tool result are real and will render; the
@@ -107,7 +102,7 @@ A single figure:
 <div><span class="hud-metric">1,284</span><span class="hud-unit">unread since monday</span></div>
 
 An image:
-<div><img class="hud-img" src="file:///Users/you/shot.png"><span class="hud-caption">Home screen, 9:41</span></div>
+<div><img class="hud-img" src="https://images.example.com/sr71.jpg"><span class="hud-caption">SR-71 Blackbird</span></div>
 
 Image search results — the pictures ARE the answer, so lead with them:
 <div class="hud-figure">
@@ -191,9 +186,8 @@ You are designing the panel, not filling in a template — compose the markup fo
 the content at hand and choose the animation, position and colour that suit it.
 
 Use it whenever the answer has substance worth seeing rather than hearing:
-search results, images, screenshots, lists of mail or events, a figure, a short
-readout. If you searched, show the results. If you generated an image, show it.
-If you looked at the phone, show the screenshot.
+search results, images, a list, a figure, a short readout. If you searched,
+show the results.
 
 If the search came back with pictures, show the pictures — thumbnails from the
 web render properly here, and describing an image you are holding the URL of is
@@ -239,10 +233,6 @@ Choosing what to open:
   embed   — a YouTube or Vimeo watch URL. It is turned into a player.
   markup  — your own composed HTML, in the same .hud-* system the display tool
             uses, when none of the above is the shape of the answer.
-  camera  — the live view from the user's camera, on screen. Open it when they
-            ask to see the camera, or when they want you to watch them do
-            something: while it is open you can also review the seconds that
-            have just passed, which you cannot do otherwise. Needs no url.
 
 Size is about reading, not decoration. \`tall\` is a reading column — use it for
 any article the user intends to actually read. \`wide\` suits images, video and
@@ -261,7 +251,7 @@ const bladeSchema = {
     .string()
     .describe('Two to four words naming what this is, e.g. "REUTERS" or "MARK VII".'),
   kind: z
-    .enum(['article', 'image', 'gallery', 'video', 'embed', 'markup', 'camera'])
+    .enum(['article', 'image', 'gallery', 'video', 'embed', 'markup'])
     .describe('What is being opened. See the tool description.'),
   url: z
     .string()
@@ -315,10 +305,9 @@ see it, what is already on screen, or whether the point was the picture or the
 argument. You know those things. Overrule it whenever you have reason to.`
 
 /**
- * @param {(panel: object) => void} emit - pushes the panel to the browser
  * @param {(blade: object) => void} emitBlade - pushes a blade to the browser
  */
-export function displayServer(emit, emitBlade) {
+export function displayServer(emitBlade) {
   return createSdkMcpServer({
     name: 'ayra',
     version: '1.0.0',
