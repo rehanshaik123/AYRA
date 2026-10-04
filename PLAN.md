@@ -10,8 +10,8 @@ line) → a short demo the owner can try from the phone → merge after the owne
 does this step; they get click-by-click instructions when it comes up.
 
 **Where we are:** Phase 5 — Light AYRA with hands on the laptop. Done: live hearing, the ask-first
-rules, light mode, Approve + kill switch, shell and files, her Chrome. Next: 5.7 Windows apps, then
-the owner's setup and demo (5.8).
+rules, light mode, Approve + kill switch, shell and files, her Chrome, Windows apps. Next: the
+owner's setup and demo (5.8).
 
 ---
 
@@ -229,8 +229,17 @@ try Approve and the kill switch · optional: start AYRA at login.
       element's real label. `npm run shortcuts` makes "AYRA" (one click: start + app window, mic granted)
       and "Chrome (AYRA)". Check ✓: opened and read example.com, closed the tab; a "Buy now" click asked
       ("spends money") and No left it unclicked. The owner's own portal waits for their sign-in (5.8).
-- [ ] 5.7 Windows apps: open and close apps, click and type in them through UI Automation, read the
-      window. Check: three everyday tasks.
+- [x] 5.7 Windows apps: `bridge/apps.mjs` (`ayra_apps`) + `bridge/apps.ps1`, Windows' own UI
+      Automation through one PowerShell worker (starts on first use, closes after 5 idle minutes, no
+      new dependency): list, read (text + numbered controls), open by Start-menu name, focus, click
+      (several in one go), type, press keys, close; each action reports what changed. Ask-first:
+      `gate.riskOfAppAction` (the four kinds, plus security windows and switches, Enter-to-send,
+      Shift+Delete). Secrets: a call naming `.env*` (not `.env.example`), Claude's credentials, `.ssh`
+      or Chrome's password store is refused outright, a window showing one is not read, and key-shaped
+      text is blanked in window and page reads. Check ✓: Calculator 12×7 = 84 by its buttons (20 s),
+      Bluetooth state from Settings (18 s), Downloads in File Explorer (19 s), a two-line note in a new
+      Notepad tab beside the owner's `.env.local` tab, which stayed unread (21 s); Windows Security asked
+      first and No left it unclicked. Bench before/after the same evening: no measurable change.
 - [ ] 5.8 🧑 Setup and demo: the owner's steps above, then a live run at the desk and from the phone.
 - [x] 5.9 Leftovers: an interrupted answer is "Stopped." and logged as `interrupted`, not a failure;
       no Vite re-optimising in daily use (gone with 5.3).

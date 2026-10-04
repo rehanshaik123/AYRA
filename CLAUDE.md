@@ -13,8 +13,8 @@ README for GitHub).
 - **Today (Phase 5, light AYRA with hands):** one bridge on the laptop (`bridge/server.mjs`) — the
   brain, the HUD's WebSocket, live hearing and Telegram. The face is an avatar with the ElevenLabs
   voice Lily. Her tools: **web search and pages, the HUD display, PowerShell and the laptop's files**
-  — four kinds of action wait for the owner's Approve; her own Chrome and Windows apps are being
-  added. No cloud until the owner has the budget.
+  — plus her own Chrome and the Windows apps; four kinds of action wait for the owner's Approve.
+  No cloud until the owner has the budget.
 - **Target:** two homes, one AYRA. **AYRA Core** in the cloud, always on (brain, one conversation,
   memory, Telegram, gate, guardian, audit, scheduler, agents). **AYRA Desk** on the laptop while
   it's on (HUD + voice, AYRA's own Chrome, files, PC control), dialling out to the core over
@@ -92,12 +92,13 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `config/identity.json` | **Who AYRA is**: name, wordmark, tagline, honorific, language, timezone, voice, wake words. The only place identity is set. |
 | `bridge/server.mjs` | Today's all-in-one bridge: HTTP + WebSocket on :8787 (the HUD channel), `/health`, ElevenLabs `/tts` `/stt`, the `/img` `/media` `/page` proxies for blades, Telegram start-up, banner. Splits into core + desk (Phases 8–9). |
 | `bridge/brain.mjs` | **The brain**, channel-independent: `createBrain().open({ systemPrompt, servers, emit })` → one Claude session with `ask / interrupt / close`; emits `ready text tool done error` |
-| `bridge/gate.mjs` | **The safety gate**: `createGate()` → `decide(tool)`, the built-ins AYRA gets (web only today), connector policy. Tested in `test/gate.test.mjs` |
+| `bridge/gate.mjs` | **The safety gate**: `createGate()` → `decide(tool)` / `review(tool, input)`, the ask-first rules for commands, paths, pages and apps, files of secrets (refused) and `redactSecrets`, connector policy. Tested in `test/gate*.test.mjs` |
 | `bridge/audit.mjs` · `bridge/state.mjs` | Audit log `data/logs/YYYY-MM-DD.jsonl` (never tool inputs or secrets) · `data/state.json`, small state that survives restarts |
 | `bridge/identity.mjs` | Loads identity + `.env.local`; `env('X')` reads `AYRA_X` |
 | `bridge/persona.mjs` · `bridge/context.mjs` | AYRA's personality: `SYSTEM_PROMPT` (voice + HUD) and `TEXT_PROMPT` (Telegram), one character, plus what she can do today · the "[Now: …]" local-time stamp |
 | `bridge/telegram.mjs` | Telegram channel: long polling, owner-only, one question at a time, text persona, Approve buttons, `/stop` |
 | `bridge/browser.mjs` | Tool server `ayra_browser`: her Chrome — "Chrome (AYRA)" over the DevTools protocol (port 9222); clicks and submits checked with the real label |
+| `bridge/apps.mjs` · `bridge/apps.ps1` | Tool server `ayra_apps`: her Windows apps through UI Automation · the PowerShell worker behind it (ASCII only) |
 | `bridge/approvals.mjs` | The owner's Approve: holds each "ask" until the first answer (HUD, voice, Telegram) or 2 min → no; `halt()` is the kill switch |
 | `bridge/listen.mjs` | Live hearing: relays the face's microphone stream (`/listen` socket) to ElevenLabs Scribe Realtime and the words back |
 | `bridge/face.mjs` | Serves the built face (`dist/`) on 127.0.0.1:5173 in daily use — no dev server |
@@ -118,7 +119,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `index.html` · `vite.config.ts` | Page shell + strict CSP · dev server, `%AYRA_WORDMARK%` title |
 | `data/` | AYRA's runtime data (logs, state; later memory) — gitignored, never committed |
 
-Planned, with their phase: `apps.mjs` (5) · `db.mjs`, `memory.mjs`
+Planned, with their phase: `db.mjs`, `memory.mjs`
 (7) · `core.mjs`, `deploy/` (8) · `link.mjs`, `desk.mjs`, `jobs.mjs` (9) · `notify.mjs`,
 `scheduler.mjs` (10) · `agents/<name>/` (11).
 
