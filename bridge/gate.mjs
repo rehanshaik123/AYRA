@@ -93,6 +93,83 @@ export function riskOfPageAction({ action, label = '', url = '', field = '' }) {
   return null
 }
 
+/** App windows where any action is a security change, by title… */
+const SECURITY_WINDOW = /windows security|sign-in options|credential manager|user accounts?\b|firewall|bitlocker|windows hello|virus & threat|registry editor|local (?:security|group) policy|user account control|passwords?\b/i
+/** …and by program (Windows Security, the registry, the admin consoles). */
+const SECURITY_APP = /^(?:sechealthui|securityhealthhost|regedit|mmc|gpedit|secpol|netplwiz|credwiz|lusrmgr|useraccountcontrolsettings)$/i
+/** Settings switches about sign-in, protection or what apps may use. */
+const SECURITY_SWITCH = /password|passkey|windows hello|sign-in|two-step|firewall|real-time protection|tamper protection|bitlocker|device encryption|user account control|administrator|(?:microphone|camera|location) access|let apps access/i
+/** Keys that send in mail and chat apps. Shift+Enter is a new line, not one of them. */
+const SEND_KEYS = /(?:^|\s)(?:(?:ctrl|control|alt)\+)*enter(?:\s|$)|(?:^|\s)alt\+s(?:\s|$)/i
+/** Shift+Delete skips the Recycle Bin. */
+const DELETE_KEYS = /(?:^|\s)(?:ctrl\+)?shift\+(?:ctrl\+)?del(?:ete)?(?:\s|$)/i
+
+/**
+ * Why an action in a Windows app needs the owner's yes, or null — the same four
+ * kinds as on a web page, plus the windows where anything is a security change.
+ *
+ * @param {{ action: 'click'|'type'|'enter'|'press', label?: string, window?: string,
+ *           app?: string, field?: string, keys?: string }} what
+ *   window — the window's title; app — its program ("notepad")
+ *   keys   — for 'press': what is pressed, as apps_press takes it ("ctrl+s")
+ */
+export function riskOfAppAction({ action, label = '', window = '', app = '', field = '', keys = '' }) {
+  if (SECURITY_WINDOW.test(window) || SECURITY_APP.test(app)) return ASK.security
+  if (action === 'press') {
+    if (DELETE_KEYS.test(keys)) return ASK.delete
+    if (!SEND_KEYS.test(keys)) return null
+    action = 'enter'
+  }
+  if (action === 'click' && (SECURITY_SWITCH.test(label) || /\bPIN\b/.test(label))) return ASK.security
+  return riskOfPageAction({ action, label, field })
+}
+
+/** Why a call naming a secrets file is refused — in the words the model hears. */
+export const SECRETS = 'holds keys or passwords'
+/** Built-ins whose input names files. */
+const FILE_INPUT_TOOLS = new Set(['Read', 'Grep', 'Glob', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+
+/**
+ * Files that hold AYRA's own keys and the owner's logins. Their contents must
+ * never reach a prompt (CLAUDE.md §7), so any tool call that names one is
+ * refused outright — an Approve could not make that safe. `.env.example` holds
+ * no secrets and stays readable.
+ */
+const SECRET_FILE = /[\\/]\.claude[\\/]\.credentials\.json|[\\/]\.ssh[\\/]|[\\/]\.aws[\\/]credentials|\.git-credentials|login data|[\\/]\.netrc\b/i
+
+/** Does this path, command or window title name a file of secrets? */
+export function touchesSecrets(text) {
+  const s = String(text ?? '')
+  for (const m of s.matchAll(/(?:^|[\\/\s'"`(=])(\.env(?:\.[\w-]+)*)(?![\w-])/gi)) {
+    if (!/\.example$/i.test(m[1])) return true
+  }
+  return SECRET_FILE.test(s)
+}
+
+/** Key and token shapes from the services AYRA and the owner use. */
+const SECRET_TOKENS = [
+  /\bsk[-_](?:ant-)?[A-Za-z0-9_-]{20,}/g,
+  /\b\d{8,11}:[A-Za-z0-9_-]{30,}/g,
+  /\bgh[pousr]_[A-Za-z0-9]{30,}/g,
+  /\bxox[abprs]-[A-Za-z0-9-]{10,}/g,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\bAIza[0-9A-Za-z_-]{35}/g,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
+]
+/** `SOME_API_KEY=value`, `password: value` — the value goes. */
+const SECRET_SETTING = /\b([\w-]*(?:(?:api|access|private|secret)[_ -]?key|token|secret|password|passwd|pwd))(\s*[=:]\s*)[^\s'"]+/gi
+
+/**
+ * Text read from a window or a page, with anything that looks like a key or a
+ * password blanked: what is on the owner's screen goes to Claude as part of a
+ * turn, and a secret must not.
+ */
+export function redactSecrets(text) {
+  let s = String(text ?? '')
+  for (const re of SECRET_TOKENS) s = s.replace(re, '[hidden]')
+  return s.replace(SECRET_SETTING, '$1$2[hidden]')
+}
+
 /**
  * Built-in Claude Code tools AYRA is given at all (the SDK's `tools` option).
  *
@@ -266,11 +343,12 @@ export function createGate({ allowWrites, laptop = false, connectors = DEFAULT_C
       // read `display` and `blade` as neither a read nor a write.
       if (server === 'ayra') return true
 
-      // Her Chrome (browser.mjs). It gates itself, twice over: without writes
-      // only the reading tools are built, and every click, submit and Enter is
-      // checked against the ask-first list with the element's real label —
-      // which only the tool can see, so the asking happens there.
-      if (server === 'ayra_browser') return true
+      // Her Chrome (browser.mjs) and her Windows apps (apps.mjs). Each gates
+      // itself, twice over: without writes only the reading tools are built,
+      // and every click, submit and Enter is checked against the ask-first
+      // list (riskOfPageAction / riskOfAppAction) with the control's real
+      // label — which only the tool can see, so the asking happens there.
+      if (server === 'ayra_browser' || server === 'ayra_apps') return true
 
       const tool = mcpToolOf(name)
       if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {
@@ -289,6 +367,12 @@ export function createGate({ allowWrites, laptop = false, connectors = DEFAULT_C
    */
   function review(name, input = {}) {
     if (!decide(name)) return { verdict: 'deny' }
+    const named = ['PowerShell', 'Bash'].includes(name)
+      ? input?.command
+      : FILE_INPUT_TOOLS.has(name)
+        ? `${input?.file_path ?? ''} ${input?.notebook_path ?? ''} ${input?.path ?? ''} ${input?.glob ?? ''}`
+        : ''
+    if (touchesSecrets(named)) return { verdict: 'deny', reason: SECRETS }
     let reason = null
     let detail = ''
     if (name === 'PowerShell' || name === 'Bash') {

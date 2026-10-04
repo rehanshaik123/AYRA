@@ -2,7 +2,9 @@
 // the owner first (Phase 5, the owner's answer "a"). `npm test`
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ASK, createGate, riskOfCommand, riskOfPath, riskOfPageAction } from '../bridge/gate.mjs'
+import {
+  ASK, SECRETS, createGate, redactSecrets, riskOfAppAction, riskOfCommand, riskOfPath, riskOfPageAction, touchesSecrets,
+} from '../bridge/gate.mjs'
 
 const laptop = createGate({ allowWrites: true, laptop: true, connectors: [], everConnected: [] })
 const readOnly = createGate({ allowWrites: false, connectors: [], everConnected: [] })
@@ -102,4 +104,79 @@ test("her Chrome is allowed; it asks the owner itself, with the button's real la
     assert.equal(laptop.decide(`mcp__ayra_browser__${t}`), true, t)
     assert.deepEqual(laptop.review(`mcp__ayra_browser__${t}`, { ref: 3 }), { verdict: 'allow' }, t)
   }
+})
+
+test('her Windows apps are allowed; they ask the owner themselves', () => {
+  for (const t of ['apps_list', 'apps_read', 'apps_click', 'apps_press']) {
+    assert.equal(laptop.decide(`mcp__ayra_apps__${t}`), true, t)
+    assert.deepEqual(laptop.review(`mcp__ayra_apps__${t}`, { ref: 3 }), { verdict: 'allow' }, t)
+  }
+})
+
+test('an app action asks for the same four things, and anything in a security window', () => {
+  const notepad = { window: 'notes.txt - Notepad', app: 'Notepad' }
+  for (const [what, reason] of [
+    [{ action: 'click', label: 'Delete', ...notepad }, ASK.delete],
+    [{ action: 'click', label: 'Buy', window: 'Microsoft Store', app: 'WinStore.App' }, ASK.money],
+    [{ action: 'click', label: 'Send', window: 'Mail', app: 'olk' }, ASK.send],
+    [{ action: 'click', label: 'Open', window: 'Windows Security', app: 'ApplicationFrameHost' }, ASK.security],
+    [{ action: 'click', label: 'Edit', window: 'Registry Editor', app: 'regedit' }, ASK.security],
+    [{ action: 'click', label: 'Microphone access', window: 'Settings', app: 'SystemSettings' }, ASK.security],
+    [{ action: 'click', label: 'PIN (Windows Hello)', window: 'Settings', app: 'SystemSettings' }, ASK.security],
+    [{ action: 'type', field: 'password', label: 'Password', window: 'Sign in', app: 'Teams' }, ASK.security],
+    [{ action: 'press', keys: 'enter', field: 'text', label: 'Type a message', window: 'Chat', app: 'Teams' }, ASK.send],
+    [{ action: 'press', keys: 'ctrl+enter', field: 'text', window: 'Mail', app: 'olk' }, ASK.send],
+    [{ action: 'press', keys: 'alt+s', window: 'Mail', app: 'olk' }, ASK.send],
+    [{ action: 'press', keys: 'shift+delete', window: 'Downloads', app: 'explorer' }, ASK.delete],
+  ]) {
+    assert.equal(riskOfAppAction(what), reason, JSON.stringify(what))
+  }
+  for (const what of [
+    { action: 'click', label: 'Save', ...notepad },
+    { action: 'click', label: 'Pin to taskbar', window: 'Start', app: 'StartMenuExperienceHost' },
+    { action: 'click', label: 'Seven', window: 'Calculator', app: 'ApplicationFrameHost' },
+    { action: 'type', field: 'text', label: 'Text editor', ...notepad },
+    { action: 'press', keys: 'ctrl+s', ...notepad },
+    { action: 'press', keys: 'shift+enter', field: 'text', window: 'Chat', app: 'Teams' },
+    { action: 'press', keys: 'enter', field: 'search', label: 'Search', window: 'File Explorer', app: 'explorer' },
+    { action: 'press', keys: 'delete', window: 'Downloads', app: 'explorer' },
+  ]) {
+    assert.equal(riskOfAppAction(what), null, JSON.stringify(what))
+  }
+})
+
+test('files of keys and passwords are named wherever they appear; .env.example is not one', () => {
+  for (const s of [
+    String.raw`E:\jarvis\.env.local`, '.env', 'Get-Content .env.local', "cat '/srv/ayra/.env.production'",
+    '.env.local - Notepad', String.raw`C:\Users\R\.claude\.credentials.json`, String.raw`C:\Users\R\.ssh\id_ed25519`,
+    String.raw`C:\Users\R\AppData\Local\AYRA\Chrome\Default\Login Data`,
+  ]) {
+    assert.equal(touchesSecrets(s), true, s)
+  }
+  for (const s of [String.raw`E:\jarvis\.env.example`, 'Copy .env.example to start', 'my.environment.txt', 'Get-Date', '', undefined]) {
+    assert.equal(touchesSecrets(s), false, String(s))
+  }
+})
+
+test('reading, searching or changing a secrets file is refused outright, not asked', () => {
+  const refused = { verdict: 'deny', reason: SECRETS }
+  const env = String.raw`E:\jarvis\.env.local`
+  assert.deepEqual(laptop.review('Read', { file_path: env }), refused)
+  assert.deepEqual(laptop.review('Grep', { pattern: 'TOKEN', path: env }), refused)
+  assert.deepEqual(laptop.review('Edit', { file_path: env }), refused)
+  assert.deepEqual(laptop.review('PowerShell', { command: `Get-Content ${env}` }), refused)
+  assert.deepEqual(laptop.review('Read', { file_path: String.raw`E:\jarvis\.env.example` }), { verdict: 'allow' })
+  assert.deepEqual(laptop.review('Grep', { pattern: 'password', path: String.raw`E:\jarvis\src` }), { verdict: 'allow' })
+})
+
+test('key-shaped text is blanked before the model sees it; ordinary text is left alone', () => {
+  const s = redactSecrets(
+    'ELEVENLABS_API_KEY=sk_0123456789abcdef0123456789abcdef0123456789abcdef\n' +
+      'AYRA_TELEGRAM_TOKEN=1234567890:AAH-abcdefghijklmnopqrstuvwxyz0123456\n' +
+      'password: hunter2 and ghp_abcdefghijklmnopqrstuvwxyz0123456789',
+  )
+  assert.doesNotMatch(s, /sk_0123|AAH-abc|hunter2|ghp_abc/)
+  assert.match(s, /ELEVENLABS_API_KEY=\[hidden\]/)
+  const plain = 'Display is 56. Open the Downloads folder; the key to success is practice.'
+  assert.equal(redactSecrets(plain), plain)
 })

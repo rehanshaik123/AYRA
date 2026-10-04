@@ -25,7 +25,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { env } from './identity.mjs'
-import { riskOfPageAction } from './gate.mjs'
+import { redactSecrets, riskOfPageAction } from './gate.mjs'
 
 /** Where "Chrome (AYRA)" keeps its profile — the owner's logins live here. */
 export const PROFILE_DIR = join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'AYRA', 'Chrome')
@@ -233,7 +233,7 @@ async function read(page) {
   const list = s.elements
     .map((e) => `[${e.ref}] ${e.role}${e.field ? `(${e.field})` : ''} "${e.label}"`)
     .join('\n')
-  return (
+  return redactSecrets(
     `Tab: ${s.title} — ${s.url}\n\nThings you can press or type in (use the number as ref):\n${list || '(none)'}` +
     `${s.more ? `\n…and ${s.more} more further down; scroll and read again.` : ''}` +
     `\n\nPage text:\n${s.text}`
