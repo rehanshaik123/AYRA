@@ -27,6 +27,7 @@ import { relayListening } from './listen.mjs'
 import { serveFace } from './face.mjs'
 import { createApprovals } from './approvals.mjs'
 import { browserServer } from './browser.mjs'
+import { appsServer } from './apps.mjs'
 import { homedir } from 'node:os'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -60,6 +61,8 @@ const ORIGINS = createOriginCheck({
  * turns it off for this process — reading only, like before Phase 5.
  */
 const ALLOW_WRITES = env('ALLOW_WRITES', '1') !== '0'
+/** Her Windows apps work through UI Automation, which only Windows has. */
+const WINDOWS = process.platform === 'win32'
 
 /**
  * The orchestrator model. Override with AYRA_MODEL to trade quality for pace
@@ -707,6 +710,13 @@ if (env('TELEGRAM', 'on') === 'off') {
         channel: 'telegram',
         approve: (request) => APPROVALS.ask(request),
       }),
+      ...(WINDOWS && {
+        ayra_apps: appsServer({
+          allowWrites: ALLOW_WRITES,
+          channel: 'telegram',
+          approve: (request) => APPROVALS.ask(request),
+        }),
+      }),
     },
     audit: AUDIT,
     // Approve buttons on the phone, and /stop.
@@ -778,6 +788,14 @@ wss.on('connection', (socket, req) => {
         channel: 'hud',
         approve: (request) => APPROVALS.ask(request),
         emitBlade: (blade) => send({ type: 'blade', blade }),
+      }),
+      // Her Windows apps (apps.mjs) — UI Automation, so Windows only.
+      ...(WINDOWS && {
+        ayra_apps: appsServer({
+          allowWrites: ALLOW_WRITES,
+          channel: 'hud',
+          approve: (request) => APPROVALS.ask(request),
+        }),
       }),
     },
     emit,
