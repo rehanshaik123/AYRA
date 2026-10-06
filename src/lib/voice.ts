@@ -1,4 +1,4 @@
-import { getMic } from './audio'
+import { getMic, releaseMic } from './audio'
 import { speakingNow, speakingSince } from './tts'
 import { startListening, type Listener } from './listen'
 import { caps } from './capabilities'
@@ -58,7 +58,25 @@ export type Voice = {
   stop: () => void
   /** True while a recogniser is actually running. */
   live: () => boolean
+  /**
+   * Push-to-talk (the owner, 2026-10-06: "only listen when I press the space
+   * bar"): open the microphone for one turn. Nothing is heard — or sent
+   * anywhere — until this is called.
+   */
+  open: () => void | Promise<void>
+  /** The owner has finished: send what was said now, without waiting for quiet. */
+  send: () => void
+  /** Stop listening; the microphone itself is handed back after RELEASE_MS. */
+  close: () => void
 }
+
+/**
+ * The microphone is kept this long after a turn, so a quick follow-up starts
+ * instantly, then handed back — the browser's "in use" light goes out.
+ */
+const RELEASE_MS = 30000
+/** After Space-to-send, the words come back within a second; never wait longer than this. */
+const SEND_WAIT_MS = 3000
 
 // ---------------------------------------------------------------------------
 // Endpointing
@@ -379,10 +397,14 @@ export async function startVoice(h: VoiceHandlers): Promise<Voice> {
         ? 'Microphone access denied — voice input is unavailable.'
         : 'No microphone available.',
     )
-    return { stop: () => {}, live: () => false }
+    return { stop: () => {}, live: () => false, open: () => {}, send: () => {}, close: () => {} }
   }
   diag.engine = caps().stt ? 'elevenlabs-live' : 'browser'
-  return caps().stt ? startLiveVoice(h) : startBrowserVoice(h)
+  const v = caps().stt ? await startLiveVoice(h) : startBrowserVoice(h)
+  // Asked for at power-on so a refused permission shows at once — then let go
+  // until the owner presses Space.
+  v.close()
+  return v
 }
 
 /**
@@ -400,6 +422,13 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
   let lastMode: VoiceMode | '' = ''
   /** A partial has arrived for the segment being spoken — the caption has words. */
   let worded = false
+  /** Push-to-talk: listening for a turn right now. */
+  let armed = false
+  /** Space pressed to send: the next words end the turn at once. */
+  let sending = false
+  let sendTimer: ReturnType<typeof setTimeout> | null = null
+  let releaseTimer: ReturnType<typeof setTimeout> | null = null
+  let opening: Promise<Listener | null> | null = null
 
   /**
    * Transcripts become turns here rather than one-per-segment.
@@ -452,9 +481,23 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
       return
     }
 
+    // Space was pressed to send: these words finish the turn, whatever they say.
+    if (sending) {
+      assemble.feed(said, false)
+      finishSend()
+      return
+    }
+
     // Not a turn yet — a piece of one. The assembler decides when the thought
     // is finished, reading the words and whether the user is still talking.
     assemble.feed(said, listener?.meter().speaking ?? false)
+  }
+
+  const finishSend = () => {
+    if (sendTimer) clearTimeout(sendTimer)
+    sendTimer = null
+    sending = false
+    assemble.flush()
   }
 
   const fallBack = (why: string) => {
@@ -467,6 +510,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
     diag.lastError = why
     h.onError(`Live hearing is unavailable (${why}) — switched to the browser's recogniser.`)
     fallback = startBrowserVoice(h)
+    if (armed) void fallback.open()
   }
 
   const guardPoll = setInterval(() => {
@@ -482,8 +526,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
     if ((mode === 'wake' || mode === 'deaf') && assemble.held()) assemble.cancel()
   }, 200)
 
-  try {
-    listener = await startListening(await getMic(), {
+  const handlers: Parameters<typeof startListening>[1] = {
       onStart: () => {
         const mode = h.mode()
         diag.mode = mode
@@ -504,7 +547,10 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
           h.onSpeechStart()
         }
       },
-      onEnd: () => {},
+      // Space pressed with nothing said: send whatever is held, if anything.
+      onEnd: (empty) => {
+        if (empty && sending) finishSend()
+      },
       onPartial: (text) => {
         if (h.mode() !== 'command' || !text.trim()) return
         worded = true
@@ -521,24 +567,87 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
         diag.restarts++
         diag.lastError = `${code}: ${message}`
         // Moments, not failures: a segment with nothing in it, a burst limit.
-        if (code === 'insufficient_audio_activity' || code === 'commit_throttled') return
+        if (code === 'insufficient_audio_activity' || code === 'commit_throttled') {
+          if (sending) finishSend()
+          return
+        }
         fallBack(code)
       },
-    })
-  } catch (err) {
-    fallBack(`could not start: ${(err as Error)?.message ?? err}`)
   }
-  diag.running = Boolean(listener?.live())
+
+  /** The microphone and its worklet, started on the first Space and kept for RELEASE_MS. */
+  const ensure = async (): Promise<Listener | null> => {
+    if (listener?.live()) return listener
+    opening ??= (async () => {
+      try {
+        listener = await startListening(await getMic(), handlers)
+        // The worklet starts armed; it must not hear anything until asked.
+        listener.arm(armed)
+      } catch (err) {
+        listener = null
+        fallBack(`could not start: ${(err as Error)?.message ?? err}`)
+      }
+      diag.running = Boolean(listener?.live())
+      return listener
+    })().finally(() => {
+      opening = null
+    })
+    return opening
+  }
+
+  const release = () => {
+    releaseTimer = null
+    if (armed) return
+    listener?.stop()
+    listener = null
+    releaseMic()
+    diag.running = false
+  }
 
   return {
     stop: () => {
       clearInterval(guardPoll)
+      if (releaseTimer) clearTimeout(releaseTimer)
       assemble.cancel()
       listener?.stop()
       fallback?.stop()
+      releaseMic()
       diag.running = false
     },
     live: () => (fallback ? fallback.live() : (listener?.live() ?? false)),
+    open: async () => {
+      armed = true
+      if (releaseTimer) clearTimeout(releaseTimer)
+      releaseTimer = null
+      if (fallback) return fallback.open()
+      const l = await ensure()
+      // Closed again while the microphone was still opening.
+      if (!armed || !l) return
+      l.arm(true)
+      l.warm()
+    },
+    send: () => {
+      if (fallback) return fallback.send()
+      if (!listener || !armed) {
+        assemble.flush()
+        return
+      }
+      sending = true
+      if (sendTimer) clearTimeout(sendTimer)
+      sendTimer = setTimeout(finishSend, SEND_WAIT_MS)
+      listener.finish()
+    },
+    close: () => {
+      armed = false
+      sending = false
+      if (sendTimer) clearTimeout(sendTimer)
+      sendTimer = null
+      assemble.cancel()
+      if (fallback) return fallback.close()
+      listener?.arm(false)
+      if (releaseTimer) clearTimeout(releaseTimer)
+      releaseTimer = setTimeout(release, RELEASE_MS)
+    },
   }
 }
 
@@ -561,10 +670,13 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
   if (!Ctor) {
     h.onError('This browser has no speech recognition — use Chrome or Edge, or add an ElevenLabs key.')
-    return { stop: () => {}, live: () => false }
+    return { stop: () => {}, live: () => false, open: () => {}, send: () => {}, close: () => {} }
   }
 
   let stopped = false
+  /** Push-to-talk: the recogniser runs only between open() and close(). */
+  let armed = false
+  let releaseTimer: ReturnType<typeof setTimeout> | null = null
   let running = false
   let rec: any = null
   let settled = ''
@@ -713,7 +825,7 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
   }
 
   const spin = () => {
-    if (stopped || running) return
+    if (stopped || running || !armed) return
     rec = new Ctor()
     rec.continuous = true
     rec.interimResults = true
@@ -740,7 +852,7 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
       diag.running = false
       touch()
       rec = null
-      if (!stopped) setTimeout(spin, 80)
+      if (!stopped && armed) setTimeout(spin, 80)
     }
     try {
       rec.start()
@@ -750,12 +862,10 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     }
   }
 
-  spin()
-
   // The heartbeat. If nothing has been heard from the engine for a while it has
   // gone quiet on us — tear it down and build a fresh one.
   const health = setInterval(() => {
-    if (stopped) return
+    if (stopped || !armed) return
     const idle = Date.now() - lastAlive
     diag.idleMs = idle
     if (idle < 15000) return
@@ -784,7 +894,32 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
       } catch {
         /* noop */
       }
+      releaseMic()
     },
     live: () => running,
+    open: () => {
+      armed = true
+      if (releaseTimer) clearTimeout(releaseTimer)
+      releaseTimer = null
+      touch()
+      spin()
+    },
+    send: () => {
+      clearSilence()
+      emit()
+      assemble.flush()
+    },
+    close: () => {
+      armed = false
+      reset()
+      assemble.cancel()
+      try {
+        rec?.abort()
+      } catch {
+        /* already gone */
+      }
+      if (releaseTimer) clearTimeout(releaseTimer)
+      releaseTimer = setTimeout(releaseMic, RELEASE_MS)
+    },
   }
 }

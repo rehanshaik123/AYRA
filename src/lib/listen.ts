@@ -14,8 +14,8 @@ import { BRIDGE_WS_URL } from '../config'
 export type ListenHandlers = {
   /** Speech confirmed — the barge-in trigger. */
   onStart: () => void
-  /** Speech over; the final words follow shortly. */
-  onEnd: () => void
+  /** Speech over; the final words follow shortly. `empty`: finished with nothing said. */
+  onEnd: (empty?: boolean) => void
   /** Words so far, while the owner is still talking. */
   onPartial: (text: string) => void
   /** The finished words of one segment (may be empty). */
@@ -33,6 +33,10 @@ export type Listener = {
   setGuard: (on: boolean) => void
   /** She is about to listen: open the transcription session now. */
   warm: () => void
+  /** Push-to-talk: hear speech (true) or nothing at all (false). */
+  arm: (on: boolean) => void
+  /** End the segment now — the owner pressed Space to send. */
+  finish: () => void
   live: () => boolean
   meter: () => { energy: number; floor: number; threshold: number; speaking: boolean }
 }
@@ -118,8 +122,9 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
       h.onStart()
     } else if (ev.type === 'end') {
       meter.speaking = false
-      send(JSON.stringify({ type: 'commit' }))
-      h.onEnd()
+      // Nothing was said: there is nothing for the transcriber to finish.
+      if (!(ev as { empty?: boolean }).empty) send(JSON.stringify({ type: 'commit' }))
+      h.onEnd(Boolean((ev as { empty?: boolean }).empty))
     } else if (ev.type === 'level') {
       meter = { energy: ev.energy, floor: ev.floor, threshold: ev.threshold, speaking: ev.speaking }
       level = ev.v ?? 0
@@ -143,6 +148,8 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
     },
     setGuard: (on) => node.port.postMessage({ guard: on }),
     warm: () => send(JSON.stringify({ type: 'warm' })),
+    arm: (on) => node.port.postMessage({ armed: on }),
+    finish: () => node.port.postMessage({ finish: true }),
     live: () => !stopped && ctx.state !== 'closed',
     meter: () => meter,
   }

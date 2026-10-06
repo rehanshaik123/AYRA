@@ -44,10 +44,17 @@ import { withHonorific } from './identity'
  *  people say his name and *then* think about what they wanted. */
 const AWAIT_SPEECH_MS = 14000
 
-/** After an answer, how long she keeps listening for a follow-up before she
- *  drops back to standby — a conversation, not a wake word per sentence (the
- *  owner, 2026-10-03). Escape stands her down sooner. */
-const FOLLOW_UP_MS = 60000
+/**
+ * Push-to-talk (the owner, 2026-10-06): "she keeps listening, which is not
+ * necessary… only listen when I press the space bar once and stop when I hit it
+ * twice" — and an open microphone heard the videos playing in other tabs and
+ * answered them. So: Space once listens, Space again sends, two quick presses
+ * stop everything. No wake word, no follow-up window, no voice barge-in.
+ */
+const DOUBLE_TAP_MS = 400
+
+/** Once the owner is talking, the "nobody spoke" timeout gives way to this ceiling. */
+const LONGEST_TURN_MS = 60000
 
 /** How long the boot sequence (Boot.tsx) stays up. It only has to cover the
  *  bridge connecting and the voice probe; the old nine seconds were pure wait. */
@@ -96,6 +103,8 @@ export default function App() {
    */
   const turn = useRef(0)
   const booting = useRef(false)
+  /** When Space was last pressed, for the double press that stops everything. */
+  const lastSpace = useRef(0)
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // -- helpers --------------------------------------------------------------
@@ -113,6 +122,7 @@ export default function App() {
   const goDormant = () => {
     clearIdle()
     silence()
+    voice.current?.close()
     turn.current++
     const s = store.getState()
     s.setCaption('')
@@ -121,13 +131,14 @@ export default function App() {
     s.setPhase('dormant')
   }
 
-  /** Open the mic and wait. `window` is how long before he gives up. */
+  /** Open the mic and wait. `window` is how long before she gives up. */
   const listen = (window: number) => {
     clearIdle()
     const s = store.getState()
     s.setCaption('')
     s.setPhase('listening')
     sfx.play('listen')
+    void voice.current?.open()
     idleTimer.current = setTimeout(goDormant, window)
   }
 
@@ -205,9 +216,8 @@ export default function App() {
         speaker.current = null
         sfx.duck(false)
         store.getState().setActiveTool(null)
-        // Stay open. Having to say his name again to add one more sentence is
-        // the difference between a conversation and a vending machine.
-        listen(FOLLOW_UP_MS)
+        // Done: the microphone stays closed until Space (push-to-talk).
+        goDormant()
       }
     }
   }
@@ -234,18 +244,14 @@ export default function App() {
   const mode = (): VoiceMode => {
     // Waiting on the owner's yes: whatever they say is the answer, never an
     // interruption that would cancel the very action being asked about.
-    if (store.getState().approvals.length) return 'command'
+    // Push-to-talk: words count only while Space has her listening — never a
+    // wake word, never a video in another tab talking over her answer.
     switch (store.getState().phase) {
-      case 'offline':
-      case 'boot':
-        return 'deaf'
-      case 'dormant':
-        return 'wake'
       case 'waking':
       case 'listening':
         return 'command'
       default:
-        return 'guard' // thinking, tooling, speaking
+        return 'deaf'
     }
   }
 
@@ -305,6 +311,8 @@ export default function App() {
   const onUtterance = (text: string) => {
     const phase = store.getState().phase
     if (phase === 'offline' || phase === 'boot' || phase === 'dormant') return
+    // One press, one turn: the microphone closes as soon as the words are in.
+    voice.current?.close()
 
     // A spoken answer to the oldest Approve card. Anything else is ignored
     // while one is waiting — it must be a clear yes or no.
@@ -313,6 +321,7 @@ export default function App() {
       const said = text.replace(LEADING_NAME, '').trim()
       if (SAID_YES.test(said)) answer(waiting.id, true)
       else if (SAID_NO.test(said)) answer(waiting.id, false)
+      goDormant()
       return
     }
 
@@ -329,6 +338,14 @@ export default function App() {
     }
 
     void respond(said)
+  }
+
+  /** Speech has begun: wake a sleeping brain, and don't time out mid-sentence. */
+  const onHearing = () => {
+    warmBrain()
+    if (store.getState().phase !== 'listening') return
+    clearIdle()
+    idleTimer.current = setTimeout(goDormant, LONGEST_TURN_MS)
   }
 
   const onPartial = (text: string) => {
@@ -431,7 +448,7 @@ export default function App() {
       mode,
       onWake,
       onSpeechStart,
-      onHearing: warmBrain,
+      onHearing,
       onPartial,
       onUtterance,
       onError: onVoiceError,
@@ -539,25 +556,34 @@ export default function App() {
         return
       }
 
-      // Space starts a turn without the wake word. Worth using while filming so
-      // a missed wake word doesn't cost a take.
+      // Push-to-talk. Each press acts at once (no waiting to see if a second
+      // one follows), and a second press within DOUBLE_TAP_MS stops everything —
+      // whatever the first one began included.
       if (e.code !== 'Space' || e.repeat) return
       e.preventDefault()
 
       const phase = store.getState().phase
+      const now = performance.now()
+      const double = now - lastSpace.current < DOUBLE_TAP_MS
+      lastSpace.current = double ? 0 : now
+      if (double && phase !== 'offline' && phase !== 'boot') {
+        halt()
+        return
+      }
+
       if (phase === 'offline') {
         void powerOn()
       } else if (phase === 'boot') {
         /* ignore — the boot sequence owns the phase until it finishes */
-      } else if (
-        phase === 'thinking' ||
-        phase === 'tooling' ||
-        phase === 'speaking'
-      ) {
-        onSpeechStart()
-        listen(AWAIT_SPEECH_MS)
+      } else if (phase === 'listening' || phase === 'waking') {
+        // Finished talking: send it now rather than waiting for quiet — which,
+        // with a video playing nearby, might never come.
+        voice.current?.send()
       } else {
-        onWake('')
+        // Standby, or mid-answer: stop whatever she is doing and listen.
+        store.getState().setError(null)
+        if (phase === 'thinking' || phase === 'tooling' || phase === 'speaking') onSpeechStart()
+        listen(AWAIT_SPEECH_MS)
       }
     }
     window.addEventListener('keydown', onKey)

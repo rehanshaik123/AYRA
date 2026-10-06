@@ -20,7 +20,10 @@
  *   { type: 'audio', pcm }         Int16Array, 16 kHz mono
  *   { type: 'end', ms }            quiet for SILENCE_MS — the segment is over
  *   { type: 'level', v, energy, floor, threshold, speaking }  ~25 times a second
- * Messages from the page: { guard: boolean }
+ * Messages from the page: { guard: boolean } · { armed: boolean } — push-to-talk:
+ * unarmed, nothing is ever sent (the owner, 2026-10-06: listen only when I press
+ * Space) · { finish: true } — the owner pressed Space again: end the segment now,
+ * however loud the room (a video playing next door never goes quiet).
  *
  * ListenCore holds all of it and knows nothing about Web Audio, so it is tested
  * in Node (test/listen-worklet.test.mjs).
@@ -67,6 +70,8 @@ export class ListenCore {
     this.smooth = 0
     this.threshold = 0
     this.guard = false
+    /** Push-to-talk: while false, speech is never confirmed and no audio leaves. */
+    this.armed = true
     this.armedAt = -1
     this.speaking = false
     this.startedAt = 0
@@ -129,7 +134,7 @@ export class ListenCore {
       // Onset and confirmation read the raw level: the smoothed one carries a
       // sharp tap's tail on for another hundred milliseconds, long enough to
       // pass for speech. The smoothing is for the release, below.
-      if (energy > this.threshold) {
+      if (energy > this.threshold && this.armed) {
         if (this.armedAt < 0) {
           this.armedAt = t
         } else if (t - this.armedAt >= START_MS) {
@@ -171,6 +176,31 @@ export class ListenCore {
     }
   }
 
+  /** Push-to-talk on or off. Off mid-segment drops it: nothing more is sent. */
+  arm(on) {
+    this.armed = Boolean(on)
+    if (!this.armed) {
+      this.speaking = false
+      this.armedAt = -1
+      this.pending = []
+      this.preRoll = []
+    }
+  }
+
+  /** End the segment now, as if the room had gone quiet. */
+  finish() {
+    this.events = []
+    if (this.speaking) {
+      this.flush()
+      this.speaking = false
+      this.armedAt = -1
+      this.events.push({ type: 'end', ms: this.t - this.startedAt })
+    } else {
+      this.events.push({ type: 'end', ms: 0, empty: true })
+    }
+    return this.events
+  }
+
   flush() {
     if (!this.pending.length) return
     const pcm = new Int16Array(this.pending.length * WINDOW)
@@ -189,6 +219,13 @@ if (typeof registerProcessor === 'function' && typeof AudioWorkletProcessor === 
       this.core = new ListenCore(sampleRate)
       this.port.onmessage = (e) => {
         if (e.data && 'guard' in e.data) this.core.guard = Boolean(e.data.guard)
+        if (e.data && 'armed' in e.data) this.core.arm(e.data.armed)
+        if (e.data && e.data.finish) {
+          for (const ev of this.core.finish()) {
+            if (ev.type === 'audio') this.port.postMessage(ev, [ev.pcm.buffer])
+            else this.port.postMessage(ev)
+          }
+        }
       }
     }
 

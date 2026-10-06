@@ -77,3 +77,36 @@ test('other sample rates come out at 16 kHz too', () => {
   }
   assert.ok(Math.abs(core.t - 1000) <= 20, `1 s of input is ${core.t} ms of steps`)
 })
+
+test('push-to-talk: unarmed, a voice is never confirmed and nothing is sent', () => {
+  const core = new ListenCore(RATE)
+  feed(core, 2000, noise(0.003))
+  core.arm(false)
+  const heard = feed(core, 1500, voice(0.2))
+  assert.deepEqual(kinds(heard), [])
+  assert.equal(samples(heard), 0)
+  core.arm(true)
+  assert.deepEqual(kinds(feed(core, 800, voice(0.2))), ['start'])
+})
+
+test('disarming mid-sentence drops it: no end, no more audio', () => {
+  const core = new ListenCore(RATE)
+  feed(core, 2000, noise(0.003))
+  feed(core, 600, voice(0.2))
+  core.arm(false)
+  const rest = feed(core, 1500, voice(0.2))
+  assert.deepEqual(kinds(rest), [])
+  assert.equal(samples(rest), 0)
+})
+
+test('finish ends the segment at once however loud the room, and says when nothing was said', () => {
+  const core = new ListenCore(RATE)
+  feed(core, 2000, noise(0.003))
+  feed(core, 800, voice(0.2)) // still talking (a video that never goes quiet)
+  const done = core.finish()
+  assert.deepEqual(kinds(done), ['end'])
+  assert.equal(done.find((e) => e.type === 'end').empty, undefined)
+  const idle = core.finish()
+  assert.deepEqual(kinds(idle), ['end'])
+  assert.equal(idle[0].empty, true)
+})
