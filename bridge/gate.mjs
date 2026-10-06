@@ -50,7 +50,13 @@ const COMMAND_RULES = [
   // Fake keystrokes, mouse clicks or UI automation from a script: that is how a
   // script could press Yes on her own Approve card. Her apps tools (apps.mjs) do
   // this work with the card out of reach; a script asks first.
-  [ASK.security, /sendkeys|sendwait|keybd_event|mouse_event|sendinput|wscript\.shell[^;|]*sendkeys|system\.windows\.automation|uiautomation|invokepattern|postmessage|sendmessage/i],
+  [ASK.security, /\[[^\]]*sendkeys\]::|\.sendkeys\s*\(|\bsendwait\s*\(|\bkeybd_event\b|\bmouse_event\b|\bsendinput\b|system\.windows\.automation\.|-assemblyname[^;|]*uiautomation|\[[^\]]*automationelement\]|\b(?:post|send)message[aw]?\s*\(/i],
+  // Talking to her own bridge, face or Chrome directly — around her tools and
+  // their checks: answering her own Approve card, driving her Chrome by hand.
+  [ASK.security, new RegExp(
+    `(?:localhost|127\\.0\\.0\\.1|\\[::1\\]):(?:${[env('BRIDGE_PORT', '8787'), env('FACE_PORT', '5173'), env('CHROME_PORT', '9222')].join('|')})\\b|clientwebsocket|system\\.net\\.websockets|\\bwss?:\\/\\/`,
+    'i',
+  )],
   // Anything that runs by itself later: scheduled tasks and the Startup folder.
   [ASK.security, /schtasks(?:\.exe)?\s+\/(?:create|change|delete)|(?:register|set|unregister)-scheduledtask/i],
   [ASK.send, /send-mailmessage|invoke-(?:webrequest|restmethod)\b[^;|]*-method\s+['"]?(?:post|put|patch|delete)/i],
@@ -85,7 +91,7 @@ const NAMES_OWN_DIR = new RegExp(
 )
 const STARTUP_DIR = /start menu[\\/]programs[\\/]startup|shell:(?:common )?startup|\[environment\]::getfolderpath\(\s*['"]?startup/i
 /** PowerShell and cmd ways of writing, moving or removing a file. */
-const WRITES = /set-content|add-content|out-file|new-item|copy-item|move-item|rename-item|remove-item|clear-content|tee-object|-outfile|write(?:all)?(?:text|bytes|lines)|appendall|(?:^|[\s;|&(])(?:sc|ac|ni|cpi|mi|rni|ri|del|erase|copy|move|ren|cp|mv|rm)(?=\s)|(?<![2-6])>/i
+const WRITES = /set-content|add-content|out-file|new-item|copy-item|move-item|rename-item|remove-item|clear-content|tee-object|-outfile|write(?:all)?(?:text|bytes|lines)|appendall|(?:^|[\s;|&(])(?:sc|ac|ni|cpi|mi|rni|ri|del|erase|copy|move|ren|cp|mv|rm)(?=\s)|(?<![-=<2-6])>{1,2}(?!\s*\$null)(?![&=])/i
 
 /** Is this path inside her own code or settings? */
 export const isOwnPath = (path) => {
@@ -206,11 +212,16 @@ const FILE_INPUT_TOOLS = new Set(['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Mult
  * refused outright — an Approve could not make that safe. `.env.example` holds
  * no secrets and stays readable.
  */
-const SECRET_FILE = /[\\/]\.claude[\\/]\.credentials\.json|[\\/]\.ssh[\\/]|[\\/]\.aws[\\/]credentials|\.git-credentials|login data|[\\/]\.netrc\b/i
+const SECRET_FILE = /allowance\.key|[\\/]\.claude[\\/]\.credentials\.json|[\\/]\.ssh[\\/]|[\\/]\.aws[\\/]credentials|\.git-credentials|login data|[\\/]\.netrc\b/i
+
+/** A read or search that takes in everything in a folder, wildcards and all. */
+const SWEEPS = /[*?]|select-string|\bsls\b|findstr|\bgrep\b|\brg\b|-recurse|-filter|-include|\/s\b/i
 
 /** Does this path, command or window title name a file of secrets? */
 export function touchesSecrets(text) {
   const s = String(text ?? '')
+  // A sweep of her own folders reads .env.local along with everything else.
+  if (NAMES_OWN_DIR.test(s) && SWEEPS.test(s)) return true
   for (const m of s.matchAll(/(?:^|[\\/\s'"`(=])(\.env(?:\.[\w-]+)*)(?![\w-])/gi)) {
     if (!/\.example$/i.test(m[1])) return true
   }

@@ -25,6 +25,7 @@
 /** How long an action waits for the owner before it is declined. */
 export const APPROVAL_TIMEOUT_MS = 120_000
 
+import { randomBytes } from 'node:crypto'
 import { placeOf } from './allowances.mjs'
 
 /**
@@ -35,6 +36,9 @@ export function createApprovals({ timeoutMs = APPROVAL_TIMEOUT_MS, audit, allowa
   const waiting = new Map() // id -> { request, resolve, timer }
   const listeners = new Set()
   let seq = 0
+  // Ids differ from one run to the next: a Telegram button left from before a
+  // restart must find nothing, not answer whatever new request took its number.
+  const run = randomBytes(3).toString('hex')
 
   const tell = (event) => {
     for (const fn of listeners) {
@@ -76,7 +80,7 @@ export function createApprovals({ timeoutMs = APPROVAL_TIMEOUT_MS, audit, allowa
         console.log(`[ayra] allowed ahead ${placeOf(scope)} — ${reason}`)
         return Promise.resolve(true)
       }
-      const id = `ap${++seq}`
+      const id = `ap${++seq}-${run}`
       const always = allowances?.allowable({ reason, scope }) ? `Always ${placeOf(scope)}` : ''
       const request = {
         id, channel, tool, reason, detail: String(detail ?? '').slice(0, 400), always, scope, at: Date.now(),
@@ -95,6 +99,16 @@ export function createApprovals({ timeoutMs = APPROVAL_TIMEOUT_MS, audit, allowa
      */
     answer(id, ok, by = 'owner', always = false) {
       return settle(id, ok === true, by, always === true)
+    },
+
+    /**
+     * Say no to the asks that `which` picks out — a stopped background job's,
+     * so a late Yes cannot make it act. Returns how many.
+     */
+    cancel(which, by = 'cancelled') {
+      const ids = [...waiting.values()].filter((e) => which(e.request)).map((e) => e.request.id)
+      for (const id of ids) settle(id, false, by)
+      return ids.length
     },
 
     /** The kill switch: no to everything waiting. Returns how many were waiting. */

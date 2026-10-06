@@ -25,6 +25,7 @@ import { spawn } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isOwnWindow, redactSecrets, riskOfAppAction, touchesSecrets } from './gate.mjs'
+import { SEND_WORDS } from './allowances.mjs'
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'apps.ps1')
 /** Longest a single request may take before the worker is presumed stuck. */
@@ -37,6 +38,12 @@ const IDLE_MS = 5 * 60_000
 const MAX_TEXT = 6000
 /** Keys that leave a file of secrets alone: a new tab, or another one. */
 const BESIDE_SECRETS = /^(?:ctrl\+(?:n|t|tab|shift\+tab|pageup|pagedown)|alt\+tab)$/i
+/**
+ * Programs that are a whole world of their own — browsers, and the hosts that
+ * many different apps run inside. "Always in chrome" would mean the whole web,
+ * so these never get the Always choice.
+ */
+const HOSTS = /^(?:chrome|msedge|firefox|brave|opera|vivaldi|iexplore|applicationframehost|explorer|javaw?|pythonw?|node|electron|powershell|pwsh|cmd|windowsterminal|wt|conhost|code|dllhost|rundll32|mmc)$/i
 /** How long a window gets to redraw after an action before it is read again. */
 const SETTLE_MS = 150
 
@@ -286,7 +293,10 @@ export function appsTools({ allowWrites, channel, approve, apps = null, emitBlad
   const allowed = async (what, win, toolName, detail) => {
     const reason = riskOfAppAction({ ...what, window: win?.title ?? '', app: win?.app ?? '' })
     if (!reason) return true
-    const scope = win?.app ? { kind: 'app', where: String(win.app).toLowerCase() } : null
+    // "Always" only for one ordinary program, and only a click on a plainly
+    // sending button — never an Enter, a generic Submit, or a whole browser.
+    const plain = what.action === 'click' && SEND_WORDS.test(what.label ?? '')
+    const scope = plain && win?.app && !HOSTS.test(win.app) ? { kind: 'app', where: String(win.app).toLowerCase() } : null
     return approve({ channel, tool: toolName, reason, detail: `${detail} — in ${label(win)}`, scope })
   }
 
@@ -353,13 +363,21 @@ export function appsTools({ allowWrites, channel, approve, apps = null, emitBlad
 
     tool(
       'apps_screenshot',
-      'See a window as a picture — and show it to the owner: on the HUD, or on their phone when they asked on Telegram ("show me"). Works even if it is behind other windows. Reading is faster when only the words matter.',
-      { window: which },
-      guard(async ({ window }) => {
+      'See a window as a picture (it also shows on the HUD); works even behind other windows. `toOwner`: send it to the owner\'s phone too — when they asked to see it ("show me"). Reading is faster when only the words matter.',
+      { window: which, toOwner: z.boolean().optional() },
+      guard(async ({ window, toOwner = false }) => {
         const { window: target } = await call('describe', { window: String(window) })
         if (isOwnWindow(target.title)) return fail(OWN)
-        // A picture cannot be blanked the way read text is.
+        // A picture cannot be blanked the way read text is: a window of secrets,
+        // or one whose words show a key or a password, is not pictured at all.
         if (touchesSecrets(target.title)) return fail('That window shows a file of keys or passwords; it is not pictured.')
+        const seen = await call('read', { window: String(target.id) }).catch(() => null)
+        // The raw words (formatRead blanks them, which would hide the very thing looked for).
+        const words = (seen?.items ?? []).map((i) => i.text ?? `${i.name ?? ''} ${i.value ?? ''}`).join('\n')
+        if (seen && redactSecrets(words) !== words) {
+          return fail('That window shows something like a key or a password, so it is not pictured.')
+        }
+        if (seen) remember(seen)
         const { jpeg, window: w } = await call('shot', { window: String(target.id) })
         emitBlade?.({
           id: `win-${Date.now().toString(36)}`,
@@ -369,8 +387,9 @@ export function appsTools({ allowWrites, channel, approve, apps = null, emitBlad
           size: 'wide',
           hold: 'turn',
         })
-        sendPhoto?.(jpeg, `${w.title} (${w.app})`)
-        return { content: [{ type: 'image', data: jpeg, mimeType: 'image/jpeg' }] }
+        const sent = toOwner && sendPhoto ? await sendPhoto(jpeg, `${w.title} (${w.app})`) : null
+        const note = sent === true ? 'Sent to the owner\'s phone.' : sent === false ? 'Could not send it to the phone.' : ''
+        return { content: [{ type: 'image', data: jpeg, mimeType: 'image/jpeg' }, ...(note ? [{ type: 'text', text: note }] : [])] }
       }),
     ),
 

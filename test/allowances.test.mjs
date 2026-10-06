@@ -16,7 +16,7 @@ const LINKEDIN = { kind: 'site', where: 'linkedin.com' }
 
 test('only sending or posting can be allowed ahead, and only somewhere named', () => {
   assert.deepEqual([...ALLOWABLE], [ASK.send])
-  const a = createAllowances({ store: memory() })
+  const a = createAllowances({ store: memory(), key: 'test-key' })
   assert.equal(a.add({ reason: ASK.money, scope: { kind: 'site', where: 'amazon.in' } }), false)
   assert.equal(a.add({ reason: ASK.delete, scope: { kind: 'app', where: 'explorer' } }), false)
   assert.equal(a.add({ reason: ASK.security, scope: LINKEDIN }), false)
@@ -25,21 +25,21 @@ test('only sending or posting can be allowed ahead, and only somewhere named', (
   assert.deepEqual(a.list(), [])
 })
 
-test('an allowed site covers its subdomains, never look-alikes or other kinds of ask', () => {
-  const a = createAllowances({ store: memory() })
+test('an allowance covers its exact place only — no subdomains, look-alikes or other kinds of ask', () => {
+  const a = createAllowances({ store: memory(), key: 'test-key' })
   assert.equal(a.add({ reason: ASK.send, scope: LINKEDIN }), true)
   assert.equal(a.allows({ reason: ASK.send, scope: LINKEDIN }), true)
-  assert.equal(a.allows({ reason: ASK.send, scope: { kind: 'site', where: 'in.linkedin.com' } }), true)
+  assert.equal(a.allows({ reason: ASK.send, scope: { kind: 'site', where: 'in.linkedin.com' } }), false)
   assert.equal(a.allows({ reason: ASK.send, scope: { kind: 'site', where: 'evil-linkedin.com' } }), false)
   assert.equal(a.allows({ reason: ASK.send, scope: { kind: 'site', where: 'linkedin.com.evil.io' } }), false)
   assert.equal(a.allows({ reason: ASK.send, scope: { kind: 'app', where: 'linkedin.com' } }), false)
   assert.equal(a.allows({ reason: ASK.money, scope: LINKEDIN }), false)
-  assert.equal(siteOf('https://www.LinkedIn.com/feed/'), 'linkedin.com')
+  assert.equal(siteOf('https://www.LinkedIn.com/feed/'), 'www.linkedin.com')
   assert.equal(describe(a.list()[0]), 'send or post on linkedin.com')
 })
 
 test('taken back by number or by place', () => {
-  const a = createAllowances({ store: memory() })
+  const a = createAllowances({ store: memory(), key: 'test-key' })
   a.add({ reason: ASK.send, scope: LINKEDIN })
   a.add({ reason: ASK.send, scope: { kind: 'app', where: 'Teams' } })
   assert.equal(a.list()[1].where, 'teams')
@@ -58,7 +58,7 @@ function hub(allowances) {
 }
 
 test('"Always" is offered only where it can apply, and a yes with it is remembered', async () => {
-  const allowances = createAllowances({ store: memory() })
+  const allowances = createAllowances({ store: memory(), key: 'test-key' })
   const { approvals, events, logged } = hub(allowances)
 
   const money = approvals.ask({ channel: 'hud', tool: 'browser_click', reason: ASK.money, detail: 'Buy', scope: { kind: 'site', where: 'amazon.in' } })
@@ -83,7 +83,7 @@ test('"Always" is offered only where it can apply, and a yes with it is remember
 })
 
 test('"Always" with a no, or on an ask that never offered it, remembers nothing', async () => {
-  const allowances = createAllowances({ store: memory() })
+  const allowances = createAllowances({ store: memory(), key: 'test-key' })
   const { approvals, events } = hub(allowances)
   const no = approvals.ask({ channel: 'hud', tool: 'x', reason: ASK.send, scope: LINKEDIN })
   approvals.answer(events.at(-1).id, false, 'hud', true)
@@ -96,7 +96,7 @@ test('"Always" with a no, or on an ask that never offered it, remembers nothing'
 })
 
 test('her rules tools can list and take back, and there is no way to add', async () => {
-  const allowances = createAllowances({ store: memory() })
+  const allowances = createAllowances({ store: memory(), key: 'test-key' })
   allowances.add({ reason: ASK.send, scope: LINKEDIN })
   const tools = rulesTools({ allowances })
   assert.deepEqual(tools.map((t) => t.name), ['rules_list', 'rules_forget'])
@@ -109,3 +109,46 @@ test('her rules tools can list and take back, and there is no way to add', async
   assert.equal(gate.decide('mcp__ayra_rules__rules_list'), true)
   assert.deepEqual(gate.review('mcp__ayra_rules__rules_forget', { which: 1 }), { verdict: 'allow' })
 })
+
+test('an allowance written into the state file by anything but the button is ignored', () => {
+  const store = memory()
+  const a = createAllowances({ store, key: 'test-key' })
+  a.add({ reason: ASK.send, scope: LINKEDIN })
+  // Someone edits the file: a forged entry, and a real one altered to a new place.
+  const list = store.get('allowances')
+  store.set('allowances', [
+    ...list,
+    { kind: 'site', where: 'evil.com', reason: ASK.send, at: new Date().toISOString(), mac: 'nope' },
+    { ...list[0], where: 'mail.google.com' },
+  ])
+  assert.deepEqual(a.list().map((x) => x.where), ['linkedin.com'])
+  assert.equal(a.allows({ reason: ASK.send, scope: { kind: 'site', where: 'evil.com' } }), false)
+  // Another key (another laptop, or a guess) trusts none of them.
+  assert.deepEqual(createAllowances({ store, key: 'other' }).list(), [])
+})
+
+test('a stopped job\'s waiting asks can be declined, so a late yes does nothing', async () => {
+  const approvals = createApprovals({ timeoutMs: 5000 })
+  const job = approvals.ask({ channel: 'job', tool: 'x', reason: ASK.send })
+  const hud = approvals.ask({ channel: 'hud', tool: 'y', reason: ASK.send })
+  assert.equal(approvals.cancel((r) => r.channel === 'job'), 1)
+  assert.equal(await job, false)
+  assert.equal(approvals.pending().length, 1)
+  approvals.halt()
+  assert.equal(await hud, false)
+})
+
+test('approval ids differ between runs, so an old button finds nothing', () => {
+  const a = createApprovals({ timeoutMs: 5000 })
+  const b = createApprovals({ timeoutMs: 5000 })
+  const ids = []
+  a.subscribe((e) => e.type === 'approve' && ids.push(e.id))
+  b.subscribe((e) => e.type === 'approve' && ids.push(e.id))
+  a.ask({ channel: 'hud', tool: 't', reason: ASK.send })
+  b.ask({ channel: 'hud', tool: 't', reason: ASK.send })
+  assert.notEqual(ids[0], ids[1])
+  assert.match(ids[0], /^ap1-[0-9a-f]{6}$/)
+  a.halt()
+  b.halt()
+})
+

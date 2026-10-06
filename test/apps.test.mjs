@@ -212,12 +212,48 @@ test('"show me": a window goes to the HUD and the phone, but never one of secret
   })
   const tools = appsTools({
     allowWrites: false, channel: 'telegram', apps, approve: async () => false,
-    emitBlade: (b) => shown.push(b), sendPhoto: (jpeg, caption) => sent.push({ jpeg, caption }),
+    emitBlade: (b) => shown.push(b), sendPhoto: async (jpeg, caption) => (sent.push({ jpeg, caption }), true),
   })
-  const res = await handler(tools, 'apps_screenshot')({ window: 'notes' })
+  const res = await handler(tools, 'apps_screenshot')({ window: 'notes', toOwner: true })
   assert.equal(res.content[0].type, 'image')
+  assert.match(res.content[1].text, /Sent to the owner's phone/)
   assert.equal(shown[0].url, 'data:image/jpeg;base64,AAAA')
   assert.deepEqual(sent, [{ jpeg: 'AAAA', caption: 'notes.txt - Notepad (Notepad)' }])
+  // Not asked to: the HUD only.
+  await handler(tools, 'apps_screenshot')({ window: 'notes' })
+  assert.equal(sent.length, 1)
   assert.equal((await handler(tools, 'apps_screenshot')({ window: 'env' })).isError, true)
-  assert.equal(apps.sent.filter((s) => s.op === 'shot').length, 1)
+  assert.equal(apps.sent.filter((s) => s.op === 'shot').length, 2)
+})
+
+test('a window whose words show a key is not pictured either', async () => {
+  const apps = fakeApps({
+    describe: { window: NOTEPAD },
+    read: { window: NOTEPAD, items: [{ text: 'ELEVENLABS_API_KEY=sk_0123456789abcdef0123456789abcdef' }] },
+    shot: { window: NOTEPAD, jpeg: 'AAAA' },
+  })
+  const tools = appsTools({ allowWrites: false, channel: 'hud', apps, approve: async () => false })
+  assert.equal((await handler(tools, 'apps_screenshot')({ window: 'notes' })).isError, true)
+  assert.equal(apps.sent.some((s) => s.op === 'shot'), false)
+})
+
+test('"Always" is offered only for a plainly sending click in an ordinary program', async () => {
+  const asked = []
+  const approve = async (r) => (asked.push(r), false)
+  const run = async (win, label, how = 'click') => {
+    const apps = fakeApps({
+      read: { window: win, items: [{ ref: 1, type: 'button', name: label }] },
+      focused: { name: label, type: 'edit', window: win },
+    })
+    const tools = appsTools({ allowWrites: true, channel: 'hud', apps, approve })
+    await handler(tools, 'apps_read')({ window: win.id })
+    if (how === 'click') await handler(tools, 'apps_click')({ refs: [1] })
+    else await handler(tools, 'apps_press')({ keys: 'enter' })
+    return asked.at(-1).scope
+  }
+  const teams = { id: 3, title: 'Chat', app: 'ms-teams' }
+  assert.deepEqual(await run(teams, 'Send'), { kind: 'app', where: 'ms-teams' })
+  assert.equal(await run(teams, 'Submit'), null, 'a generic submit')
+  assert.equal(await run(teams, 'Type a message', 'enter'), null, 'an Enter')
+  assert.equal(await run({ id: 4, title: 'Gmail - Google Chrome', app: 'chrome' }, 'Send'), null, 'a whole browser')
 })
