@@ -65,6 +65,16 @@ function shutdown(code) {
 process.on('SIGINT', () => shutdown(0))
 process.on('SIGTERM', () => shutdown(0))
 
+// Run by AYRA.exe (desktop/ayra.cs): it stops her by closing this process's
+// input, and if the tray itself dies the input closes too. Either way only the
+// direct children stop — never a Chrome window she opened, which a whole-tree
+// kill would take down with every tab in it.
+if (process.argv.includes('--supervised')) {
+  process.stdin.on('end', () => shutdown(0))
+  process.stdin.on('error', () => shutdown(0))
+  process.stdin.resume()
+}
+
 /** The newest modification time under a file or folder. */
 function newest(path) {
   if (!existsSync(path)) return 0

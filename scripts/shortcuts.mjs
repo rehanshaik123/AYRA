@@ -1,80 +1,117 @@
 /**
- * Desktop shortcuts for the owner — `npm run shortcuts`.
+ * AYRA on the Windows desktop — `npm run shortcuts`.
  *
- *   AYRA            one click: starts AYRA if needed and opens her app window
- *   Chrome (AYRA)   the owner's Chrome from now on: the profile AYRA can drive
+ * Builds AYRA.exe from desktop/ayra.cs with the C# compiler that ships with
+ * Windows (nothing to install) into desktop/bin, beside its icon and settings
+ * (ayra.ini), and has it make the shortcuts:
  *
- * Windows does not let a program pin to the taskbar; the owner right-clicks each
- * shortcut → "Pin to taskbar". `--startup` also puts AYRA in the Startup folder,
- * so she starts with Windows (the owner's choice, not the default).
+ *   AYRA            Desktop + Start menu: opens her window (starting her if needed)
+ *   Chrome (AYRA)   Desktop + Start menu: the owner's Chrome, the one she drives
+ *   AYRA            Startup folder: she is running from sign-in, in the tray
+ *                   (the owner's choice, 2026-10-05) — `--no-startup` removes it
+ *
+ * Then AYRA.exe starts in the tray. Run it again after changing AYRA_HOTKEY,
+ * the ports or desktop/ayra.cs. Windows does not let a program pin itself to
+ * the taskbar: the owner right-clicks "AYRA" once → Pin to taskbar.
+ *
+ * Why desktop/bin and not %LOCALAPPDATA%: a program run from inside a packaged
+ * app (the Claude desktop app, for one) has its AppData writes quietly moved
+ * into that app's private folder, where Windows itself never finds them. The
+ * AYRA folder is an ordinary folder for everyone.
  */
 
-import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import { spawn, spawnSync } from 'node:child_process'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { chromeArgs, chromePath } from '../bridge/browser.mjs'
+import { env } from '../bridge/identity.mjs'
 
 if (process.platform !== 'win32') {
-  console.log('Shortcuts are for Windows; on this system run `npm start` and open http://localhost:5173.')
+  console.log('The desktop app is for Windows; on this system run `npm start` and open http://localhost:5173.')
   process.exit(0)
 }
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+const HOME = join(ROOT, 'desktop', 'bin')
+const EXE = join(HOME, 'AYRA.exe')
+const identity = JSON.parse(readFileSync(join(ROOT, 'config', 'identity.json'), 'utf8'))
+
+const windir = process.env.WINDIR ?? 'C:\\Windows'
+const csc = ['Framework64', 'Framework']
+  .map((f) => join(windir, 'Microsoft.NET', f, 'v4.0.30319', 'csc.exe'))
+  .find(existsSync)
+if (!csc) {
+  console.error('The C# compiler that comes with Windows (.NET Framework 4) was not found.')
+  process.exit(1)
+}
+
+/** True while AYRA.exe is running (it locks its own file). */
+const trayRunning = () =>
+  /AYRA\.exe/i.test(spawnSync('tasklist', ['/FI', 'IMAGENAME eq AYRA.exe', '/NH'], { encoding: 'utf8' }).stdout ?? '')
+
+// Built beside the old exe first: if the build fails, the AYRA that is running
+// is left exactly as it was.
+mkdirSync(HOME, { recursive: true })
+const NEXT = join(HOME, 'AYRA.next.exe')
+const build = spawnSync(
+  csc,
+  [
+    '/nologo', '/target:winexe', '/optimize+', `/out:${NEXT}`,
+    `/win32icon:${join(ROOT, 'desktop', 'ayra.ico')}`,
+    '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll',
+    join(ROOT, 'desktop', 'ayra.cs'),
+  ],
+  { encoding: 'utf8' },
+)
+if (build.status !== 0) {
+  console.error(`AYRA.exe did not build, so nothing was changed:\n${build.stdout}${build.stderr}`)
+  process.exit(1)
+}
+
+// A running tray is asked to stop AYRA and close, so its exe can be replaced.
+// The new build sends the request: the old exe may live somewhere else.
+const wasRunning = trayRunning()
+if (wasRunning) {
+  spawnSync(NEXT, ['--quit'])
+  for (let i = 0; i < 60 && trayRunning(); i++) await new Promise((r) => setTimeout(r, 250))
+  if (trayRunning()) {
+    console.error('AYRA.exe is still running — choose Quit AYRA in its tray menu, then run this again.')
+    process.exit(1)
+  }
+}
+
+renameSync(NEXT, EXE)
+copyFileSync(join(ROOT, 'desktop', 'ayra.ico'), join(HOME, 'ayra.ico'))
+console.log(`built ${EXE}`)
+
 const chrome = chromePath()
-if (!chrome) {
-  console.error('Chrome is not installed — install it first, then run this again.')
-  process.exit(1)
-}
-
-/** A command-line argument as Windows expects it: quoted when it has spaces. */
-const quote = (a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)
-const psString = (s) => `'${String(s).replace(/'/g, "''")}'`
-
-const shortcuts = [
-  {
-    name: 'AYRA',
-    target: process.execPath,
-    args: quote(join(ROOT, 'scripts', 'open.mjs')),
-    // Minimised: the launcher's own console should not flash up.
-    style: 7,
-    icon: `${chrome},0`,
-  },
-  {
-    name: 'Chrome (AYRA)',
-    target: chrome,
-    args: chromeArgs().map(quote).join(' '),
-    style: 1,
-    icon: `${chrome},0`,
-  },
+const ini = [
+  '# Written by `npm run shortcuts` — run it again rather than editing this.',
+  `root=${ROOT}`,
+  `node=${process.execPath}`,
+  ...(chrome ? [`chrome=${chrome}`, ...chromeArgs().map((a) => `chromeArg=${a}`)] : []),
+  `face=http://localhost:${env('FACE_PORT', '5173')}`,
+  `health=http://127.0.0.1:${env('BRIDGE_PORT', '8787')}/health`,
+  `title=${identity.wordmark}`,
+  `hotkey=${env('HOTKEY', 'ctrl+alt+a')}`,
 ]
+writeFileSync(join(HOME, 'ayra.ini'), `${ini.join('\r\n')}\r\n`)
 
-const folders = ["[Environment]::GetFolderPath('Desktop')"]
-if (process.argv.includes('--startup')) folders.push("[Environment]::GetFolderPath('Startup')")
+const startup = !process.argv.includes('--no-startup')
+const install = spawnSync(EXE, ['--install', ...(startup ? [] : ['--no-startup'])], { encoding: 'utf8' })
+process.stdout.write(install.stdout ?? '')
+if (install.status !== 0) console.error(`The shortcuts were not made (exit ${install.status}).`)
 
-const script = [
-  '$shell = New-Object -ComObject WScript.Shell',
-  ...folders.flatMap((folder) =>
-    shortcuts
-      .filter((s) => folder.includes('Desktop') || s.name === 'AYRA')
-      .map((s) =>
-        [
-          `$l = $shell.CreateShortcut((Join-Path (${folder}) ${psString(`${s.name}.lnk`)}))`,
-          `$l.TargetPath = ${psString(s.target)}`,
-          `$l.Arguments = ${psString(s.args)}`,
-          `$l.WorkingDirectory = ${psString(ROOT)}`,
-          `$l.IconLocation = ${psString(s.icon)}`,
-          `$l.WindowStyle = ${s.style}`,
-          '$l.Save()',
-          `Write-Output ('  made ' + (Join-Path (${folder}) ${psString(`${s.name}.lnk`)}))`,
-        ].join('; '),
-      ),
-  ),
-].join('\n')
-
-const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' })
-process.stdout.write(result.stdout)
-if (result.status !== 0) {
-  console.error(result.stderr)
-  process.exit(1)
-}
-console.log('\nRight-click each shortcut on the Desktop → "Pin to taskbar".')
+// Started the way sign-in starts it — through Explorer, from the Startup
+// shortcut — so the tray and every bridge it runs get the owner's own clean
+// environment, not this shell's (which holds .env.local, loaded above, and
+// whatever the terminal set). Without the Startup shortcut it opens her window.
+const loginLink = join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'AYRA.lnk')
+spawn('explorer.exe', [startup && existsSync(loginLink) ? loginLink : EXE], { detached: true, stdio: 'ignore' }).unref()
+console.log(
+  `\nAYRA is in the tray, by the clock: click her icon to open her window, or press ${env('HOTKEY', 'ctrl+alt+a')} to talk.` +
+    '\nTo pin her: right-click "AYRA" on the Desktop → Show more options → Pin to taskbar.',
+)
+if (install.status !== 0) process.exit(1)

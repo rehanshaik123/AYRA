@@ -29,6 +29,9 @@ public/mediapipe/
 # AYRA runtime data — memory, logs, state. Personal; never committed.
 data/
 
+# AYRA.exe and its settings, built by `npm run shortcuts`.
+desktop/bin/
+
 # Secrets. .env.example is the only env file that belongs in git.
 .env
 .env.*
