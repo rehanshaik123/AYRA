@@ -7,8 +7,9 @@ import { createApprovals } from '../bridge/approvals.mjs'
 const OWNER = '1300190813'
 
 test('the buttons carry the request id and the answer', () => {
-  assert.deepEqual(parseApproval('ap:ap3:y'), { id: 'ap3', ok: true })
-  assert.deepEqual(parseApproval('ap:ap12:n'), { id: 'ap12', ok: false })
+  assert.deepEqual(parseApproval('ap:ap3:y'), { id: 'ap3', ok: true, always: false })
+  assert.deepEqual(parseApproval('ap:ap12:n'), { id: 'ap12', ok: false, always: false })
+  assert.deepEqual(parseApproval('ap:ap7:a'), { id: 'ap7', ok: true, always: true })
   assert.equal(parseApproval('ap:ap3:maybe'), null)
   assert.equal(parseApproval('something else'), null)
 })

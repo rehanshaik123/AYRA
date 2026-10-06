@@ -15,9 +15,12 @@
  * there is no screen on this side.
  *
  * It also carries the owner's Approve (Yes / No buttons under each request, the
- * message edited to show the outcome) and the kill switch, `/stop`.
+ * message edited to show the outcome, and "Always" where it can be allowed ahead),
+ * the kill switch `/stop`, and `/rules` · `/forget N` for what she may do without asking.
  */
 
+import { formatRules } from './rules.mjs'
+import { describe } from './allowances.mjs'
 import { localTime } from './context.mjs'
 
 const API = 'https://api.telegram.org'
@@ -50,10 +53,10 @@ export function chunk(text, size = MAX_MESSAGE) {
 export const approveText = ({ reason, detail }) =>
   `🔐 AYRA wants to do something that ${reason}:\n\n${String(detail ?? '').slice(0, 300) || '(no details)'}\n\nAllow it?`
 
-/** `ap:<id>:y` / `ap:<id>:n` — what the buttons send back. */
+/** `ap:<id>:y` / `ap:<id>:n` / `ap:<id>:a` (yes, and always here) — what the buttons send back. */
 export function parseApproval(data) {
-  const m = /^ap:([\w-]+):([yn])$/.exec(String(data ?? ''))
-  return m ? { id: m[1], ok: m[2] === 'y' } : null
+  const m = /^ap:([\w-]+):([yna])$/.exec(String(data ?? ''))
+  return m ? { id: m[1], ok: m[2] !== 'n', always: m[2] === 'a' } : null
 }
 
 /** True only for a message the owner sent in a private chat with the bot. */
@@ -73,7 +76,7 @@ export const fromOwner = (message, ownerId) =>
  *   onHalt    — the kill switch, for `/stop`
  *   request   — how Bot API calls are made; tests pass a fake, the bridge uses the real API
  */
-export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {}, audit, approvals, onHalt, request }) {
+export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {}, audit, approvals, allowances, onHalt, request }) {
   const call = request ?? botApi
 
   async function botApi(method, body, timeoutMs = 15_000) {
@@ -180,10 +183,14 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
         chat_id: ownerId,
         text: approveText(event),
         reply_markup: {
-          inline_keyboard: [[
-            { text: '✅ Yes', callback_data: `ap:${event.id}:y` },
-            { text: '❌ No', callback_data: `ap:${event.id}:n` },
-          ]],
+          inline_keyboard: [
+            [
+              { text: '✅ Yes', callback_data: `ap:${event.id}:y` },
+              { text: '❌ No', callback_data: `ap:${event.id}:n` },
+            ],
+            // Sending or posting somewhere named: allow it here from now on.
+            ...(event.always ? [[{ text: `✅ ${event.always}`, callback_data: `ap:${event.id}:a` }]] : []),
+          ],
         },
       })
         .then((sent) => asked.set(event.id, sent?.message_id))
@@ -193,7 +200,9 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
       const messageId = asked.get(event.id)
       asked.delete(event.id)
       const outcome = event.ok
-        ? '✅ Allowed'
+        ? event.always
+          ? '✅ Allowed — and from now on there without asking (/rules to see or take back)'
+          : '✅ Allowed'
         : event.by === 'timeout'
           ? '⌛ No answer in time — left it'
           : '❌ Not allowed'
@@ -207,7 +216,7 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
       return
     }
     const choice = parseApproval(query.data)
-    const settled = choice ? approvals?.answer(choice.id, choice.ok, 'telegram') : false
+    const settled = choice ? approvals?.answer(choice.id, choice.ok, 'telegram', choice.always) : false
     await call('answerCallbackQuery', {
       callback_query_id: query.id,
       text: settled ? (choice.ok ? 'Allowed' : 'Not allowed') : 'Already answered',
@@ -234,6 +243,16 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
       waiting.length = 0
       onHalt?.()
       await reply(chatId, 'Stopped. Nothing is running now.')
+      return
+    }
+    // What she may do without asking, and taking an allowance back.
+    if (text === '/rules') {
+      await reply(chatId, `${formatRules(allowances?.list() ?? [])}\n\nSend /forget 2 to take back number 2.`)
+      return
+    }
+    if (/^\/forget\b/.test(text)) {
+      const gone = allowances?.remove(text.replace(/^\/forget\s*/, ''))
+      await reply(chatId, gone ? `Taken back: ${describe(gone)}. That asks first again.` : 'Nothing allowed matches that — /rules lists them.')
       return
     }
     if (text === '/start') text = 'Hi!'

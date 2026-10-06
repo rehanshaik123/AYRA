@@ -21,7 +21,7 @@ test('an ask is announced and waits for the answer', async () => {
   assert.equal(approvals.pending().length, 1)
   assert.equal(approvals.answer(events[0].id, true, 'hud'), true)
   assert.equal(await answer, true)
-  assert.deepEqual(events.at(-1), { type: 'approved', id: events[0].id, ok: true, by: 'hud' })
+  assert.deepEqual(events.at(-1), { type: 'approved', id: events[0].id, ok: true, by: 'hud', always: false })
   assert.equal(approvals.pending().length, 0)
 })
 

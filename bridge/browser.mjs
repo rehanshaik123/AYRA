@@ -331,7 +331,8 @@ export function browserServer({ allowWrites, channel, approve, emitBlade }) {
   const allowed = async (what, page, toolName, detail) => {
     const reason = riskOfPageAction({ ...what, url: page.url() })
     if (!reason) return true
-    return approve({ channel, tool: toolName, reason, detail: `${detail} — on ${host(page.url())}` })
+    const site = host(page.url())
+    return approve({ channel, tool: toolName, reason, detail: `${detail} — on ${site}`, scope: { kind: 'site', where: site } })
   }
 
   const guard = (fn) => async (args) => {

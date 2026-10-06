@@ -8,9 +8,14 @@
  * the others are told. No answer in two minutes is a no: an action nobody
  * approved never runs. The kill switch (`halt`) says no to everything waiting.
  *
+ * "Always allow here" (allowances.mjs): an ask that names its place — a website,
+ * an app — and is of the one kind that can be allowed ahead (sending or posting)
+ * offers a third answer, `always`, and next time goes ahead without asking.
+ *
  * Events to subscribers (HUD sockets, Telegram):
- *   { type: 'approve', id, channel, tool, reason, detail, at }  — please answer
- *   { type: 'approved', id, ok, by }                            — answered (or timed out)
+ *   { type: 'approve', id, channel, tool, reason, detail, always, at }  — please answer;
+ *        `always` is the third button's words ("Always on linkedin.com") or ''
+ *   { type: 'approved', id, ok, by, always }                    — answered (or timed out)
  *   { type: 'halt', by }                                        — the kill switch
  *
  * The audit log gets who answered what and why it was asked, never the detail:
@@ -20,10 +25,13 @@
 /** How long an action waits for the owner before it is declined. */
 export const APPROVAL_TIMEOUT_MS = 120_000
 
+import { placeOf } from './allowances.mjs'
+
 /**
- * @param {{ timeoutMs?: number, audit?: { log: (e: object) => void } }} [options]
+ * @param {{ timeoutMs?: number, audit?: { log: (e: object) => void },
+ *           allowances?: ReturnType<import('./allowances.mjs').createAllowances> }} [options]
  */
-export function createApprovals({ timeoutMs = APPROVAL_TIMEOUT_MS, audit } = {}) {
+export function createApprovals({ timeoutMs = APPROVAL_TIMEOUT_MS, audit, allowances } = {}) {
   const waiting = new Map() // id -> { request, resolve, timer }
   const listeners = new Set()
   let seq = 0
@@ -38,27 +46,41 @@ export function createApprovals({ timeoutMs = APPROVAL_TIMEOUT_MS, audit } = {})
     }
   }
 
-  const settle = (id, ok, by) => {
+  const settle = (id, ok, by, always = false) => {
     const entry = waiting.get(id)
     if (!entry) return false
     waiting.delete(id)
     clearTimeout(entry.timer)
     const { request } = entry
+    // Only a yes from the owner, and only where the ask offered it.
+    const kept = ok && always && Boolean(request.always) && Boolean(allowances?.add(request))
     audit?.log({ type: 'approval', channel: request.channel, tool: request.tool, reason: request.reason, ok, by })
-    console.log(`[ayra] approval ${id}: ${ok ? 'yes' : 'no'} (${by}) — ${request.reason}`)
-    tell({ type: 'approved', id, ok, by })
+    if (kept) audit?.log({ type: 'allowance', kind: request.scope.kind, where: request.scope.where, by })
+    console.log(`[ayra] approval ${id}: ${ok ? 'yes' : 'no'}${kept ? `, and always ${placeOf(request.scope)}` : ''} (${by}) — ${request.reason}`)
+    tell({ type: 'approved', id, ok, by, always: kept })
     entry.resolve(ok)
     return true
   }
 
   return {
     /**
-     * Ask the owner. Resolves true only on an explicit yes.
-     * @param {{ channel: string, tool: string, reason: string, detail?: string }} what
+     * Ask the owner. Resolves true only on an explicit yes — or at once when
+     * the owner has already allowed this kind of thing here.
+     * @param {{ channel: string, tool: string, reason: string, detail?: string,
+     *           scope?: { kind: 'site'|'app', where: string } }} what
+     *   scope — where the action happens, for "Always allow here"
      */
-    ask({ channel, tool, reason, detail = '' }) {
+    ask({ channel, tool, reason, detail = '', scope = null }) {
+      if (allowances?.allows({ reason, scope })) {
+        audit?.log({ type: 'approval', channel, tool, reason, ok: true, by: 'allowance' })
+        console.log(`[ayra] allowed ahead ${placeOf(scope)} — ${reason}`)
+        return Promise.resolve(true)
+      }
       const id = `ap${++seq}`
-      const request = { id, channel, tool, reason, detail: String(detail ?? '').slice(0, 400), at: Date.now() }
+      const always = allowances?.allowable({ reason, scope }) ? `Always ${placeOf(scope)}` : ''
+      const request = {
+        id, channel, tool, reason, detail: String(detail ?? '').slice(0, 400), always, scope, at: Date.now(),
+      }
       return new Promise((resolve) => {
         const timer = setTimeout(() => settle(id, false, 'timeout'), timeoutMs)
         timer.unref?.()
@@ -67,9 +89,12 @@ export function createApprovals({ timeoutMs = APPROVAL_TIMEOUT_MS, audit } = {})
       })
     },
 
-    /** The owner's answer. False if it was already answered or never asked. */
-    answer(id, ok, by = 'owner') {
-      return settle(id, ok === true, by)
+    /**
+     * The owner's answer. False if it was already answered or never asked.
+     * `always`: the third button — yes, and from now on here.
+     */
+    answer(id, ok, by = 'owner', always = false) {
+      return settle(id, ok === true, by, always === true)
     },
 
     /** The kill switch: no to everything waiting. Returns how many were waiting. */

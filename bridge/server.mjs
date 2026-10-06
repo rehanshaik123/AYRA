@@ -26,6 +26,8 @@ import { sourcesCard } from './sources.mjs'
 import { relayListening } from './listen.mjs'
 import { serveFace } from './face.mjs'
 import { createApprovals } from './approvals.mjs'
+import { createAllowances } from './allowances.mjs'
+import { rulesServer } from './rules.mjs'
 import { browserServer } from './browser.mjs'
 import { appsServer } from './apps.mjs'
 import { homedir } from 'node:os'
@@ -655,7 +657,9 @@ const AUDIT = createAudit()
  * The owner's Approve, shared by every channel: an ask from any conversation
  * shows on every HUD and on Telegram, and the first answer wins. See approvals.mjs.
  */
-const APPROVALS = createApprovals({ audit: AUDIT })
+/** "Always allow here" — the owner's standing allowances (allowances.mjs). */
+const ALLOWANCES = createAllowances()
+const APPROVALS = createApprovals({ audit: AUDIT, allowances: ALLOWANCES })
 
 /** Every open conversation, so the kill switch can stop them all at once. */
 const CONVERSATIONS = new Set()
@@ -717,7 +721,9 @@ if (env('TELEGRAM', 'on') === 'off') {
           approve: (request) => APPROVALS.ask(request),
         }),
       }),
+      ayra_rules: rulesServer({ allowances: ALLOWANCES }),
     },
+    allowances: ALLOWANCES,
     audit: AUDIT,
     // Approve buttons on the phone, and /stop.
     approvals: APPROVALS,
@@ -797,6 +803,8 @@ wss.on('connection', (socket, req) => {
           approve: (request) => APPROVALS.ask(request),
         }),
       }),
+      // What she may do without asking (rules.mjs).
+      ayra_rules: rulesServer({ allowances: ALLOWANCES }),
     },
     emit,
     // Reloading the page carries on the same conversation (see brain.mjs).
@@ -833,7 +841,7 @@ wss.on('connection', (socket, req) => {
 
     // The owner's answer to an Approve card, or the kill switch.
     if (msg.type === 'approval' && typeof msg.id === 'string') {
-      APPROVALS.answer(msg.id, msg.ok === true, 'hud')
+      APPROVALS.answer(msg.id, msg.ok === true, 'hud', msg.always === true)
     }
     if (msg.type === 'halt') halt('hud')
   })

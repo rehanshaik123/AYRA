@@ -417,6 +417,11 @@ export function createGate({ allowWrites, laptop = false, connectors = DEFAULT_C
       // label — which only the tool can see, so the asking happens there.
       if (server === 'ayra_browser' || server === 'ayra_apps') return true
 
+      // What she may do without asking (rules.mjs): read the owner's standing
+      // allowances and take one back. It cannot add one — only the owner's
+      // button does — so it widens nothing.
+      if (server === 'ayra_rules') return true
+
       const tool = mcpToolOf(name)
       if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {
         return allowWrites

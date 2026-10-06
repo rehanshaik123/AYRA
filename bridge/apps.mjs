@@ -284,7 +284,8 @@ export function appsTools({ allowWrites, channel, approve, apps = null }) {
   const allowed = async (what, win, toolName, detail) => {
     const reason = riskOfAppAction({ ...what, window: win?.title ?? '', app: win?.app ?? '' })
     if (!reason) return true
-    return approve({ channel, tool: toolName, reason, detail: `${detail} — in ${label(win)}` })
+    const scope = win?.app ? { kind: 'app', where: String(win.app).toLowerCase() } : null
+    return approve({ channel, tool: toolName, reason, detail: `${detail} — in ${label(win)}`, scope })
   }
 
   const guard = (fn) => async (args) => {
