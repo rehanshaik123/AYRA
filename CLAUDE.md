@@ -98,10 +98,11 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/audit.mjs` · `bridge/state.mjs` | Audit log `data/logs/YYYY-MM-DD.jsonl` (never tool inputs or secrets) · `data/state.json`, small state that survives restarts |
 | `bridge/identity.mjs` | Loads identity + `.env.local`; `env('X')` reads `AYRA_X` |
 | `bridge/persona.mjs` · `bridge/context.mjs` | AYRA's personality: `SYSTEM_PROMPT` (voice + HUD) and `TEXT_PROMPT` (Telegram), one character, plus what she can do today · the "[Now: …]" local-time stamp |
-| `bridge/telegram.mjs` | Telegram channel: long polling, owner-only, one question at a time, text persona, Approve buttons (and Always), `/stop`, `/rules`, `/forget N` |
+| `bridge/telegram.mjs` | Telegram channel: long polling, owner-only, one question at a time, text persona, Approve buttons (and Always), `/stop`, `/rules`, `/forget N`, `/jobs`, photos ("show me"), notes |
 | `bridge/browser.mjs` | Tool server `ayra_browser`: her Chrome — "Chrome (AYRA)" over the DevTools protocol (port 9222); clicks and submits checked with the real label |
 | `bridge/apps.mjs` · `bridge/apps.ps1` | Tool server `ayra_apps`: her Windows apps through UI Automation · the PowerShell worker behind it (ASCII only) |
 | `bridge/allowances.mjs` · `bridge/rules.mjs` | "Always allow here": standing allowances for sending/posting on one site or in one app — only the owner's button adds one · tool server `ayra_rules` (list, take back; no add) |
+| `bridge/jobs.mjs` · `bridge/presence.mjs` | Background jobs — one at a time, 30 min / 60 steps, reported on Telegram; tool server `ayra_jobs` · "I'm back" on Telegram after the laptop was off or asleep |
 | `bridge/approvals.mjs` | The owner's Approve: holds each "ask" until the first answer (HUD, voice, Telegram) or 2 min → no; `halt()` is the kill switch |
 | `bridge/listen.mjs` | Live hearing: relays the face's microphone stream (`/listen` socket) to ElevenLabs Scribe Realtime and the words back |
 | `bridge/face.mjs` | Serves the built face (`dist/`) on 127.0.0.1:5173 in daily use — no dev server |
@@ -123,7 +124,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `index.html` · `vite.config.ts` | Page shell + strict CSP · dev server, `%AYRA_WORDMARK%` title |
 | `data/` | AYRA's runtime data (logs, state; later memory) — gitignored, never committed |
 
-Planned, with their phase: `jobs.mjs` (6) · `db.mjs`, `memory.mjs` (8) · `core.mjs`, `deploy/`
+Planned, with their phase: `db.mjs`, `memory.mjs` (8) · `core.mjs`, `deploy/`
 (9) · `link.mjs`, `desk.mjs` (10) · `notify.mjs`, `scheduler.mjs` (11) · `agents/<name>/` (12).
 
 Live hearing (`/listen` WebSocket): face sends 16 kHz PCM (binary), `commit`, `warm`; bridge sends

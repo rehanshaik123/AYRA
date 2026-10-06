@@ -299,13 +299,19 @@ everyday sites in "Chrome (AYRA)".
       "Post" went ahead without asking; taken back afterwards. Found on the way: with the laptop idle
       (display off) Chrome dropped her mouse clicks without a word — clicks are now checked and, if
       dropped, pressed from inside the page (both Posts landed exactly once).
-- [ ] 6.2 Background jobs (`bridge/jobs.mjs`): "go to X and do Y, then Z" runs to the end on its own,
-      one job at a time, with a step and time budget; progress on Telegram and a screenshot at the end;
-      `/jobs`, `/stop`. Check: a three-site task from the phone with nobody at the laptop.
-- [ ] 6.3 "Show me": a screenshot of the tab or window she is working in, to the HUD or the phone.
-      Check: from Telegram.
-- [ ] 6.4 Through the day: Wi-Fi drops, sleep and resume, Windows Update restarts — she comes back by
-      herself and says so on Telegram. Check: Wi-Fi off for a minute; a restart.
+- [x] 6.2 Background jobs (`bridge/jobs.mjs`, `ayra_jobs`: jobs_start — writes on only — jobs_status,
+      jobs_stop): "go to X and do Y, then Z" runs to the end in its own conversation, one at a time, 30
+      minutes / 60 steps at most; started, every 3 minutes and finished on Telegram, with a screenshot
+      when it ends on a site or in an app; `/jobs`, `/stop`. Check ✓ (test copy): a two-site task asked
+      "in the background" was handed off in 7.9 s, answered "6 × 7" meanwhile in 3 s, and the job finished
+      both sites in 4 steps (~25 s), closing its tabs. The owner's phone check is in 6.5.
+- [x] 6.3 "Show me": browser_screenshot and the new apps_screenshot (PrintWindow — works behind other
+      windows and with the display off) go on the HUD, or to the owner's phone when asked on Telegram;
+      a window of secrets is never pictured. Check ✓: Calculator pictured in 0.35 s, display off.
+- [x] 6.4 Through the day: Telegram keeps retrying a dead network (also at sign-in) and its long poll
+      gives up on a dead connection after 65 s; "I'm back" on Telegram after 15+ minutes off or asleep
+      (`bridge/presence.mjs`); sleep when plugged in is Never (checked). Still to see live: a Wi-Fi drop
+      and a restart (6.5).
 - [ ] 6.5 🧑 Demo: jobs from the phone with the lid closed.
 
 ## Phase 7 — Apps, one at a time · branch `phase-7-apps`
