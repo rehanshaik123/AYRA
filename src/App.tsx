@@ -4,7 +4,7 @@ import { Hud } from './ui/Hud'
 import { Boot } from './ui/Boot'
 import { Ignition } from './ui/Ignition'
 import { Diagnostics } from './ui/Diagnostics'
-import { useStore } from './store'
+import { useStore, type Phase } from './store'
 import { startVoice, type Voice, type VoiceMode } from './lib/voice'
 import { createSpeaker, cycleVoice, currentVoiceName } from './lib/tts'
 import * as sfx from './lib/sfx'
@@ -56,6 +56,12 @@ const DOUBLE_TAP_MS = 400
 /** Once the owner is talking, the "nobody spoke" timeout gives way to this ceiling. */
 const LONGEST_TURN_MS = 60000
 
+/**
+ * A pause sends a turn by itself; a Space pressed this soon after is the owner
+ * meaning "send" a moment late — not an interruption of what they just asked.
+ */
+const SEND_GRACE_MS = 1500
+
 /** How long the boot sequence (Boot.tsx) stays up. It only has to cover the
  *  bridge connecting and the voice probe; the old nine seconds were pure wait. */
 const BOOT_MS = 2400
@@ -105,6 +111,16 @@ export default function App() {
   const booting = useRef(false)
   /** When Space was last pressed, for the double press that stops everything. */
   const lastSpace = useRef(0)
+  /**
+   * The phase to go back to after listening, when a turn is still in flight —
+   * the owner opened the mic to answer its Approve card. Standby would abandon
+   * the answer that is waiting on that card.
+   */
+  const resumeTo = useRef<Phase | null>(null)
+  /** When the last turn was sent (performance.now()), for SEND_GRACE_MS. */
+  const sentAt = useRef(0)
+  /** Speech has begun in this listening window (the ceiling is set once). */
+  const heard = useRef(false)
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // -- helpers --------------------------------------------------------------
@@ -122,6 +138,7 @@ export default function App() {
   const goDormant = () => {
     clearIdle()
     silence()
+    resumeTo.current = null
     voice.current?.close()
     turn.current++
     const s = store.getState()
@@ -134,12 +151,28 @@ export default function App() {
   /** Open the mic and wait. `window` is how long before she gives up. */
   const listen = (window: number) => {
     clearIdle()
+    heard.current = false
     const s = store.getState()
     s.setCaption('')
     s.setPhase('listening')
-    sfx.play('listen')
-    void voice.current?.open()
-    idleTimer.current = setTimeout(goDormant, window)
+    // The cue once the microphone is really open: a cold start takes a moment,
+    // and words said before the cue would be lost.
+    void Promise.resolve(voice.current?.open()).then(() => {
+      if (store.getState().phase === 'listening') sfx.play('listen')
+    })
+    idleTimer.current = setTimeout(stopListening, window)
+  }
+
+  /** Listening ends without a new turn: standby — or back to the turn that is
+   *  still waiting on an Approve card. */
+  const stopListening = () => {
+    clearIdle()
+    voice.current?.close()
+    const back = resumeTo.current
+    resumeTo.current = null
+    if (!back) return goDormant()
+    store.getState().setCaption('')
+    store.getState().setPhase(back)
   }
 
   // -- one turn -------------------------------------------------------------
@@ -147,6 +180,8 @@ export default function App() {
   const respond = async (said: string): Promise<void> => {
     const mine = ++turn.current
     const stale = () => mine !== turn.current
+    resumeTo.current = null
+    sentAt.current = performance.now()
 
     clearIdle()
     const s = store.getState()
@@ -226,6 +261,8 @@ export default function App() {
 
   /** Answer an Approve card; the bridge tells every screen it is settled. */
   const answer = (id: string, ok: boolean, always = false) => {
+    // The mic was opened to answer this card: the answer is in, so it closes.
+    if (resumeTo.current && store.getState().phase === 'listening') stopListening()
     answerApproval(id, ok, always)
     store.getState().removeApproval(id)
     sfx.play(ok ? 'done' : 'error')
@@ -321,7 +358,7 @@ export default function App() {
       const said = text.replace(LEADING_NAME, '').trim()
       if (SAID_YES.test(said)) answer(waiting.id, true)
       else if (SAID_NO.test(said)) answer(waiting.id, false)
-      goDormant()
+      stopListening()
       return
     }
 
@@ -343,9 +380,10 @@ export default function App() {
   /** Speech has begun: wake a sleeping brain, and don't time out mid-sentence. */
   const onHearing = () => {
     warmBrain()
-    if (store.getState().phase !== 'listening') return
+    if (store.getState().phase !== 'listening' || heard.current) return
+    heard.current = true
     clearIdle()
-    idleTimer.current = setTimeout(goDormant, LONGEST_TURN_MS)
+    idleTimer.current = setTimeout(stopListening, LONGEST_TURN_MS)
   }
 
   const onPartial = (text: string) => {
@@ -582,9 +620,18 @@ export default function App() {
         // with a video playing nearby, might never come.
         voice.current?.send()
       } else {
-        // Standby, or mid-answer: stop whatever she is doing and listen.
+        const busy = phase === 'thinking' || phase === 'tooling' || phase === 'speaking'
+        // "Send", pressed just after a pause had already sent it.
+        if (busy && now - sentAt.current < SEND_GRACE_MS) return
         store.getState().setError(null)
-        if (phase === 'thinking' || phase === 'tooling' || phase === 'speaking') onSpeechStart()
+        if (busy && store.getState().approvals.length) {
+          // Opening the mic to answer the card: the turn waits on it, so it
+          // carries on afterwards rather than being stopped.
+          resumeTo.current = phase
+        } else if (busy) {
+          // Mid-answer: stop whatever she is doing and listen.
+          onSpeechStart()
+        }
         listen(AWAIT_SPEECH_MS)
       }
     }

@@ -89,14 +89,27 @@ test('push-to-talk: unarmed, a voice is never confirmed and nothing is sent', ()
   assert.deepEqual(kinds(feed(core, 800, voice(0.2))), ['start'])
 })
 
-test('disarming mid-sentence drops it: no end, no more audio', () => {
+test('disarming mid-sentence closes it as dropped (so it is committed and thrown away), then nothing more', () => {
   const core = new ListenCore(RATE)
   feed(core, 2000, noise(0.003))
   feed(core, 600, voice(0.2))
-  core.arm(false)
+  const closed = core.arm(false)
+  assert.deepEqual(kinds(closed), ['end'])
+  assert.equal(closed.find((e) => e.type === 'end').dropped, true)
   const rest = feed(core, 1500, voice(0.2))
   assert.deepEqual(kinds(rest), [])
   assert.equal(samples(rest), 0)
+  assert.deepEqual(kinds(new ListenCore(RATE).arm(false)), [], 'nothing to close when silent')
+})
+
+test('after a send nothing new starts until push-to-talk opens again', () => {
+  const core = new ListenCore(RATE)
+  feed(core, 2000, noise(0.003))
+  feed(core, 800, voice(0.2))
+  core.finish()
+  assert.deepEqual(kinds(feed(core, 1000, voice(0.2))), [], 'a video talking on is not a new segment')
+  core.arm(true)
+  assert.deepEqual(kinds(feed(core, 800, voice(0.2))), ['start'])
 })
 
 test('finish ends the segment at once however loud the room, and says when nothing was said', () => {

@@ -176,20 +176,31 @@ export class ListenCore {
     }
   }
 
-  /** Push-to-talk on or off. Off mid-segment drops it: nothing more is sent. */
+  /**
+   * Push-to-talk on or off. Off mid-segment ends it as `dropped`: the page
+   * still commits it, so the transcriber is not left holding half a sentence to
+   * glue onto the next question, and the words that come back are thrown away.
+   */
   arm(on) {
+    this.events = []
     this.armed = Boolean(on)
     if (!this.armed) {
+      if (this.speaking) {
+        this.flush()
+        this.events.push({ type: 'end', ms: this.t - this.startedAt, dropped: true })
+      }
       this.speaking = false
       this.armedAt = -1
       this.pending = []
       this.preRoll = []
     }
+    return this.events
   }
 
-  /** End the segment now, as if the room had gone quiet. */
+  /** End the segment now, as if the room had gone quiet — and hear nothing more until re-armed. */
   finish() {
     this.events = []
+    this.armed = false
     if (this.speaking) {
       this.flush()
       this.speaking = false
@@ -219,7 +230,12 @@ if (typeof registerProcessor === 'function' && typeof AudioWorkletProcessor === 
       this.core = new ListenCore(sampleRate)
       this.port.onmessage = (e) => {
         if (e.data && 'guard' in e.data) this.core.guard = Boolean(e.data.guard)
-        if (e.data && 'armed' in e.data) this.core.arm(e.data.armed)
+        if (e.data && 'armed' in e.data) {
+          for (const ev of this.core.arm(e.data.armed)) {
+            if (ev.type === 'audio') this.port.postMessage(ev, [ev.pcm.buffer])
+            else this.port.postMessage(ev)
+          }
+        }
         if (e.data && e.data.finish) {
           for (const ev of this.core.finish()) {
             if (ev.type === 'audio') this.port.postMessage(ev, [ev.pcm.buffer])

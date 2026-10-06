@@ -14,8 +14,9 @@ import { BRIDGE_WS_URL } from '../config'
 export type ListenHandlers = {
   /** Speech confirmed — the barge-in trigger. */
   onStart: () => void
-  /** Speech over; the final words follow shortly. `empty`: finished with nothing said. */
-  onEnd: (empty?: boolean) => void
+  /** Speech over; the final words follow shortly. `empty`: finished with nothing said;
+   *  `dropped`: cut off by push-to-talk closing — its words are to be thrown away. */
+  onEnd: (empty?: boolean, dropped?: boolean) => void
   /** Words so far, while the owner is still talking. */
   onPartial: (text: string) => void
   /** The finished words of one segment (may be empty). */
@@ -123,8 +124,9 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
     } else if (ev.type === 'end') {
       meter.speaking = false
       // Nothing was said: there is nothing for the transcriber to finish.
-      if (!(ev as { empty?: boolean }).empty) send(JSON.stringify({ type: 'commit' }))
-      h.onEnd(Boolean((ev as { empty?: boolean }).empty))
+      const end = ev as { empty?: boolean; dropped?: boolean }
+      if (!end.empty) send(JSON.stringify({ type: 'commit' }))
+      h.onEnd(Boolean(end.empty), Boolean(end.dropped))
     } else if (ev.type === 'level') {
       meter = { energy: ev.energy, floor: ev.floor, threshold: ev.threshold, speaking: ev.speaking }
       level = ev.v ?? 0

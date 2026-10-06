@@ -77,6 +77,8 @@ export type Voice = {
 const RELEASE_MS = 30000
 /** After Space-to-send, the words come back within a second; never wait longer than this. */
 const SEND_WAIT_MS = 3000
+/** The browser recogniser's last words trail the speaker by about this much. */
+const BROWSER_SEND_MS = 700
 
 // ---------------------------------------------------------------------------
 // Endpointing
@@ -429,6 +431,10 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
   let sendTimer: ReturnType<typeof setTimeout> | null = null
   let releaseTimer: ReturnType<typeof setTimeout> | null = null
   let opening: Promise<Listener | null> | null = null
+  /** Segments committed whose words have not come back yet — a send waits for them. */
+  let awaiting = 0
+  /** Segments cut off by closing: their words come back first (in order) and are thrown away. */
+  let discard = 0
 
   /**
    * Transcripts become turns here rather than one-per-segment.
@@ -547,9 +553,12 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
           h.onSpeechStart()
         }
       },
-      // Space pressed with nothing said: send whatever is held, if anything.
-      onEnd: (empty) => {
-        if (empty && sending) finishSend()
+      // A segment was committed: its words are on their way. Space pressed with
+      // nothing more said sends what is held — once those words are in.
+      onEnd: (empty, dropped) => {
+        if (dropped) discard++
+        else if (!empty) awaiting++
+        else if (sending && awaiting === 0) finishSend()
       },
       onPartial: (text) => {
         if (h.mode() !== 'command' || !text.trim()) return
@@ -557,7 +566,16 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
         const carried = assemble.held()
         h.onPartial(carried ? `${carried} ${text}` : text)
       },
-      onFinal: (text) => hear(text.trim()),
+      onFinal: (text) => {
+        if (discard > 0) {
+          discard--
+          return
+        }
+        awaiting = Math.max(0, awaiting - 1)
+        hear(text.trim())
+        // The last outstanding words arrived empty-handed: send what is held.
+        if (sending && awaiting === 0) finishSend()
+      },
       onLevel: (v) => {
         // Before the first words arrive, show that she can hear something.
         if (h.mode() !== 'command' || worded || assemble.held()) return
@@ -568,7 +586,9 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
         diag.lastError = `${code}: ${message}`
         // Moments, not failures: a segment with nothing in it, a burst limit.
         if (code === 'insufficient_audio_activity' || code === 'commit_throttled') {
-          if (sending) finishSend()
+          if (discard > 0) discard--
+          else awaiting = Math.max(0, awaiting - 1)
+          if (sending && awaiting === 0) finishSend()
           return
         }
         fallBack(code)
@@ -640,6 +660,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
     close: () => {
       armed = false
       sending = false
+      awaiting = 0
       if (sendTimer) clearTimeout(sendTimer)
       sendTimer = null
       assemble.cancel()
@@ -905,9 +926,13 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
       spin()
     },
     send: () => {
+      // The recogniser delivers its last words a little after the owner stops;
+      // sending at once would leave them behind.
       clearSilence()
-      emit()
-      assemble.flush()
+      silenceTimer = setTimeout(() => {
+        emit()
+        assemble.flush()
+      }, BROWSER_SEND_MS)
     },
     close: () => {
       armed = false
