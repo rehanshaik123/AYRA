@@ -269,6 +269,15 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
 
   let stopped = false
   let offset = 0
+  /** Notes for the owner waiting for Telegram to be reachable (notify). */
+  let outbox = []
+  const flush = () => {
+    const notes = outbox
+    outbox = []
+    for (const text of notes) {
+      call('sendMessage', { chat_id: ownerId, text }).catch(() => outbox.push(text))
+    }
+  }
 
   async function poll() {
     let backoff = 1_000
@@ -280,6 +289,7 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
           65_000,
         )
         backoff = 1_000
+        if (outbox.length) flush()
         for (const update of updates) {
           offset = update.update_id + 1
           if (update.message) {
@@ -336,6 +346,11 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
     /** Stop the answer in flight (the kill switch). */
     interrupt() {
       conversation?.interrupt()
+    },
+    /** A note to the owner from AYRA herself; held until Telegram is reachable. */
+    notify(text) {
+      outbox.push(String(text))
+      flush()
     },
   }
 }

@@ -28,6 +28,8 @@ import { serveFace } from './face.mjs'
 import { createApprovals } from './approvals.mjs'
 import { createAllowances } from './allowances.mjs'
 import { rulesServer } from './rules.mjs'
+import { watchPresence } from './presence.mjs'
+import { createStore } from './state.mjs'
 import { browserServer } from './browser.mjs'
 import { appsServer } from './apps.mjs'
 import { homedir } from 'node:os'
@@ -730,6 +732,8 @@ if (env('TELEGRAM', 'on') === 'off') {
     onHalt: () => halt('telegram'),
   })
   CONVERSATIONS.add(telegram)
+  // "I'm back" after the laptop was off or asleep for a while (presence.mjs).
+  watchPresence({ store: createStore(), notify: (text) => telegram.notify(text) })
 } else if (TELEGRAM_TOKEN) {
   console.log('[ayra] telegram: token set but AYRA_TELEGRAM_OWNER_ID is missing — channel off')
 }
