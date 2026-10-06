@@ -387,6 +387,7 @@ while ($null -ne ($line = $stdin.ReadLine())) {
       'read' { Op-Read $req }
       'open' { Op-Open $req }
       'focus' { Op-Focus $req }
+      'describe' { @{ window = (Describe-Window (Find-Window $req.window)) } }
       'focused' { Op-Focused }
       'click' { Op-Click $req }
       'type' { Op-Type $req }

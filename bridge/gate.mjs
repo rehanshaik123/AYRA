@@ -13,6 +13,11 @@
  *   disallowed           — tools removed from the model's context entirely
  */
 
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { IDENTITY, env } from './identity.mjs'
+
 /**
  * What AYRA asks the owner about first. The owner gave her the whole laptop
  * (2026-10-03, answer "a") with exactly these four exceptions; everything else
@@ -42,6 +47,8 @@ const COMMAND_RULES = [
   [ASK.security, /net(?:\.exe)?\s+(?:user|localgroup|accounts)|(?:set|new|remove|enable|disable|rename)-localuser|(?:add|remove)-localgroupmember/i],
   [ASK.security, /reg(?:\.exe)?\s+(?:add|delete|import|restore)|(?:set|new|remove)-itemproperty\s[^;|]*hk(?:lm|cu|ey)|certutil(?:\.exe)?\s+-(?:add|del)/i],
   [ASK.security, /(?:set|stop)-service\s[^;|]*(?:windefend|wscsvc|mpssvc|wuauserv)/i],
+  // Anything that runs by itself later: scheduled tasks and the Startup folder.
+  [ASK.security, /schtasks(?:\.exe)?\s+\/(?:create|change|delete)|(?:register|set|unregister)-scheduledtask/i],
   [ASK.send, /send-mailmessage|invoke-(?:webrequest|restmethod)\b[^;|]*-method\s+['"]?(?:post|put|patch|delete)/i],
   [ASK.send, /(?:^|[\s;|&(])(?:curl|curl\.exe|wget)\b[^;|]*(?:-x\s*['"]?(?:post|put|patch)|--data|--form|\s-d\s|\s-f\s)/i],
 ]
@@ -50,7 +57,36 @@ const COMMAND_RULES = [
 export function riskOfCommand(command) {
   const text = String(command ?? '')
   for (const [reason, re] of COMMAND_RULES) if (re.test(text)) return reason
+  if ((NAMES_OWN_DIR.test(text) || STARTUP_DIR.test(text)) && WRITES.test(text)) return ASK.security
   return null
+}
+
+/**
+ * Her own code and settings: the AYRA folder (bridge, gate, persona) and
+ * %LOCALAPPDATA%\AYRA (AYRA.exe, ayra.ini, her Chrome profile). Changing them
+ * changes her own rules — and AYRA.exe restarts her into whatever is there —
+ * so it is a security change and asks, like any other. Reading is fine.
+ */
+export const OWN_DIRS = [
+  join(dirname(fileURLToPath(import.meta.url)), '..'),
+  join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'AYRA'),
+]
+const norm = (p) => String(p ?? '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
+const OWN = OWN_DIRS.map(norm)
+const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\\/g, '[\\\\/]')
+/** A command naming one of her folders, by path or as %LOCALAPPDATA%\AYRA / $env:LOCALAPPDATA\AYRA. */
+const NAMES_OWN_DIR = new RegExp(
+  `(?:${OWN.map(escape).join('|')})(?:[\\\\/]|\\b|$)|(?:localappdata%?|appdata[\\\\/]local)[\\\\/]ayra\\b`,
+  'i',
+)
+const STARTUP_DIR = /start menu[\\/]programs[\\/]startup|shell:(?:common )?startup|\[environment\]::getfolderpath\(\s*['"]?startup/i
+/** PowerShell and cmd ways of writing, moving or removing a file. */
+const WRITES = /set-content|add-content|out-file|new-item|copy-item|move-item|rename-item|remove-item|clear-content|tee-object|-outfile|write(?:all)?(?:text|bytes|lines)|appendall|(?:^|[\s;|&(])(?:sc|ac|ni|cpi|mi|rni|ri|del|erase|copy|move|ren|cp|mv|rm)(?=\s)|(?<![2-6])>/i
+
+/** Is this path inside her own code or settings? */
+export const isOwnPath = (path) => {
+  const p = norm(path)
+  return OWN.some((dir) => p === dir || p.startsWith(`${dir}\\`))
 }
 
 /**
@@ -62,7 +98,38 @@ const PROTECTED_PATH =
 
 /** Why writing this file needs the owner's yes, or null. */
 export function riskOfPath(path) {
-  return PROTECTED_PATH.test(String(path ?? '')) ? ASK.security : null
+  return PROTECTED_PATH.test(String(path ?? '')) || isOwnPath(path) ? ASK.security : null
+}
+
+/**
+ * Her own pages and window — the face and the bridge. The Approve card lives
+ * there, so her tools never see or touch them: otherwise a web page that
+ * talked her into it could have her press Yes on her own request.
+ */
+const OWN_PORTS = () =>
+  new Set([
+    Number(env('FACE_PORT', '5173')),
+    Number(env('BRIDGE_PORT', '8787')),
+    Number(env('CHROME_PORT', '9222')),
+    // Every port origin.mjs lets a face connect from (Vite dev and preview).
+    ...Array.from({ length: 27 }, (_, i) => 5173 + i),
+    ...Array.from({ length: 27 }, (_, i) => 4173 + i),
+  ])
+
+export function isOwnPage(url, ports = OWN_PORTS()) {
+  try {
+    const u = new URL(url)
+    if (!['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) return false
+    return ports.has(Number(u.port || (u.protocol === 'https:' ? 443 : 80)))
+  } catch {
+    return false
+  }
+}
+
+/** Her window by its title: her wordmark, alone (her app window) or as a Chrome tab's title. */
+export function isOwnWindow(title, wordmark = IDENTITY.wordmark) {
+  const t = String(title ?? '').trim()
+  return t === wordmark || t.startsWith(`${wordmark} - `) || t.startsWith(`${wordmark} — `)
 }
 
 /** Button and link words, by what pressing them does. */

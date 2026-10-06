@@ -24,7 +24,7 @@ import { z } from 'zod'
 import { spawn } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { redactSecrets, riskOfAppAction, touchesSecrets } from './gate.mjs'
+import { isOwnWindow, redactSecrets, riskOfAppAction, touchesSecrets } from './gate.mjs'
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'apps.ps1')
 /** Longest a single request may take before the worker is presumed stuck. */
@@ -244,6 +244,12 @@ export function formatRead({ window, items = [], more = false }, maxText = MAX_T
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Her own window (the face, with the Approve card) is out of bounds: pressing
+ * in it could answer her own request.
+ */
+const OWN = "That is AYRA's own window; her tools leave it alone."
+
 const text = (t) => ({ content: [{ type: 'text', text: t }] })
 const fail = (t) => ({ isError: true, content: [{ type: 'text', text: t }] })
 
@@ -291,6 +297,10 @@ export function appsTools({ allowWrites, channel, approve, apps = null }) {
 
   async function read(window) {
     const data = await call('read', { window: String(window) })
+    if (isOwnWindow(data.window.title)) {
+      last = null
+      return fail(OWN)
+    }
     if (touchesSecrets(data.window.title)) {
       last = null
       return fail(
@@ -405,6 +415,7 @@ export function appsTools({ allowWrites, channel, approve, apps = null }) {
           el = f
           win = f.window
         }
+        if (isOwnWindow(win?.title)) return fail(OWN)
         const field = fieldOf(el)
         if (field === 'password' && !(await allowed({ action: 'type', field, label: el.name }, win, 'apps_type', `Type a password into "${el.name || 'a box'}"`))) {
           return fail('The owner did not approve typing a password. Ask them to type it themselves.')
@@ -423,6 +434,7 @@ export function appsTools({ allowWrites, channel, approve, apps = null }) {
         const sendKeys = toSendKeys(keys)
         if (window != null) await call('focus', { window: String(window) })
         const f = await call('focused')
+        if (isOwnWindow(f.window?.title)) return fail(OWN)
         if (touchesSecrets(f.window?.title) && !BESIDE_SECRETS.test(keys.trim())) {
           return fail('A file of keys or passwords is in front there; only ctrl+n (a new tab) or ctrl+tab is pressed in it.')
         }
@@ -436,7 +448,9 @@ export function appsTools({ allowWrites, channel, approve, apps = null }) {
     ),
 
     tool('apps_close', 'Close a window. If it asks to save, read it and decide with the owner.', { window: which }, guard(async ({ window }) => {
-      const { window: w, waiting } = await call('close', { window: String(window) })
+      const { window: target } = await call('describe', { window: String(window) })
+      if (isOwnWindow(target.title)) return fail(OWN)
+      const { window: w, waiting } = await call('close', { window: String(target.id) })
       if (last?.window.id === w.id) last = null
       return text(waiting ? `${label(w)} is asking something before it closes — read it.` : `Closed ${label(w)}.`)
     })),

@@ -182,3 +182,23 @@ test('the worker answers by id, and a stuck request restarts it', async () => {
   assert.equal(procs.length, 2)
   w.stop()
 })
+
+test("her own window can't be read, typed in, pressed in or closed", async () => {
+  const own = { id: 7, title: 'A.Y.R.A.', app: 'chrome' }
+  const apps = fakeApps({
+    read: { window: own, items: [{ ref: 1, type: 'button', name: 'Yes' }] },
+    focused: { name: '', type: 'document', window: own },
+    describe: { window: own },
+    keys: { done: true },
+    type: { how: 'keys' },
+    close: { window: own, waiting: false },
+  })
+  const tools = appsTools({ allowWrites: true, channel: 'hud', apps, approve: async () => true })
+  assert.equal((await handler(tools, 'apps_read')({ window: 7 })).isError, true)
+  assert.equal((await handler(tools, 'apps_click')({ refs: [1] })).isError, true)
+  assert.equal((await handler(tools, 'apps_press')({ keys: 'y' })).isError, true)
+  assert.equal((await handler(tools, 'apps_type')({ text: 'y' })).isError, true)
+  assert.equal((await handler(tools, 'apps_close')({ window: 'A.Y.R.A.' })).isError, true)
+  assert.equal(apps.sent.some((s) => ['click', 'keys', 'type', 'close'].includes(s.op)), false)
+})
+

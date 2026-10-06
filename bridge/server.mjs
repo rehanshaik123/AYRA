@@ -629,7 +629,7 @@ console.log(
 console.log(`[ayra] model ${MODEL} · effort ${EFFORT}`)
 console.log(
   ALLOW_WRITES
-    ? '[ayra] tools: web, the HUD display, the laptop (PowerShell, files, her Chrome) · asks first: money, sending as you, deleting for good, passwords/security'
+    ? '[ayra] tools: web, the HUD display, the laptop (PowerShell, files, her Chrome, Windows apps) · asks first: money, sending as you, deleting for good, passwords/security'
     : '[ayra] tools: web, the HUD display, reading the laptop\'s files · writes off (AYRA_ALLOW_WRITES=0)',
 )
 console.log(

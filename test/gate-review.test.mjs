@@ -2,8 +2,10 @@
 // the owner first (Phase 5, the owner's answer "a"). `npm test`
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { join } from 'node:path'
 import {
-  ASK, SECRETS, createGate, redactSecrets, riskOfAppAction, riskOfCommand, riskOfPath, riskOfPageAction, touchesSecrets,
+  ASK, OWN_DIRS, SECRETS, createGate, isOwnPage, isOwnPath, isOwnWindow, redactSecrets, riskOfAppAction,
+  riskOfCommand, riskOfPath, riskOfPageAction, touchesSecrets,
 } from '../bridge/gate.mjs'
 
 const laptop = createGate({ allowWrites: true, laptop: true, connectors: [], everConnected: [] })
@@ -180,3 +182,50 @@ test('key-shaped text is blanked before the model sees it; ordinary text is left
   const plain = 'Display is 56. Open the Downloads folder; the key to success is practice.'
   assert.equal(redactSecrets(plain), plain)
 })
+
+test('her own code and settings ask before they change; reading them is fine', () => {
+  const [repo, home] = OWN_DIRS
+  const gateFile = join(repo, 'bridge', 'gate.mjs')
+  assert.equal(isOwnPath(gateFile), true)
+  assert.equal(isOwnPath(gateFile.replace(/\\/g, '/').toUpperCase()), true)
+  assert.equal(isOwnPath(join(home, 'ayra.ini')), true)
+  assert.equal(isOwnPath(`${repo}2\\notes.txt`), false)
+  assert.equal(riskOfPath(gateFile), ASK.security)
+  assert.equal(riskOfPath(String.raw`C:\Users\R\Documents\notes.txt`), null)
+  assert.deepEqual(laptop.review('Edit', { file_path: gateFile }), { verdict: 'ask', reason: ASK.security, detail: gateFile })
+
+  for (const c of [
+    `Set-Content ${gateFile} 'x'`,
+    `Copy-Item C:\\temp\\gate.mjs ${repo}\\bridge\\`,
+    `cd ${repo}; git log > ${repo}\\x.txt`,
+    `Set-Content "$env:LOCALAPPDATA\\AYRA\\ayra.ini" 'node=evil.exe'`,
+    `Copy-Item x.lnk "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\"`,
+    'schtasks /create /tn x /tr calc.exe /sc onlogon',
+    'Register-ScheduledTask -TaskName x -Action $a',
+  ]) {
+    assert.equal(riskOfCommand(c), ASK.security, c)
+  }
+  for (const c of [
+    `Get-Content ${repo}\\README.md 2>$null`,
+    `Get-ChildItem ${repo}`,
+    `Set-Content ${repo}2\\notes.txt 'x'`,
+    'schtasks /query',
+    'Get-ScheduledTask',
+  ]) {
+    assert.equal(riskOfCommand(c), null, c)
+  }
+})
+
+test("her own face and window are never her tools' to touch", () => {
+  for (const url of ['http://localhost:5173/', 'http://127.0.0.1:8787/health', 'http://[::1]:5180/', 'http://localhost:9222/json']) {
+    assert.equal(isOwnPage(url), true, url)
+  }
+  for (const url of ['https://example.com', 'http://localhost:3000', 'http://192.168.1.8:5173/', 'not a url']) {
+    assert.equal(isOwnPage(url), false, url)
+  }
+  assert.equal(isOwnWindow('A.Y.R.A.', 'A.Y.R.A.'), true)
+  assert.equal(isOwnWindow('A.Y.R.A. - Google Chrome', 'A.Y.R.A.'), true)
+  assert.equal(isOwnWindow('Calculator', 'A.Y.R.A.'), false)
+  assert.equal(isOwnWindow('Notes about A.Y.R.A. - Notepad', 'A.Y.R.A.'), false)
+})
+

@@ -290,14 +290,23 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
   }
 
   void (async () => {
-    try {
-      const me = await call('getMe')
-      console.log(`[ayra] telegram: @${me.username} is listening — answering only the owner`)
-    } catch (err) {
-      console.error(`[ayra] telegram unavailable: ${err.message}`)
-      return
+    // At sign-in the Wi-Fi is often not up yet, so a failed first call is
+    // retried — only a rejected token ends the channel.
+    for (let wait = 2_000; !stopped; wait = Math.min(wait * 2, 60_000)) {
+      try {
+        const me = await call('getMe')
+        console.log(`[ayra] telegram: @${me.username} is listening — answering only the owner`)
+        break
+      } catch (err) {
+        if (err.code === 401 || err.code === 404) {
+          console.error('[ayra] telegram: the bot token was rejected — check AYRA_TELEGRAM_TOKEN in .env.local')
+          return
+        }
+        console.warn(`[ayra] telegram not reachable yet (${err.message}); trying again in ${wait / 1000}s`)
+        await new Promise((resolve) => setTimeout(resolve, wait))
+      }
     }
-    await poll()
+    if (!stopped) await poll()
   })()
 
   return {

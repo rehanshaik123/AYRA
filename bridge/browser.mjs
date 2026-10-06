@@ -25,7 +25,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { env } from './identity.mjs'
-import { redactSecrets, riskOfPageAction } from './gate.mjs'
+import { isOwnPage, redactSecrets, riskOfPageAction } from './gate.mjs'
 
 /** Where "Chrome (AYRA)" keeps its profile — the owner's logins live here. */
 export const PROFILE_DIR = join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'AYRA', 'Chrome')
@@ -142,10 +142,13 @@ async function connect() {
   return connecting
 }
 
-/** Normal web tabs, in window order. */
+/**
+ * Normal web tabs, in window order — never her own face, which shares this
+ * Chrome: its Approve card must stay out of reach of her own clicks.
+ */
 async function tabs() {
   const b = await connect()
-  return (await b.pages()).filter((p) => !p.url().startsWith('devtools://'))
+  return (await b.pages()).filter((p) => !p.url().startsWith('devtools://') && !isOwnPage(p.url()))
 }
 
 /** The tab to act in: the one asked for, else the one she was in, else the one in front. */
@@ -316,6 +319,7 @@ export function browserServer({ allowWrites, channel, approve, emitBlade }) {
       guard(async ({ url, newTab = true }) => {
         const target = safeUrl(url)
         if (!target) return fail('Only web addresses (http or https) can be opened.')
+        if (isOwnPage(target)) return fail("That is AYRA's own window; her tools leave it alone.")
         const b = await connect()
         const page = newTab ? await b.newPage() : await pick()
         await page.goto(target, { waitUntil: 'domcontentloaded', timeout: LOAD_TIMEOUT_MS }).catch(() => {})
