@@ -503,7 +503,11 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
     if (sendTimer) clearTimeout(sendTimer)
     sendTimer = null
     sending = false
+    const had = assemble.held()
     assemble.flush()
+    // Space pressed with nothing said yet: nothing to send, so keep listening
+    // (the worklet stopped hearing at the press) rather than go quiet on them.
+    if (!had && armed) listener?.arm(true)
   }
 
   const fallBack = (why: string) => {
