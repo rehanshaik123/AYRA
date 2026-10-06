@@ -262,6 +262,43 @@ async function describe(page, ref) {
   return info
 }
 
+/**
+ * Press an element: a real mouse click first, then a check that it landed.
+ *
+ * With the laptop left alone — display off, the owner on the phone — Chrome
+ * can drop a mouse click without a word: measured 2026-10-07, the button never
+ * fired while keyboard input still arrived. So the click is checked, and if it
+ * never reached the element it is pressed from inside the page with the same
+ * pointer and mouse events a click makes. Never both: the check is what keeps
+ * a "Post" from going out twice.
+ */
+async function press(el) {
+  await el.evaluate((e) => {
+    e.__ayraPressed = false
+    e.addEventListener('click', () => (e.__ayraPressed = true), { capture: true, once: true })
+  })
+  await el.click().catch(() => {})
+  await new Promise((r) => setTimeout(r, 80))
+  // Gone with the page it was on: the click navigated, so it landed.
+  const landed = await el.evaluate((e) => e.__ayraPressed === true).catch(() => true)
+  if (landed) return
+  await el.evaluate((e) => {
+    e.scrollIntoView({ block: 'center' })
+    const r = e.getBoundingClientRect()
+    const at = {
+      bubbles: true, cancelable: true, composed: true, view: window, button: 0,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+    }
+    const pointer = { ...at, pointerId: 1, isPrimary: true, pointerType: 'mouse' }
+    e.dispatchEvent(new PointerEvent('pointerdown', pointer))
+    e.dispatchEvent(new MouseEvent('mousedown', at))
+    e.focus?.()
+    e.dispatchEvent(new PointerEvent('pointerup', pointer))
+    e.dispatchEvent(new MouseEvent('mouseup', at))
+    e.click()
+  })
+}
+
 /** The kind of box that has the keyboard, for an Enter. */
 const focused = (page) =>
   page.evaluate(() => {
@@ -400,7 +437,7 @@ export function browserServer({ allowWrites, channel, approve, emitBlade }) {
           return fail(`The owner did not approve clicking "${label}". Leave it and say so in one sentence.`)
         }
         const el = await page.$(`[data-ayra-ref="${ref}"]`)
-        await el.click()
+        await press(el)
         await settle(page)
         return text(`Clicked "${label}". Now on: ${await page.title()} — ${page.url()}. Read the page to see what changed.`)
       }),
@@ -417,7 +454,19 @@ export function browserServer({ allowWrites, channel, approve, emitBlade }) {
           return fail('The owner did not approve typing a password. Ask them to sign in themselves.')
         }
         const el = await page.$(`[data-ayra-ref="${ref}"]`)
-        await el.click({ clickCount: 3 }).catch(() => {})
+        // Select what is there from inside the page, so the typing replaces it —
+        // a triple click is a mouse action, and those can be dropped (see press).
+        await el.evaluate((e) => {
+          e.focus()
+          if (typeof e.select === 'function') e.select()
+          else if (e.isContentEditable) {
+            const range = document.createRange()
+            range.selectNodeContents(e)
+            const sel = getSelection()
+            sel?.removeAllRanges()
+            sel?.addRange(range)
+          }
+        })
         await el.type(typed)
         if (submit) {
           const shown = field === 'password' ? '••••' : `"${typed.slice(0, 80)}"`
