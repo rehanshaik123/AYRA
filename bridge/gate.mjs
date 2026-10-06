@@ -47,6 +47,10 @@ const COMMAND_RULES = [
   [ASK.security, /net(?:\.exe)?\s+(?:user|localgroup|accounts)|(?:set|new|remove|enable|disable|rename)-localuser|(?:add|remove)-localgroupmember/i],
   [ASK.security, /reg(?:\.exe)?\s+(?:add|delete|import|restore)|(?:set|new|remove)-itemproperty\s[^;|]*hk(?:lm|cu|ey)|certutil(?:\.exe)?\s+-(?:add|del)/i],
   [ASK.security, /(?:set|stop)-service\s[^;|]*(?:windefend|wscsvc|mpssvc|wuauserv)/i],
+  // Fake keystrokes, mouse clicks or UI automation from a script: that is how a
+  // script could press Yes on her own Approve card. Her apps tools (apps.mjs) do
+  // this work with the card out of reach; a script asks first.
+  [ASK.security, /sendkeys|sendwait|keybd_event|mouse_event|sendinput|wscript\.shell[^;|]*sendkeys|system\.windows\.automation|uiautomation|invokepattern|postmessage|sendmessage/i],
   // Anything that runs by itself later: scheduled tasks and the Startup folder.
   [ASK.security, /schtasks(?:\.exe)?\s+\/(?:create|change|delete)|(?:register|set|unregister)-scheduledtask/i],
   [ASK.send, /send-mailmessage|invoke-(?:webrequest|restmethod)\b[^;|]*-method\s+['"]?(?:post|put|patch|delete)/i],

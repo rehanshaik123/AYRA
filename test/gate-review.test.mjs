@@ -229,3 +229,17 @@ test("her own face and window are never her tools' to touch", () => {
   assert.equal(isOwnWindow('Notes about A.Y.R.A. - Notepad', 'A.Y.R.A.'), false)
 })
 
+
+test('a script that fakes keys or clicks, or drives UI automation, asks first', () => {
+  for (const c of [
+    "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('y')",
+    '(New-Object -ComObject WScript.Shell).SendKeys("y")',
+    'Add-Type -AssemblyName UIAutomationClient; [System.Windows.Automation.AutomationElement]::RootElement',
+    '[Win32]::keybd_event(0x59, 0, 0, 0)',
+  ]) {
+    assert.equal(riskOfCommand(c), ASK.security, c)
+  }
+  for (const c of ['Get-Process | Sort-Object CPU', 'Send-Notification is not a thing', 'Get-Content notes.txt']) {
+    assert.equal(riskOfCommand(c), null, c)
+  }
+})
