@@ -29,6 +29,8 @@ export type Blade = {
   mode?: 'reader' | 'live'
   size: 'compact' | 'tall' | 'wide' | 'full'
   hold: 'turn' | 'sticky'
+  /** The owner pressed Keep: it stays, through the next answer too. */
+  kept?: boolean
 }
 
 /** Something AYRA wants to do that the owner chose to be asked about first. */
@@ -76,6 +78,8 @@ type State = {
   pushBlade: (b: Blade) => void
   closeBlade: (id: string) => void
   clearBlades: () => void
+  /** Keep (or let go of) a card: kept cards never close by themselves or with the next turn. */
+  keepBlade: (id: string, kept: boolean) => void
   focusBlade: (id: string | null) => void
   expandBlade: (id: string | null) => void
   addApproval: (a: Approval) => void
@@ -130,7 +134,7 @@ export const useStore = create<State>((set) => ({
   // 'sticky' ones stay until something replaces them.
   clearBlades: () =>
     set((s) => {
-      const kept = s.blades.filter((b) => b.hold === 'sticky')
+      const kept = s.blades.filter((b) => b.hold === 'sticky' || b.kept)
       const alive = new Set(kept.map((b) => b.id))
       return {
         blades: kept,
@@ -138,6 +142,7 @@ export const useStore = create<State>((set) => ({
         expandedBlade: s.expandedBlade && alive.has(s.expandedBlade) ? s.expandedBlade : null,
       }
     }),
+  keepBlade: (id, kept) => set((s) => ({ blades: s.blades.map((b) => (b.id === id ? { ...b, kept } : b)) })),
   focusBlade: (focusedBlade) => set({ focusedBlade }),
   expandBlade: (expandedBlade) => set({ expandedBlade }),
   addApproval: (a) =>

@@ -1406,7 +1406,8 @@ html[data-still='1'] *::after {
 /* With a card docked on the right, the conversation moves left with her. */
 html[data-cards='1'] .log { left: 30%; width: min(560px, 52vw); }
 @media (max-width: 760px) {
-  .blades-stack { left: 4vw; right: 4vw; width: auto; }
+  /* Above the conversation panel, not over it. */
+  .blades-stack { left: 4vw; right: 4vw; width: auto; bottom: calc(118px + 30vh + 8px); }
   html[data-cards='1'] .log { left: 50%; width: 92vw; }
 }
 

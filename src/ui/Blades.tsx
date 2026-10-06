@@ -213,11 +213,15 @@ function Card({
   const [pos, setPos] = useState({ x: 0, y: 0 })
   const shell = useRef<HTMLDivElement>(null)
 
-  // Closing by itself: the clock runs only while nobody is looking at it.
+  // Closing by itself: the clock runs only while nobody is looking at it. A
+  // page, a video or a player is something to read or watch, not glance at,
+  // so those never close on their own.
   const life = blade.hold === 'sticky' ? STICKY_MS : TURN_MS
+  const lasting = blade.kind === 'article' || blade.kind === 'video' || blade.kind === 'embed'
   const [hover, setHover] = useState(false)
-  const [kept, setKept] = useState(false)
-  const paused = hover || expanded || kept
+  const kept = blade.kept === true
+  const keepBlade = useStore((s) => s.keepBlade)
+  const paused = hover || expanded || kept || lasting
   const left = useRef(life)
   const close = useRef(onClose)
   close.current = onClose
@@ -346,7 +350,7 @@ function Card({
               className={`bl-btn bl-keep${kept ? ' bl-kept' : ''}`}
               onClick={(e) => {
                 e.stopPropagation()
-                setKept((k) => !k)
+                keepBlade(blade.id, !kept)
               }}
               title={kept ? 'Let it close by itself again' : 'Keep it open'}
             >
@@ -392,11 +396,16 @@ function Card({
           <Body blade={blade} />
         </div>
 
-        {/* How long until it closes by itself; stops while hovered or kept. */}
-        {!kept && !expanded && (
+        {/* How long until it closes by itself; stops while hovered or kept.
+            Always mounted, so its run-down stays in step with the clock above. */}
+        {!lasting && (
           <span
             className="bl-timer"
-            style={{ animationDuration: `${life}ms`, animationPlayState: paused ? 'paused' : 'running' }}
+            style={{
+              animationDuration: `${life}ms`,
+              animationPlayState: paused ? 'paused' : 'running',
+              visibility: kept || expanded ? 'hidden' : 'visible',
+            }}
           />
         )}
 
@@ -440,6 +449,22 @@ export function Blades() {
   useEffect(() => {
     document.documentElement.dataset.cards = blades.length && !expandedBlade ? '1' : '0'
   }, [blades.length, expandedBlade])
+
+  // A click inside a card's page or player hands the keyboard to that frame,
+  // and then Space — talk, send, stop — would never reach her. The click still
+  // lands; the keyboard comes straight back.
+  useEffect(() => {
+    const onBlur = () =>
+      setTimeout(() => {
+        const el = document.activeElement as HTMLElement | null
+        if (el?.tagName === 'IFRAME' && el.closest('.bl')) {
+          el.blur()
+          window.focus()
+        }
+      }, 0)
+    window.addEventListener('blur', onBlur)
+    return () => window.removeEventListener('blur', onBlur)
+  }, [])
 
   const cycle = useCallback(
     (by: number) => {

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useStore } from '../store'
-import { IDENTITY } from '../identity'
 
 /**
  * Rotating example commands, shown only while idle.
@@ -51,7 +50,7 @@ export function Suggestions() {
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.35 }}
         >
-          “hey {IDENTITY.name.toLowerCase()}, {EXAMPLES[i]}”
+          press Space, then: “{EXAMPLES[i]}”
         </motion.span>
       </AnimatePresence>
     </div>
