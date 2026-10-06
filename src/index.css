@@ -254,18 +254,35 @@ body::after {
 
 /* Conversation log */
 
+/* Its own dark panel (the owner, 2026-10-06): laid straight over her, the white
+   words took on her colours and were hard to read. Solid text, no glow — the
+   glow is what bled the accent into the letters. Newest at the bottom; older
+   lines fade out at the top instead of pushing the panel up into her face. */
 .log {
   position: absolute;
   left: 50%;
-  bottom: 132px;
+  bottom: 118px;
   transform: translateX(-50%);
-  width: min(760px, 68vw);
+  width: min(760px, 86vw);
+  max-height: 30vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
   text-transform: none;
   letter-spacing: 0.01em;
+  background: linear-gradient(180deg, rgba(2, 9, 14, 0.74), rgba(2, 9, 14, 0.9));
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
+  transition: left 0.5s ease, width 0.5s ease;
 }
+.log:empty { display: none; }
 
 .log-line {
   display: flex;
@@ -280,30 +297,31 @@ body::after {
   font-size: 8px;
   letter-spacing: 0.26em;
   text-transform: uppercase;
-  opacity: 0.45;
-  padding-top: 3px;
+  color: var(--accent);
+  opacity: 0.75;
+  padding-top: 4px;
 }
 
-.log-user .log-text { opacity: 0.52; }
-.log-assistant .log-text {
-  color: #eaf9ff;
-  text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 45%, transparent);
-}
+.log-user .log-text { color: #93abb8; }
+.log-assistant .log-text { color: #f3fbff; }
 
 /* Live partial transcript while listening */
 
 .caption {
   position: absolute;
   left: 50%;
-  bottom: 88px;
+  bottom: 74px;
   transform: translateX(-50%);
-  font-size: 16px;
+  font-size: 15px;
   text-transform: none;
   letter-spacing: 0.02em;
   color: #fff;
-  opacity: 0.85;
-  max-width: 66vw;
+  max-width: 80vw;
   text-align: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(2, 9, 14, 0.82);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .error {
@@ -1031,13 +1049,23 @@ kbd {
 */
 .blades-stack {
   position: fixed;
-  inset: 0;
+  /* Docked on the right, not over her face (the owner, 2026-10-06: "the cards
+     showing in the exact middle is disturbing"). She steps aside to make room
+     (avatar.css, html[data-cards]). Full screen (E) still uses the whole frame. */
+  top: 78px;
+  right: 22px;
+  bottom: 150px;
+  width: min(420px, 42vw);
   z-index: 6;
-  display: grid;
-  place-items: center;
   /* The container never eats clicks; only the cards inside it do, so the
      reactor and the rails stay reachable around a small blade. */
   pointer-events: none;
+}
+.blades-stack-full {
+  inset: 0;
+  width: auto;
+  display: grid;
+  place-items: center;
 }
 
 .bl {
@@ -1077,20 +1105,64 @@ kbd {
 .bl-full    { width: 92vw;              height: 88vh }
 .bl-expanded { width: 94vw; height: 92vh }
 
+/* Docked: the width of the dock, and as tall as what it holds — a list of
+   three results no longer sits in a box sized for a page. Pages, videos and
+   images keep a height to fill. */
+.blades-stack:not(.blades-stack-full) .bl {
+  position: relative;
+  width: 100%;
+  height: auto;
+  max-height: calc(100vh - 240px);
+  border-radius: 12px;
+}
+.blades-stack:not(.blades-stack-full) .bl-k-article,
+.blades-stack:not(.blades-stack-full) .bl-k-embed,
+.blades-stack:not(.blades-stack-full) .bl-k-video {
+  height: min(calc(100vh - 240px), 460px);
+}
+.blades-stack:not(.blades-stack-full) .bl-k-image { height: min(calc(100vh - 240px), 340px); }
+.bl-expanded { border-radius: 12px; }
+
+/* How long until it closes by itself — a hairline that runs down. */
+.bl-timer {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+  transform-origin: left center;
+  animation-name: blTimer;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+  pointer-events: none;
+}
+@keyframes blTimer {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+.bl-keep { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; }
+.bl-kept {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
 .bl-head {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px 9px 14px;
+  padding: 10px 12px 10px 16px;
   border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
   background: color-mix(in srgb, var(--accent) 7%, transparent);
+  /* An accent edge on the left: the card belongs to her. */
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 80%, transparent);
 }
 
 .bl-title {
-  font-size: 10px;
-  letter-spacing: 0.2em;
-  color: color-mix(in srgb, var(--accent) 92%, white);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: color-mix(in srgb, var(--accent) 70%, white);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1177,9 +1249,8 @@ kbd {
 
 .bl-hint {
   position: absolute;
-  bottom: 3.2vh;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: -22px;
+  right: 0;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -1212,6 +1283,14 @@ kbd {
   display: grid;
   place-items: center;
   pointer-events: none;
+}
+/* Docked, every card sits at the top of the dock; the older ones peek out
+   behind the newest. */
+.blades-stack:not(.blades-stack-full) .bl-slot {
+  top: 0;
+  right: 0;
+  width: 100%;
+  display: block;
 }
 .bl-slot > .bl { pointer-events: auto }
 
@@ -1322,3 +1401,11 @@ html[data-still='1'] *::after {
 .approve-no { color: #ff6b6b; }
 .approve-acts button:hover { background: rgba(255, 255, 255, 0.08); }
 .approve-more { margin-left: auto; font-size: 11px; opacity: 0.7; }
+
+/* With a card docked on the right, the conversation moves left with her. */
+html[data-cards='1'] .log { left: 30%; width: min(560px, 52vw); }
+@media (max-width: 760px) {
+  .blades-stack { left: 4vw; right: 4vw; width: auto; }
+  html[data-cards='1'] .log { left: 50%; width: 92vw; }
+}
+

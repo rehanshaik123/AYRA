@@ -16,9 +16,16 @@
 }
 .avatar-stage {
   position: relative;
-  width: min(58vh, 500px, 86vw);
+  width: min(56vh, 480px, 86vw);
   aspect-ratio: 400 / 440;
-  transform: translateY(-8vh);
+  /* Higher than centre: the conversation panel owns the bottom of the frame. */
+  transform: translateY(-11vh);
+  transition: transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+/* A card is docked on the right (Blades.tsx): she steps left to make room. */
+html[data-cards='1'] .avatar-stage { transform: translate(-21vw, -11vh) scale(0.9); }
+@media (max-width: 760px) {
+  html[data-cards='1'] .avatar-stage { transform: translateY(-11vh) scale(0.8); opacity: 0.35; }
 }
 .avatar-halo {
   position: absolute;

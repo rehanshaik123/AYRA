@@ -9,9 +9,9 @@ import { IDENTITY } from '../identity'
 const statusText: Record<Phase, string> = {
   offline: 'OFFLINE',
   boot: 'INITIALISING',
-  dormant: `STANDBY — SAY “HEY ${IDENTITY.name.toUpperCase()}”`,
+  dormant: 'STANDBY — PRESS SPACE TO TALK',
   waking: 'ONLINE',
-  listening: 'LISTENING',
+  listening: 'LISTENING — SPACE TO SEND',
   thinking: 'PROCESSING',
   tooling: 'ACCESSING SYSTEMS',
   speaking: 'RESPONDING',
@@ -295,10 +295,10 @@ export function Hud() {
         )}
       </AnimatePresence>
 
-      {/* Conversation log — last few turns, fading upward */}
+      {/* The latest exchange — what you said and her answer — on its own panel */}
       <div className="log">
         <AnimatePresence initial={false}>
-          {turns.slice(-4).map((t) => (
+          {turns.slice(-2).map((t) => (
             <motion.div
               key={t.id}
               className={`log-line log-${t.role}`}
@@ -343,7 +343,7 @@ export function Hud() {
 
       <footer className="hud-bottom">
         <span className="hint">
-          say <b>“hey {IDENTITY.name.toLowerCase()}”</b> · <kbd>Space</kbd> to talk · <kbd>Esc</kbd> stop · <kbd>L</kbd> still
+          <kbd>Space</kbd> talk · <kbd>Space</kbd> again send · <kbd>Space</kbd><kbd>Space</kbd> stop · <kbd>L</kbd> still
           {voice && (
             <>
               {' · '}

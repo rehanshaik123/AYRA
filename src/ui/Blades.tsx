@@ -171,6 +171,24 @@ const Body = memo(function Body({ blade }: { blade: Blade }) {
 
 /* -------------------------------------------------------------------- card */
 
+/**
+ * Cards close by themselves (the owner, 2026-10-06: "it's not closing itself").
+ * Long enough to read a handful of results; a card the model marked sticky
+ * stays longer. Hovering a card holds it, and Keep holds it for good.
+ */
+const TURN_MS = 40000
+const STICKY_MS = 120000
+
+/** What the header says the card is — in words, not the internal kind. */
+const KIND_LABEL: Record<Blade['kind'], string> = {
+  article: 'read',
+  image: 'image',
+  gallery: 'images',
+  video: 'video',
+  embed: 'video',
+  markup: '',
+}
+
 function Card({
   blade,
   depth,
@@ -194,6 +212,24 @@ function Card({
   /** Where the user has dragged it, relative to its slot. */
   const [pos, setPos] = useState({ x: 0, y: 0 })
   const shell = useRef<HTMLDivElement>(null)
+
+  // Closing by itself: the clock runs only while nobody is looking at it.
+  const life = blade.hold === 'sticky' ? STICKY_MS : TURN_MS
+  const [hover, setHover] = useState(false)
+  const [kept, setKept] = useState(false)
+  const paused = hover || expanded || kept
+  const left = useRef(life)
+  const close = useRef(onClose)
+  close.current = onClose
+  useEffect(() => {
+    if (paused) return
+    const from = performance.now()
+    const timer = setTimeout(() => close.current(), left.current)
+    return () => {
+      clearTimeout(timer)
+      left.current = Math.max(0, left.current - (performance.now() - from))
+    }
+  }, [paused])
 
   /**
    * Drag and resize both listen on `window`, not on the grip or the header:
@@ -280,10 +316,12 @@ function Card({
       <motion.section
         ref={shell}
         className={
-          `bl bl-${blade.size}` +
+          `bl bl-${blade.size} bl-k-${blade.kind}` +
           (expanded ? ' bl-expanded' : '') +
           (focused ? ' bl-front' : '')
         }
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
         // Position and size are ours rather than framer's — see `grab` above for
         // why. Applied as a plain transform because the depth animation lives on
         // the slot wrapper, so nothing is competing for this element's own one.
@@ -302,9 +340,19 @@ function Card({
 
         <header className="bl-head" onPointerDown={onHeadDown}>
           <span className="bl-title">{blade.title}</span>
-          <span className="bl-kind">{blade.kind}</span>
+          <span className="bl-kind">{KIND_LABEL[blade.kind] ?? ''}</span>
           <span className="bl-acts">
-            {(size || pos.x || pos.y) && !expanded && (
+            <button
+              className={`bl-btn bl-keep${kept ? ' bl-kept' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                setKept((k) => !k)
+              }}
+              title={kept ? 'Let it close by itself again' : 'Keep it open'}
+            >
+              {kept ? 'kept' : 'keep'}
+            </button>
+            {(size !== null || pos.x !== 0 || pos.y !== 0) && !expanded && (
               <button
                 className="bl-btn"
                 onClick={(e) => {
@@ -344,6 +392,14 @@ function Card({
           <Body blade={blade} />
         </div>
 
+        {/* How long until it closes by itself; stops while hovered or kept. */}
+        {!kept && !expanded && (
+          <span
+            className="bl-timer"
+            style={{ animationDuration: `${life}ms`, animationPlayState: paused ? 'paused' : 'running' }}
+          />
+        )}
+
         {/* Resize grip. Absent while expanded, where the size is the point. */}
         {!expanded && <span className="bl-grip" onPointerDown={onGrip} title="Drag to resize" />}
       </motion.section>
@@ -379,6 +435,11 @@ export function Blades() {
   }, [blades, focusedBlade])
 
   const front = ordered[0]
+
+  // She steps aside while a card is docked beside her (index.css, data-cards).
+  useEffect(() => {
+    document.documentElement.dataset.cards = blades.length && !expandedBlade ? '1' : '0'
+  }, [blades.length, expandedBlade])
 
   const cycle = useCallback(
     (by: number) => {
