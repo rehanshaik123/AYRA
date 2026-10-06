@@ -1,13 +1,14 @@
 # A.Y.R.A.
 
-**AYRA** is a personal assistant for one person. Say **"Hey AYRA"** at the laptop, or message her on
-Telegram: she answers out loud in her ElevenLabs voice, searches the web, and puts the results on
-screen as cards. The face is an animated avatar; the brain is **Claude Code run headless through the
-Claude Agent SDK** on the owner's own Claude login, so there's no API key.
+**AYRA** is a personal assistant for one person. Press **Space** at the laptop and talk, or message
+her on Telegram: she answers out loud in her ElevenLabs voice, searches the web, works in the owner's
+own Chrome and Windows apps, runs PowerShell and handles files — and asks first before spending
+money, sending or posting as the owner, deleting for good, or touching passwords and security
+settings. The face is an animated avatar; the brain is **Claude Code run headless through the Claude
+Agent SDK** on the owner's own Claude login, so there's no API key.
 
-Today AYRA does web search only. Apps, memory, laptop control and agents come back one at a time:
-see [PLAN.md](PLAN.md). The rules for working on this repo are in [CLAUDE.md](CLAUDE.md), and the
-build log is in [PROGRESS.md](PROGRESS.md).
+Memory, more apps and agents come one at a time: see [PLAN.md](PLAN.md). The rules for working on
+this repo are in [CLAUDE.md](CLAUDE.md), and the build log is in [PROGRESS.md](PROGRESS.md).
 
 ## Run it
 
@@ -17,13 +18,14 @@ desktop app or `claude` CLI, signed in once) and Chrome or Edge in a real window
 ```bash
 npm install
 npm run setup     # checks the machine, changes nothing
-npm start         # brain + face → open http://localhost:5173, click INITIALISE, say "Hey AYRA"
+npm start         # brain + face → open http://localhost:5173, click INITIALISE, press Space
+npm run shortcuts # Windows: AYRA.exe in the tray — starts with Windows, Ctrl+Alt+A to talk
 ```
 
 Optional settings go in `.env.local` (template: `.env.example`): `ELEVENLABS_API_KEY` for the voice
 and transcription (otherwise the browser's own speech is used), and the Telegram bot token and owner
-ID. In the HUD, **Space** talks without the wake word, **D** opens diagnostics and **T** runs an
-audio test.
+ID. In the HUD: **Space** to talk, **Space** again to send, **Space Space** or **Esc** to stop,
+**D** diagnostics, **T** an audio test.
 
 ## Credits & licence
 

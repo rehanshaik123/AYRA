@@ -108,7 +108,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/origin.mjs` · `bridge/net.mjs` · `bridge/page.mjs` | Which pages may talk to the bridge · SSRF-safe outbound fetching (use for EVERY server-side fetch) · web pages for blades |
 | `src/App.tsx` · `src/identity.ts` · `src/config.ts` | The face's conductor (boot, phases, voice loop, turns) · identity for the face · the bridge address |
 | `src/lib/bridge.ts` · `capabilities.ts` | WebSocket client to the bridge · `/health` probe (is ElevenLabs there?) |
-| `src/lib/wake.ts` · `voice.ts` · `listen.ts` · `audio.ts` | "Hey AYRA" phrase · the voice loop (wake, conversation, barge-in, echo, browser fallback) · live hearing to the bridge · mic analyser |
+| `src/lib/wake.ts` · `voice.ts` · `listen.ts` · `audio.ts` | Her name and its mishearings (stripped from what you say) · the voice loop: push-to-talk (`open / send / close`), echo, browser fallback · live hearing to the bridge · the one microphone stream |
 | `public/listen-worklet.js` | AYRA's ears on the audio thread: speech detection + 16 kHz PCM, never throttled in a background tab |
 | `src/lib/tts.ts` · `fillers.ts` · `vocative.ts` · `sfx.ts` | Speaking (ElevenLabs, browser voice as fallback) · short "On it!" lines · the comma before "boss" · synthesised interface beeps |
 | `src/ui/Avatar.tsx` · `src/ui/avatar.css` · `src/lib/avatar.ts` | **The avatar face**: the SVG character · her poses and animations · which pose for which phase, lip-sync, blinking |

@@ -257,6 +257,14 @@ and the kill switch · for always-on: plugged in, closing the lid does nothing, 
       Check ✓: built and installed; the bridge started hidden; a shortcut click opened her window with
       AYRA's taskbar id; the hotkey brought it to the front and her page got exactly one Space → LISTENING;
       a quit stopped her in ~1 s with Chrome untouched; she came back from the Startup shortcut.
+- [x] 5.11 The owner's feedback after setup (2026-10-06), decided overnight on their behalf:
+      push-to-talk — Space listens, Space again sends, Space Space stops; no wake word, no follow-up
+      window, no voice barge-in, the microphone handed back 30 s after a turn (an open mic heard videos
+      in other tabs and answered them). The conversation on its own dark panel (white text took on her
+      colours). Cards docked on the right, as tall as what they hold, closing by themselves after 40 s
+      (hover holds them, Keep keeps them), and she steps aside while one is open.
+      Check ✓: a fake microphone looping "What is two plus two?" — ignored for 8 s on standby, one Space
+      → one turn ("Four, boss") → standby, 9 s more of the loop ignored; Space Space stopped a turn.
 
 ## Phase 6 — Autonomy on the laptop · branch `phase-6-autonomy`
 
