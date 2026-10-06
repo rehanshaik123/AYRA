@@ -278,19 +278,27 @@ some task… it has to just perform it." Answers: 1a (keep the four asks, add "A
 sending/posting) · 2a (the laptop is her always-on home for now) · 3b (the cloud waits for budget) ·
 4a (app window + tray + hotkey — done in 5.10).
 
-**Intent check — settle:** which sites and apps to allow ahead of time first · how long a background
-job may run and how much of the Pro plan it may use · what she reports (each step, or the result and
-a screenshot) · what a job does when an ask gets no answer (today: 2 minutes → no).
+**Intent check — settled overnight on the owner's behalf (2026-10-07, "I give you the freedom"; for
+review):** nothing is allowed ahead of time until the owner presses "Always" on a real ask — no list
+made up front · "Always" covers sending/posting only, on one website or in one app; never money,
+deleting for good or passwords, and never a PowerShell command (too broad to allow ahead) · AYRA can
+list and take back allowances, never add one · a background job (6.2) gets at most 30 minutes and
+60 tool steps, reports the result with a screenshot rather than every step, and an unanswered ask is
+still a no after 2 minutes.
 
 **🧑 Owner steps:** laptop plugged in; Control Panel → Power Options → "Choose what closing the lid
 does" → Plugged in: Do nothing; sleep when plugged in: Never; Settings → Accounts → Sign-in options →
 "Use my sign-in info to automatically finish updating" (so she restarts after updates); sign in to
 everyday sites in "Chrome (AYRA)".
 
-- [ ] 6.1 "Always allow here": a third choice on the Approve card and on Telegram — sending or posting
-      on this site / in this app goes ahead from now on; never for money, passwords or deleting for
-      good. Kept in `data/`, listed and taken back by asking ("what are you allowed to do?", `/rules`).
-      Check: allowed once on a test site, the next send goes without asking; taken back, it asks again.
+- [x] 6.1 "Always allow here": a third choice on the Approve card (A) and on Telegram — sending or
+      posting on this site / in this app goes ahead from now on; never for money, passwords or deleting
+      for good. `bridge/allowances.mjs` (kept in `data/state.json`), `bridge/rules.mjs` (`ayra_rules`:
+      rules_list, rules_forget — no add), Telegram `/rules` and `/forget N`.
+      Check ✓: a "Post" on example.com asked with "Always on example.com", answered Always; the next
+      "Post" went ahead without asking; taken back afterwards. Found on the way: with the laptop idle
+      (display off) Chrome dropped her mouse clicks without a word — clicks are now checked and, if
+      dropped, pressed from inside the page (both Posts landed exactly once).
 - [ ] 6.2 Background jobs (`bridge/jobs.mjs`): "go to X and do Y, then Z" runs to the end on its own,
       one job at a time, with a step and time budget; progress on Telegram and a screenshot at the end;
       `/jobs`, `/stop`. Check: a three-site task from the phone with nobody at the laptop.

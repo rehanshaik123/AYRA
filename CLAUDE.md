@@ -98,9 +98,10 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/audit.mjs` · `bridge/state.mjs` | Audit log `data/logs/YYYY-MM-DD.jsonl` (never tool inputs or secrets) · `data/state.json`, small state that survives restarts |
 | `bridge/identity.mjs` | Loads identity + `.env.local`; `env('X')` reads `AYRA_X` |
 | `bridge/persona.mjs` · `bridge/context.mjs` | AYRA's personality: `SYSTEM_PROMPT` (voice + HUD) and `TEXT_PROMPT` (Telegram), one character, plus what she can do today · the "[Now: …]" local-time stamp |
-| `bridge/telegram.mjs` | Telegram channel: long polling, owner-only, one question at a time, text persona, Approve buttons, `/stop` |
+| `bridge/telegram.mjs` | Telegram channel: long polling, owner-only, one question at a time, text persona, Approve buttons (and Always), `/stop`, `/rules`, `/forget N` |
 | `bridge/browser.mjs` | Tool server `ayra_browser`: her Chrome — "Chrome (AYRA)" over the DevTools protocol (port 9222); clicks and submits checked with the real label |
 | `bridge/apps.mjs` · `bridge/apps.ps1` | Tool server `ayra_apps`: her Windows apps through UI Automation · the PowerShell worker behind it (ASCII only) |
+| `bridge/allowances.mjs` · `bridge/rules.mjs` | "Always allow here": standing allowances for sending/posting on one site or in one app — only the owner's button adds one · tool server `ayra_rules` (list, take back; no add) |
 | `bridge/approvals.mjs` | The owner's Approve: holds each "ask" until the first answer (HUD, voice, Telegram) or 2 min → no; `halt()` is the kill switch |
 | `bridge/listen.mjs` | Live hearing: relays the face's microphone stream (`/listen` socket) to ElevenLabs Scribe Realtime and the words back |
 | `bridge/face.mjs` | Serves the built face (`dist/`) on 127.0.0.1:5173 in daily use — no dev server |
@@ -129,7 +130,8 @@ Live hearing (`/listen` WebSocket): face sends 16 kHz PCM (binary), `commit`, `w
 `partial {text}`, `final {text}`, `error {code,message}` — see `bridge/listen.mjs`.
 
 Face ↔ brain protocol (WebSocket): face sends `ask {id,text}`, `interrupt`, `warm` (speech began:
-wake a sleeping brain), `approval {id,ok}`, `halt`; brain sends `approve {id,reason,detail,tool}`,
+wake a sleeping brain), `approval {id,ok,always}`, `halt`; brain sends `approve {id,reason,detail,tool,always}`
+(`always`: the third button's words, or ''),
 `approved {id,ok,by}`, `halt {by}`,
 `ready {servers}`, `text {delta}`, `tool {name}`, `done {text}`, `error {message}`, `blade` — turn
 frames carry `ask: <id>`. Inside the bridge the brain also emits `sources {query, links}`, which the
