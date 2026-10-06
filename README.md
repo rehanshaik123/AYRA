@@ -7,6 +7,8 @@ money, sending or posting as the owner, deleting for good, or touching passwords
 settings. The face is an animated avatar; the brain is **Claude Code run headless through the Claude
 Agent SDK** on the owner's own Claude login, so there's no API key.
 
+Long tasks can run in the background as jobs that report on Telegram, she can show you any tab or
+window as a picture, and the owner can let her send or post on a chosen site without asking ("Always").
 Memory, more apps and agents come one at a time: see [PLAN.md](PLAN.md). The rules for working on
 this repo are in [CLAUDE.md](CLAUDE.md), and the build log is in [PROGRESS.md](PROGRESS.md).
 
