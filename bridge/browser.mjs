@@ -321,12 +321,14 @@ const fail = (t) => ({ isError: true, content: [{ type: 'text', text: t }] })
 /**
  * @param {{ allowWrites: boolean, channel: string,
  *           approve: (request: object) => Promise<boolean>,
- *           emitBlade?: (blade: object) => void }} options
+ *           emitBlade?: (blade: object) => void,
+ *           sendPhoto?: (jpegBase64: string, caption: string) => void }} options
  *   allowWrites — without it only the reading tools exist (CLAUDE.md §7)
  *   approve     — the owner's Approve, for clicks and submits on the ask-first list
  *   emitBlade   — puts a screenshot on the HUD; absent on Telegram
+ *   sendPhoto   — sends a screenshot to the owner's phone; Telegram only
  */
-export function browserServer({ allowWrites, channel, approve, emitBlade }) {
+export function browserServer({ allowWrites, channel, approve, emitBlade, sendPhoto }) {
   /** Ask the owner when the action is on their list; true to go ahead. */
   const allowed = async (what, page, toolName, detail) => {
     const reason = riskOfPageAction({ ...what, url: page.url() })
@@ -408,7 +410,7 @@ export function browserServer({ allowWrites, channel, approve, emitBlade }) {
 
     tool(
       'browser_screenshot',
-      'See the current tab as a picture (it also goes on the HUD). Use when the layout matters; reading is faster.',
+      'See the current tab as a picture — and show it to the owner: on the HUD, or on their phone when they asked on Telegram ("show me"). Use when the layout matters or they want to see; reading is faster.',
       {},
       guard(async () => {
         const page = await pick()
@@ -421,6 +423,7 @@ export function browserServer({ allowWrites, channel, approve, emitBlade }) {
           size: 'wide',
           hold: 'turn',
         })
+        sendPhoto?.(data, `${await page.title()} — ${host(page.url())}`)
         return { content: [{ type: 'image', data, mimeType: 'image/jpeg' }] }
       }),
     ),

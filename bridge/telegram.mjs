@@ -80,10 +80,12 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
   const call = request ?? botApi
 
   async function botApi(method, body, timeoutMs = 15_000) {
+    // A photo goes up as a form; everything else is JSON.
+    const form = body instanceof FormData
     const res = await fetch(`${API}/bot${token}/${method}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body ?? {}),
+      ...(form ? {} : { headers: { 'content-type': 'application/json' } }),
+      body: form ? body : JSON.stringify(body ?? {}),
       signal: AbortSignal.timeout(timeoutMs),
     })
     const data = await res.json().catch(() => ({ ok: false, description: `HTTP ${res.status}` }))
@@ -346,6 +348,16 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
     /** Stop the answer in flight (the kill switch). */
     interrupt() {
       conversation?.interrupt()
+    },
+    /** "Show me": a picture to the owner's phone (a JPEG, base64). */
+    photo(jpegBase64, caption = '') {
+      const form = new FormData()
+      form.append('chat_id', String(ownerId))
+      if (caption) form.append('caption', String(caption).slice(0, 1000))
+      form.append('photo', new Blob([Buffer.from(jpegBase64, 'base64')], { type: 'image/jpeg' }), 'ayra.jpg')
+      return call('sendPhoto', form, 60_000).catch((err) =>
+        console.warn(`[ayra] telegram: could not send a picture — ${err.message}`),
+      )
     },
     /** A note to the owner from AYRA herself; held until Telegram is reachable. */
     notify(text) {

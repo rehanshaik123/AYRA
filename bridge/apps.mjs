@@ -272,12 +272,14 @@ const which = z
  *
  * @param {{ allowWrites: boolean, channel: string,
  *           approve: (request: object) => Promise<boolean>,
- *           apps?: { call: Function } }} options
+ *           apps?: { call: Function }, emitBlade?: (blade: object) => void,
+ *           sendPhoto?: (jpegBase64: string, caption: string) => void }} options
  *   allowWrites — without it only the reading tools exist (CLAUDE.md §7)
  *   approve     — the owner's Approve, for actions on the ask-first list
  *   apps        — the worker; tests pass a fake
+ *   emitBlade   — puts a screenshot on the HUD; sendPhoto — on the owner's phone
  */
-export function appsTools({ allowWrites, channel, approve, apps = null }) {
+export function appsTools({ allowWrites, channel, approve, apps = null, emitBlade, sendPhoto }) {
   const call = (...args) => (apps ?? worker()).call(...args)
 
   /** Ask the owner when the action is on their list; true to go ahead. */
@@ -348,6 +350,29 @@ export function appsTools({ allowWrites, channel, approve, apps = null }) {
       const { windows } = await call('list')
       return text(formatWindows(windows))
     })),
+
+    tool(
+      'apps_screenshot',
+      'See a window as a picture — and show it to the owner: on the HUD, or on their phone when they asked on Telegram ("show me"). Works even if it is behind other windows. Reading is faster when only the words matter.',
+      { window: which },
+      guard(async ({ window }) => {
+        const { window: target } = await call('describe', { window: String(window) })
+        if (isOwnWindow(target.title)) return fail(OWN)
+        // A picture cannot be blanked the way read text is.
+        if (touchesSecrets(target.title)) return fail('That window shows a file of keys or passwords; it is not pictured.')
+        const { jpeg, window: w } = await call('shot', { window: String(target.id) })
+        emitBlade?.({
+          id: `win-${Date.now().toString(36)}`,
+          title: String(w.title).toUpperCase().slice(0, 40),
+          kind: 'image',
+          url: `data:image/jpeg;base64,${jpeg}`,
+          size: 'wide',
+          hold: 'turn',
+        })
+        sendPhoto?.(jpeg, `${w.title} (${w.app})`)
+        return { content: [{ type: 'image', data: jpeg, mimeType: 'image/jpeg' }] }
+      }),
+    ),
 
     tool(
       'apps_read',

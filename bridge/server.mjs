@@ -700,6 +700,8 @@ const BRAIN = createBrain({
  */
 const TELEGRAM_TOKEN = env('TELEGRAM_TOKEN')
 const TELEGRAM_OWNER = env('TELEGRAM_OWNER_ID')
+/** The Telegram channel once started — "show me" pictures go to the phone through it. */
+let phone = null
 if (env('TELEGRAM', 'on') === 'off') {
   console.log('[ayra] telegram: off for this process (AYRA_TELEGRAM=off)')
 } else if (TELEGRAM_TOKEN && TELEGRAM_OWNER) {
@@ -715,12 +717,14 @@ if (env('TELEGRAM', 'on') === 'off') {
         allowWrites: ALLOW_WRITES,
         channel: 'telegram',
         approve: (request) => APPROVALS.ask(request),
+        sendPhoto: (jpeg, caption) => phone?.photo(jpeg, caption),
       }),
       ...(WINDOWS && {
         ayra_apps: appsServer({
           allowWrites: ALLOW_WRITES,
           channel: 'telegram',
           approve: (request) => APPROVALS.ask(request),
+          sendPhoto: (jpeg, caption) => phone?.photo(jpeg, caption),
         }),
       }),
       ayra_rules: rulesServer({ allowances: ALLOWANCES }),
@@ -732,6 +736,7 @@ if (env('TELEGRAM', 'on') === 'off') {
     onHalt: () => halt('telegram'),
   })
   CONVERSATIONS.add(telegram)
+  phone = telegram
   // "I'm back" after the laptop was off or asleep for a while (presence.mjs).
   watchPresence({ store: createStore(), notify: (text) => telegram.notify(text) })
 } else if (TELEGRAM_TOKEN) {
@@ -805,6 +810,7 @@ wss.on('connection', (socket, req) => {
           allowWrites: ALLOW_WRITES,
           channel: 'hud',
           approve: (request) => APPROVALS.ask(request),
+          emitBlade: (blade) => send({ type: 'blade', blade }),
         }),
       }),
       // What she may do without asking (rules.mjs).

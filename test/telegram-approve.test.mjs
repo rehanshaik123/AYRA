@@ -94,3 +94,25 @@ test('/stop is the kill switch', async () => {
   assert.equal(h.halted(), 1)
   h.tg.stop()
 })
+
+test('"show me" sends the picture to the owner as a photo', async () => {
+  const h = harness()
+  await h.tg.photo(Buffer.from('jpeg bytes').toString('base64'), 'Calculator (ApplicationFrameHost)')
+  const sent = h.calls.find((c) => c.method === 'sendPhoto')
+  assert.ok(sent, 'a photo was sent')
+  assert.ok(sent.body instanceof FormData)
+  assert.equal(sent.body.get('chat_id'), String(OWNER))
+  assert.equal(sent.body.get('caption'), 'Calculator (ApplicationFrameHost)')
+  assert.equal(Buffer.from(await sent.body.get('photo').arrayBuffer()).toString(), 'jpeg bytes')
+  h.tg.stop()
+})
+
+test('/rules and /forget answer from the owner\'s allowances', async () => {
+  const h = harness()
+  h.push({ update_id: 50, message: { message_id: 1, date: Math.floor(Date.now() / 1000), chat: { id: OWNER, type: 'private' }, from: { id: OWNER }, text: '/rules' } })
+  for (let i = 0; i < 50 && !h.calls.some((c) => c.method === 'sendMessage' && /Always asks first/.test(c.body?.text ?? '')); i++) {
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  assert.ok(h.calls.some((c) => c.method === 'sendMessage' && /Nothing is allowed ahead of time yet/.test(c.body?.text ?? '')))
+  h.tg.stop()
+})

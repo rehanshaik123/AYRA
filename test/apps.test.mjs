@@ -155,7 +155,7 @@ test('with a secrets file in front, only a new tab or another tab can be pressed
 
 test('without writes only the reading tools exist', () => {
   const names = appsTools({ allowWrites: false, channel: 'hud', approve: async () => false }).map((t) => t.name)
-  assert.deepEqual(names, ['apps_list', 'apps_read'])
+  assert.deepEqual(names, ['apps_list', 'apps_screenshot', 'apps_read'])
 })
 
 test('the worker answers by id, and a stuck request restarts it', async () => {
@@ -202,3 +202,22 @@ test("her own window can't be read, typed in, pressed in or closed", async () =>
   assert.equal(apps.sent.some((s) => ['click', 'keys', 'type', 'close'].includes(s.op)), false)
 })
 
+
+test('"show me": a window goes to the HUD and the phone, but never one of secrets', async () => {
+  const shown = []
+  const sent = []
+  const apps = fakeApps({
+    describe: ({ window }) => ({ window: window === 'env' ? { id: 5, title: '.env.local - Notepad', app: 'Notepad' } : NOTEPAD }),
+    shot: { window: NOTEPAD, jpeg: 'AAAA' },
+  })
+  const tools = appsTools({
+    allowWrites: false, channel: 'telegram', apps, approve: async () => false,
+    emitBlade: (b) => shown.push(b), sendPhoto: (jpeg, caption) => sent.push({ jpeg, caption }),
+  })
+  const res = await handler(tools, 'apps_screenshot')({ window: 'notes' })
+  assert.equal(res.content[0].type, 'image')
+  assert.equal(shown[0].url, 'data:image/jpeg;base64,AAAA')
+  assert.deepEqual(sent, [{ jpeg: 'AAAA', caption: 'notes.txt - Notepad (Notepad)' }])
+  assert.equal((await handler(tools, 'apps_screenshot')({ window: 'env' })).isError, true)
+  assert.equal(apps.sent.filter((s) => s.op === 'shot').length, 1)
+})

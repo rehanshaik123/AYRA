@@ -14,7 +14,7 @@ using namespace System.Windows.Automation
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase, System.Windows.Forms
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase, System.Windows.Forms, System.Drawing
 
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 $stdin = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8)
@@ -85,6 +85,7 @@ function Win32 {
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
 [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+[DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
 '@
     $script:win32 = [Ayra.Win32]
     # UI Automation reports real pixels; the mouse must move in them too.
@@ -366,6 +367,42 @@ function Op-Keys($req) {
   @{ done = $true }
 }
 
+# A picture of a window, even one behind others or on a display that is off:
+# PrintWindow asks the window to draw itself (PW_RENDERFULLCONTENT, 2, for
+# browsers and modern apps). JPEG, at most 1400 px wide.
+function Op-Shot($req) {
+  $win = Find-Window $req.window
+  $w = Win32
+  $wp = $null
+  if ($win.TryGetCurrentPattern([WindowPattern]::Pattern, [ref]$wp) -and "$($wp.Current.WindowVisualState)" -eq 'Minimized') {
+    throw 'That window is minimised - bring it to the front first.'
+  }
+  $c = $win.Current
+  $r = $c.BoundingRectangle
+  if ($r.IsEmpty -or $r.Width -lt 2 -or $r.Height -lt 2) { throw 'That window has no size to picture.' }
+  $bmp = [System.Drawing.Bitmap]::new([int]$r.Width, [int]$r.Height)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $hdc = $g.GetHdc()
+  $ok = $w::PrintWindow([IntPtr]$c.NativeWindowHandle, $hdc, 2)
+  $g.ReleaseHdc($hdc)
+  $g.Dispose()
+  if (-not $ok) { $bmp.Dispose(); throw 'Windows would not draw that window.' }
+  $out = $bmp
+  if ($bmp.Width -gt 1400) {
+    $h = [int]($bmp.Height * 1400 / $bmp.Width)
+    $out = [System.Drawing.Bitmap]::new(1400, $h)
+    $g2 = [System.Drawing.Graphics]::FromImage($out)
+    $g2.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g2.DrawImage($bmp, 0, 0, 1400, $h)
+    $g2.Dispose()
+    $bmp.Dispose()
+  }
+  $ms = [System.IO.MemoryStream]::new()
+  $out.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+  $out.Dispose()
+  @{ window = (Describe-Window $win); jpeg = [Convert]::ToBase64String($ms.ToArray()) }
+}
+
 function Op-Close($req) {
   $win = Find-Window $req.window
   $d = Describe-Window $win
@@ -388,6 +425,7 @@ while ($null -ne ($line = $stdin.ReadLine())) {
       'open' { Op-Open $req }
       'focus' { Op-Focus $req }
       'describe' { @{ window = (Describe-Window (Find-Window $req.window)) } }
+      'shot' { Op-Shot $req }
       'focused' { Op-Focused }
       'click' { Op-Click $req }
       'type' { Op-Type $req }
