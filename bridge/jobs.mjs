@@ -31,9 +31,9 @@ export const jobBrief = (task) =>
   'Work through it step by step with your tools. Do not stop to ask the owner questions in words — ' +
   'make sensible choices; the actions that need their yes ask by themselves. If something blocks you ' +
   '(a sign-in you cannot do, a captcha, a no from the owner), stop and say what blocked you. When you ' +
-  'are done, if it happened on a website or in an app, take a screenshot of where you finished ' +
-  '(browser_screenshot or apps_screenshot), then reply with a short report: what you did, the result, ' +
-  'and anything left for the owner.'
+  'are done, if the result is something to see on a website or in an app, take one screenshot of it ' +
+  'with toOwner set (browser_screenshot or apps_screenshot), then reply with a short report: what you ' +
+  'did, the result, and anything left for the owner.'
 
 const minutesSince = (from, to) => Math.max(1, Math.round((to - from) / 60_000))
 /** A task in a heading: the model writes jobs out in full, and a phone screen is small. */
@@ -54,14 +54,24 @@ export function report(job) {
 /**
  * @param {{ open: (handlers: { emit: Function, onEnd: Function }) => { ask: Function, interrupt: Function, close: Function },
  *           tell: (text: string) => void, limits?: { minutes: number, steps: number },
- *           progressMs?: number, now?: () => number, audit?: { log: Function } }} options
- *   open — a fresh conversation for the job (server.mjs: the brain with her hands, no jobs server)
- *   tell — a note to the owner (Telegram)
+ *           progressMs?: number, now?: () => number, audit?: { log: Function },
+ *           store?: { get: Function, set: Function }, onFinish?: (job: object) => void }} options
+ *   open     — a fresh conversation for the job (server.mjs: the brain with her hands, no jobs server)
+ *   tell     — a note to the owner (Telegram)
+ *   store    — remembers the running job across a restart, so one cut off is reported
+ *   onFinish — after a job ends (server.mjs: its waiting Approve asks are declined)
  */
-export function createJobs({ open, tell, limits = JOB_LIMITS, progressMs = PROGRESS_MS, now = Date.now, audit }) {
+export function createJobs({ open, tell, limits = JOB_LIMITS, progressMs = PROGRESS_MS, now = Date.now, audit, store, onFinish }) {
   let current = null
   const finished = []
   let seq = 0
+
+  // A job that was running when the bridge stopped: say so, once.
+  const cut = store?.get('job')
+  if (cut?.task) {
+    tell(`⚠️ A background job was cut off when I restarted: ${short(cut.task)}\n(it had run ${minutesSince(cut.started, now())} min). Ask again if you still want it.`)
+    store.set('job', null)
+  }
 
   const finish = (job, outcome, text) => {
     if (current !== job) return
@@ -78,6 +88,8 @@ export function createJobs({ open, tell, limits = JOB_LIMITS, progressMs = PROGR
     }
     finished.unshift(done)
     finished.length = Math.min(finished.length, 5)
+    store?.set('job', null)
+    onFinish?.(done)
     audit?.log({ type: 'job', id: job.id, outcome, steps: job.steps })
     console.log(`[ayra] job ${job.id} ${outcome} after ${job.steps} steps`)
     tell(report(done))
@@ -113,7 +125,8 @@ export function createJobs({ open, tell, limits = JOB_LIMITS, progressMs = PROGR
           }
           if (e.type === 'text') job.text += e.delta
           if (e.type === 'done') finish(job, 'done', e.text || job.text)
-          if (e.type === 'error') finish(job, 'error', e.message)
+          // Whatever it managed to say still reaches the owner.
+          if (e.type === 'error') finish(job, 'error', `${e.message}${job.text ? `\n\nSo far: ${job.text.trim()}` : ''}`)
         },
         onEnd: () => finish(job, 'error', 'The job lost its connection to the brain.'),
       })
@@ -127,6 +140,7 @@ export function createJobs({ open, tell, limits = JOB_LIMITS, progressMs = PROGR
       }, progressMs)
       job.progress.unref?.()
       current = job
+      store?.set('job', { task: what, started: job.started })
       audit?.log({ type: 'job', id: job.id, outcome: 'started' })
       tell(`🛠️ Started a background job: ${short(what, 300)}\nI'll report back here — /jobs to check, /stop to stop it.`)
       job.conversation.ask(jobBrief(what), job.id)
@@ -139,7 +153,9 @@ export function createJobs({ open, tell, limits = JOB_LIMITS, progressMs = PROGR
         return `Running: "${short(current.task)}" — ${minutesSince(current.started, now())} min, ${current.steps} steps; now: ${toolName(current.last) || 'thinking'}.`
       }
       const last = finished[0]
-      return last ? `No job running. The last one (${last.outcome}): "${short(last.task)}".` : 'No job running, and none yet today.'
+      return last
+        ? `No job running. The last one (${last.outcome}): "${short(last.task)}".${last.text ? `\n\n${last.text}` : ''}`
+        : 'No job running, and none yet today.'
     },
 
     stop,
@@ -151,8 +167,12 @@ export function createJobs({ open, tell, limits = JOB_LIMITS, progressMs = PROGR
 
 const text = (t) => ({ content: [{ type: 'text', text: t }] })
 
-/** The tools, for jobsServer — and for tests. */
-export function jobsTools({ jobs, allowWrites }) {
+/**
+ * The tools, for jobsServer — and for tests.
+ * `reportsTo`: where the owner hears how a job went ('Telegram'), or null when
+ * nothing can reach them — then the report waits for jobs_status.
+ */
+export function jobsTools({ jobs, allowWrites, reportsTo = 'Telegram' }) {
   const reading = [
     tool('jobs_status', 'How the background job is going, or how the last one ended.', {}, async () => text(jobs.status())),
     tool('jobs_stop', 'Stop the background job now, when the owner asks.', {}, async () =>
@@ -166,7 +186,12 @@ export function jobsTools({ jobs, allowWrites }) {
       { task: z.string().describe('The whole task, with every detail the job needs — it starts fresh') },
       async ({ task }) => {
         const r = jobs.start(task)
-        return text(r.ok ? 'Started. The owner will hear on Telegram how it goes — tell them in one sentence.' : r.reason)
+        if (!r.ok) return text(r.reason)
+        return text(
+          reportsTo
+            ? `Started. The owner will hear on ${reportsTo} how it goes — tell them in one sentence.`
+            : 'Started. The report will be here when it ends: tell the owner to ask you how the job went.',
+        )
       },
     ),
   ]

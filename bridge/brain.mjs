@@ -86,7 +86,7 @@ export function createBrain({
    *   channel — the channel's name ("hud", "telegram"), for logs and state
    *   resume  — pick up where this channel's last conversation left off
    */
-  function open({ systemPrompt, servers = {}, emit, onEnd, channel = 'default', resume: wantResume = false }) {
+  function open({ systemPrompt, servers = {}, emit, onEnd, channel = 'default', resume: wantResume = false, maxTurns = 24 }) {
     /**
      * Carrying on the last conversation, so a page reload doesn't wipe what
      * was just said. The SDK keeps each session on disk; all we keep is its id
@@ -300,7 +300,7 @@ export function createBrain({
           // connectors they haven't allowed — both decided in gate.mjs.
           tools: gate.builtins,
           disallowedTools: gate.disallowed,
-          maxTurns: 24,
+          maxTurns,
           permissionMode: 'default',
           // Without this the SDK only emits whole assistant messages, and AYRA
           // would sit silent until the entire answer was written. Partial events

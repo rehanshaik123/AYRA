@@ -25,7 +25,8 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { env } from './identity.mjs'
-import { isOwnPage, redactSecrets, riskOfPageAction } from './gate.mjs'
+import { isOwnPage, redactSecrets, riskOfPageAction, touchesSecrets } from './gate.mjs'
+import { SEND_WORDS } from './allowances.mjs'
 
 /** Where "Chrome (AYRA)" keeps its profile — the owner's logins live here. */
 export const PROFILE_DIR = join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'AYRA', 'Chrome')
@@ -102,8 +103,6 @@ export const isTrusted = (origin, sites = trustedSites()) => {
 
 let browser = null
 let connecting = null
-/** The tab AYRA last worked in; the owner's own clicking moves it too. */
-let current = null
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -130,7 +129,6 @@ async function connect() {
     const b = await puppeteer.connect({ browserURL: `http://127.0.0.1:${DEBUG_PORT}`, defaultViewport: null })
     b.on('disconnected', () => {
       if (browser === b) browser = null
-      current = null
     })
     // Her own face always has the microphone in her own window.
     await b.defaultBrowserContext().overridePermissions('http://localhost:5173', ['microphone']).catch(() => {})
@@ -151,15 +149,19 @@ async function tabs() {
   return (await b.pages()).filter((p) => !p.url().startsWith('devtools://') && !isOwnPage(p.url()))
 }
 
-/** The tab to act in: the one asked for, else the one she was in, else the one in front. */
-async function pick(index) {
+/**
+ * The tab to act in: the one asked for, else the one this conversation was in,
+ * else the one in front. `me` is the conversation's own place (browserServer):
+ * a background job and the HUD never share a tab or a set of refs.
+ */
+async function pick(me, index) {
   const all = await tabs()
   if (Number.isInteger(index)) {
     const page = all[index - 1]
     if (!page) throw new Error(`There is no tab ${index}; there are ${all.length}.`)
     return page
   }
-  if (current && !current.isClosed() && all.includes(current)) return current
+  if (me.current && !me.current.isClosed() && all.includes(me.current)) return me.current
   for (const page of all) {
     const visible = await page.evaluate(() => document.visibilityState === 'visible').catch(() => false)
     if (visible) return page
@@ -189,10 +191,13 @@ async function settle(page) {
 
 /**
  * Runs inside the page: the visible text, and everything that can be pressed or
- * typed in, numbered with `data-ayra-ref`. Kept as plain browser JavaScript —
- * it is serialised into the page.
+ * typed in, numbered in the conversation's own attribute (`attr`). Kept as plain
+ * browser JavaScript — it is serialised into the page.
  */
-function snapshot(maxText, maxElements) {
+function snapshot(maxText, maxElements, attr) {
+  // Last read's numbers go first: an element that has since vanished must not
+  // keep a number the new read hands to something else.
+  for (const old of document.querySelectorAll(`[${attr}]`)) old.removeAttribute(attr)
   const sel = [
     'a[href]', 'button', 'input:not([type=hidden])', 'select', 'textarea', 'summary',
     '[role=button]', '[role=link]', '[role=tab]', '[role=menuitem]', '[role=option]',
@@ -215,7 +220,7 @@ function snapshot(maxText, maxElements) {
     const searchy = type === 'search' || role === 'searchbox' || role === 'combobox' ||
       /search|query|^q$/i.test(`${el.getAttribute('name') || ''} ${el.getAttribute('placeholder') || ''} ${el.getAttribute('aria-label') || ''}`)
     const field = type === 'password' ? 'password' : searchy ? 'search' : role === 'textbox' || el.isContentEditable ? 'text' : ''
-    el.setAttribute('data-ayra-ref', String(++n))
+    el.setAttribute(attr, String(++n))
     const inView = r.bottom > 0 && r.top < innerHeight
     seen.push({ ref: n, role, label, field, inView })
   }
@@ -231,8 +236,8 @@ function snapshot(maxText, maxElements) {
 }
 
 /** The page as text the model can act on. */
-async function read(page) {
-  const s = await page.evaluate(snapshot, MAX_TEXT, MAX_ELEMENTS)
+async function read(page, attr) {
+  const s = await page.evaluate(snapshot, MAX_TEXT, MAX_ELEMENTS, attr)
   const list = s.elements
     .map((e) => `[${e.ref}] ${e.role}${e.field ? `(${e.field})` : ''} "${e.label}"`)
     .join('\n')
@@ -244,9 +249,9 @@ async function read(page) {
 }
 
 /** What the element behind a ref is, for the ask-first check. */
-async function describe(page, ref) {
-  const info = await page.evaluate((r) => {
-    const el = document.querySelector(`[data-ayra-ref="${r}"]`)
+async function describe(page, ref, attr) {
+  const info = await page.evaluate((r, a) => {
+    const el = document.querySelector(`[${a}="${r}"]`)
     if (!el) return null
     const type = (el.getAttribute('type') || '').toLowerCase()
     const label = (
@@ -257,7 +262,7 @@ async function describe(page, ref) {
     const searchy = type === 'search' || role === 'searchbox' || role === 'combobox' ||
       /search|query|^q$/i.test(`${el.getAttribute('name') || ''} ${el.getAttribute('placeholder') || ''} ${el.getAttribute('aria-label') || ''}`)
     return { label, field: type === 'password' ? 'password' : searchy ? 'search' : 'text' }
-  }, String(ref))
+  }, String(ref), attr)
   if (!info) throw new Error(`Nothing has ref ${ref} on this page any more — read the page again.`)
   return info
 }
@@ -265,24 +270,40 @@ async function describe(page, ref) {
 /**
  * Press an element: a real mouse click first, then a check that it landed.
  *
- * With the laptop left alone — display off, the owner on the phone — Chrome
- * can drop a mouse click without a word: measured 2026-10-07, the button never
- * fired while keyboard input still arrived. So the click is checked, and if it
- * never reached the element it is pressed from inside the page with the same
- * pointer and mouse events a click makes. Never both: the check is what keeps
- * a "Post" from going out twice.
+ * With the laptop left alone — display off, the owner on the phone — Chrome's
+ * mouse clicks miss: measured 2026-10-07, the click arrived on the page itself,
+ * not the button, while keyboard input was fine. So the click is checked:
+ *   - it reached the element: done;
+ *   - it reached nothing pressable (the page, an empty area): it is pressed from
+ *     inside the page instead, with the pointer and mouse events a click makes;
+ *   - it reached another button or link (a popup, an overlay in the way): that
+ *     may already have done something, so it is reported, never followed by a
+ *     second press.
+ * Never two presses of anything: that is what keeps a "Post" from going twice.
  */
 async function press(el) {
+  // Heard on the window, first of anything on the page, wherever it lands.
   await el.evaluate((e) => {
-    e.__ayraPressed = false
-    e.addEventListener('click', () => (e.__ayraPressed = true), { capture: true, once: true })
+    window.__ayraClick = null
+    window.removeEventListener('click', window.__ayraProbe, true)
+    window.__ayraProbe = (ev) => {
+      const hit = ev.composedPath().includes(e)
+      const other = !hit && ev.target instanceof Element &&
+        Boolean(ev.target.closest('a[href],button,input,select,textarea,summary,label,[role=button],[role=link],[role=menuitem],[role=tab],[onclick]'))
+      window.__ayraClick = { hit, other }
+    }
+    window.addEventListener('click', window.__ayraProbe, { capture: true, once: true })
   })
   await el.click().catch(() => {})
   await new Promise((r) => setTimeout(r, 80))
   // Gone with the page it was on: the click navigated, so it landed.
-  const landed = await el.evaluate((e) => e.__ayraPressed === true).catch(() => true)
-  if (landed) return
+  const click = await el.evaluate(() => window.__ayraClick).catch(() => ({ hit: true }))
+  if (click?.hit) return
+  if (click?.other) {
+    throw new Error('the click landed on another button or link (a popup or overlay?) — read the page again before trying again')
+  }
   await el.evaluate((e) => {
+    window.removeEventListener('click', window.__ayraProbe, true)
     e.scrollIntoView({ block: 'center' })
     const r = e.getBoundingClientRect()
     const at = {
@@ -329,12 +350,21 @@ const fail = (t) => ({ isError: true, content: [{ type: 'text', text: t }] })
  *   sendPhoto   — sends a screenshot to the owner's phone; Telegram only
  */
 export function browserServer({ allowWrites, channel, approve, emitBlade, sendPhoto }) {
+  /** This conversation's own tab and ref numbers (see pick). */
+  const me = { current: null, attr: `data-ayra-${String(channel).replace(/[^a-z0-9-]/gi, '') || 'x'}` }
   /** Ask the owner when the action is on their list; true to go ahead. */
   const allowed = async (what, page, toolName, detail) => {
     const reason = riskOfPageAction({ ...what, url: page.url() })
     if (!reason) return true
-    const site = host(page.url())
-    return approve({ channel, tool: toolName, reason, detail: `${detail} — on ${site}`, scope: { kind: 'site', where: site } })
+    // "Always" names the exact address ("www.linkedin.com", never all of
+    // google.com) and only a click on a plainly sending button — never an
+    // Enter or a generic Submit, which can mean anything on a page.
+    const site = new URL(page.url()).hostname.toLowerCase()
+    const plain = what.action === 'click' && SEND_WORDS.test(what.label ?? '')
+    return approve({
+      channel, tool: toolName, reason, detail: `${detail} — on ${host(page.url())}`,
+      scope: plain ? { kind: 'site', where: site } : null,
+    })
   }
 
   const guard = (fn) => async (args) => {
@@ -348,7 +378,7 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
   const reading = [
     tool('browser_tabs', "List the tabs open in the owner's Chrome, numbered.", {}, guard(async () => {
       const all = await tabs()
-      const lines = await Promise.all(all.map(async (p, i) => `${i + 1}. ${(await p.title()) || '(untitled)'} — ${p.url()}${p === current ? '  ← working here' : ''}`))
+      const lines = await Promise.all(all.map(async (p, i) => `${i + 1}. ${(await p.title()) || '(untitled)'} — ${p.url()}${p === me.current ? '  ← working here' : ''}`))
       return text(lines.join('\n') || 'No tabs open.')
     })),
 
@@ -361,11 +391,11 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
         if (!target) return fail('Only web addresses (http or https) can be opened.')
         if (isOwnPage(target)) return fail("That is AYRA's own window; her tools leave it alone.")
         const b = await connect()
-        const page = newTab ? await b.newPage() : await pick()
+        const page = newTab ? await b.newPage() : await pick(me)
         await page.goto(target, { waitUntil: 'domcontentloaded', timeout: LOAD_TIMEOUT_MS }).catch(() => {})
         await page.bringToFront().catch(() => {})
-        current = page
-        return text(await read(page))
+        me.current = page
+        return text(await read(page, me.attr))
       }),
     ),
 
@@ -374,16 +404,16 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
       'Read a tab: its text, and everything on it that can be pressed or typed in, with refs to use. Read again after the page changes.',
       { tab: z.number().int().optional().describe('Tab number from browser_tabs; the current tab if left out.') },
       guard(async ({ tab }) => {
-        const page = await pick(tab)
-        current = page
-        return text(await read(page))
+        const page = await pick(me, tab)
+        me.current = page
+        return text(await read(page, me.attr))
       }),
     ),
 
     tool('browser_switch', 'Bring a tab to the front and work in it.', { tab: z.number().int() }, guard(async ({ tab }) => {
-      const page = await pick(tab)
+      const page = await pick(me, tab)
       await page.bringToFront()
-      current = page
+      me.current = page
       return text(`Now on tab ${tab}: ${await page.title()}`)
     })),
 
@@ -392,7 +422,7 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
       'Scroll the current tab up or down, then read it again to see what came into view.',
       { direction: z.enum(['up', 'down', 'top', 'bottom']) },
       guard(async ({ direction }) => {
-        const page = await pick()
+        const page = await pick(me)
         await page.evaluate((d) => {
           if (d === 'top') scrollTo(0, 0)
           else if (d === 'bottom') scrollTo(0, document.body.scrollHeight)
@@ -403,17 +433,23 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
     ),
 
     tool('browser_back', 'Go back a page in the current tab.', {}, guard(async () => {
-      const page = await pick()
+      const page = await pick(me)
       await page.goBack({ waitUntil: 'domcontentloaded', timeout: LOAD_TIMEOUT_MS }).catch(() => {})
       return text(`Back on: ${await page.title()} — ${page.url()}`)
     })),
 
     tool(
       'browser_screenshot',
-      'See the current tab as a picture — and show it to the owner: on the HUD, or on their phone when they asked on Telegram ("show me"). Use when the layout matters or they want to see; reading is faster.',
-      {},
-      guard(async () => {
-        const page = await pick()
+      'See the current tab as a picture (it also shows on the HUD). `toOwner`: send it to the owner\'s phone too — when they asked to see it ("show me"). Use when the layout matters or they want to see; reading is faster.',
+      { toOwner: z.boolean().optional() },
+      guard(async ({ toOwner = false }) => {
+        const page = await pick(me)
+        // A picture can't be blanked the way read text is: a page showing a key,
+        // a token or a password is not pictured at all.
+        const words = await page.evaluate(() => document.body?.innerText ?? '').catch(() => '')
+        if (touchesSecrets(page.url()) || redactSecrets(words) !== words) {
+          return fail('That page shows something like a key or a password, so it is not pictured. Say so in one sentence.')
+        }
         const data = await page.screenshot({ type: 'jpeg', quality: 60, encoding: 'base64' })
         emitBlade?.({
           id: `shot-${Date.now().toString(36)}`,
@@ -423,8 +459,9 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
           size: 'wide',
           hold: 'turn',
         })
-        sendPhoto?.(data, `${await page.title()} — ${host(page.url())}`)
-        return { content: [{ type: 'image', data, mimeType: 'image/jpeg' }] }
+        const sent = toOwner && sendPhoto ? await sendPhoto(data, `${await page.title()} — ${host(page.url())}`) : null
+        const note = sent === true ? 'Sent to the owner\'s phone.' : sent === false ? 'Could not send it to the phone.' : ''
+        return { content: [{ type: 'image', data, mimeType: 'image/jpeg' }, ...(note ? [{ type: 'text', text: note }] : [])] }
       }),
     ),
   ]
@@ -435,13 +472,21 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
       'Press a button or link by its ref from browser_read. Buying, sending, posting and deleting ask the owner first, by themselves.',
       { ref: z.number().int() },
       guard(async ({ ref }) => {
-        const page = await pick()
-        const { label } = await describe(page, ref)
+        const page = await pick(me)
+        const { label } = await describe(page, ref, me.attr)
         if (!(await allowed({ action: 'click', label }, page, 'browser_click', `Click "${label}"`))) {
           return fail(`The owner did not approve clicking "${label}". Leave it and say so in one sentence.`)
         }
-        const el = await page.$(`[data-ayra-ref="${ref}"]`)
+        const el = await page.$(`[${me.attr}="${ref}"]`)
+        // A link that opens a new tab: she follows it there.
+        const opened = page.browser().waitForTarget((t) => t.opener() === page.target(), { timeout: 1500 }).catch(() => null)
         await press(el)
+        const tab = await (await opened)?.page().catch(() => null)
+        if (tab) {
+          me.current = tab
+          await settle(tab)
+          return text(`Clicked "${label}"; it opened a new tab: ${await tab.title()} — ${tab.url()}. Working there now; read it.`)
+        }
         await settle(page)
         return text(`Clicked "${label}". Now on: ${await page.title()} — ${page.url()}. Read the page to see what changed.`)
       }),
@@ -452,12 +497,12 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
       'Type into a box by its ref; `submit` presses Enter after. Typing a password, or submitting anything but a search, asks the owner first.',
       { ref: z.number().int(), text: z.string(), submit: z.boolean().optional() },
       guard(async ({ ref, text: typed, submit = false }) => {
-        const page = await pick()
-        const { label, field } = await describe(page, ref)
+        const page = await pick(me)
+        const { label, field } = await describe(page, ref, me.attr)
         if (field === 'password' && !(await allowed({ action: 'type', field, label }, page, 'browser_type', `Type a password into "${label}"`))) {
           return fail('The owner did not approve typing a password. Ask them to sign in themselves.')
         }
-        const el = await page.$(`[data-ayra-ref="${ref}"]`)
+        const el = await page.$(`[${me.attr}="${ref}"]`)
         // Select what is there from inside the page, so the typing replaces it —
         // a triple click is a mouse action, and those can be dropped (see press).
         await el.evaluate((e) => {
@@ -489,7 +534,7 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
       'Press a key in the current tab (Enter, Escape, Tab, ArrowDown…). Enter outside a search box asks the owner first.',
       { key: z.string() },
       guard(async ({ key }) => {
-        const page = await pick()
+        const page = await pick(me)
         if (/^enter$/i.test(key)) {
           const f = await focused(page)
           if (!(await allowed({ action: 'enter', field: f.field, label: f.label }, page, 'browser_press', `Press Enter in "${f.label || 'the focused box'}"`))) {
@@ -503,10 +548,10 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
     ),
 
     tool('browser_close', 'Close a tab by its number (the current tab if left out).', { tab: z.number().int().optional() }, guard(async ({ tab }) => {
-      const page = await pick(tab)
+      const page = await pick(me, tab)
       const title = await page.title()
       await page.close()
-      if (current === page) current = null
+      if (me.current === page) me.current = null
       return text(`Closed "${title}".`)
     })),
 

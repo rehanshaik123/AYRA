@@ -41,10 +41,24 @@ export const backText = (since, now, why) =>
  * @returns {{ stop: () => void, tick: () => void }} tick is exposed for tests
  */
 export function watchPresence({ store, notify, now = Date.now, every = TICK_MS, away = AWAY_MS }) {
+  // The heartbeat must never take the bridge down: a write that fails this
+  // minute is simply written next minute.
+  const mark = (t) => {
+    try {
+      store.set('aliveAt', t)
+    } catch (err) {
+      console.warn(`[ayra] presence: could not note the time (${err?.message ?? err})`)
+    }
+  }
   const start = now()
-  const before = Number(store.get('aliveAt')) || 0
+  let before = 0
+  try {
+    before = Number(store.get('aliveAt')) || 0
+  } catch {
+    /* unreadable: no note this time */
+  }
   if (before && start - before > away) notify(backText(before, start, 'off or restarting'))
-  store.set('aliveAt', start)
+  mark(start)
   let last = start
 
   const tick = () => {
@@ -52,7 +66,7 @@ export function watchPresence({ store, notify, now = Date.now, every = TICK_MS, 
     // Timers stop while the laptop sleeps: a long gap between ticks is a nap.
     if (t - last > away) notify(backText(last, t, 'asleep'))
     last = t
-    store.set('aliveAt', t)
+    mark(t)
   }
   const timer = setInterval(tick, every)
   timer.unref?.()

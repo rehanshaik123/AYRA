@@ -29,7 +29,7 @@ import { createApprovals } from './approvals.mjs'
 import { createAllowances } from './allowances.mjs'
 import { rulesServer } from './rules.mjs'
 import { watchPresence } from './presence.mjs'
-import { createJobs, jobsServer } from './jobs.mjs'
+import { JOB_LIMITS, createJobs, jobsServer } from './jobs.mjs'
 import { createStore } from './state.mjs'
 import { browserServer } from './browser.mjs'
 import { appsServer } from './apps.mjs'
@@ -698,11 +698,18 @@ const BRAIN = createBrain({
  * its own conversation, with her hands but no jobs server of its own, reported
  * on Telegram. The kill switch stops it like any conversation.
  */
+/** The Telegram channel once started — "show me" pictures and job notes go to the phone through it. */
+let phone = null
+/** Notes from before Telegram was up (a job cut off by the last restart), sent once it is. */
+const early = []
+
 const JOBS = createJobs({
   open: ({ emit, onEnd }) =>
     BRAIN.open({
       channel: 'job',
       systemPrompt: TEXT_PROMPT,
+      // The job's own step budget (jobs.mjs) is the limit, not the SDK's default.
+      maxTurns: JOB_LIMITS.steps + 20,
       servers: {
         ayra_browser: browserServer({
           allowWrites: ALLOW_WRITES,
@@ -723,8 +730,16 @@ const JOBS = createJobs({
       emit,
       onEnd,
     }),
-  tell: (text) => (phone ? phone.notify(text) : console.log(`[ayra] job: ${text.split('\n')[0]}`)),
+  tell: (text) => {
+    if (phone) return phone.notify(text)
+    early.push(text)
+    console.log(`[ayra] job: ${text.split('\n')[0]}`)
+  },
   audit: AUDIT,
+  // A job cut off by a restart is reported on the next start.
+  store: createStore(),
+  // A stopped job's waiting Approve asks are declined, so a late Yes can't make it act.
+  onFinish: () => APPROVALS.cancel((request) => request.channel === 'job', 'job ended'),
 })
 CONVERSATIONS.add(JOBS)
 
@@ -736,8 +751,6 @@ CONVERSATIONS.add(JOBS)
  */
 const TELEGRAM_TOKEN = env('TELEGRAM_TOKEN')
 const TELEGRAM_OWNER = env('TELEGRAM_OWNER_ID')
-/** The Telegram channel once started — "show me" pictures go to the phone through it. */
-let phone = null
 if (env('TELEGRAM', 'on') === 'off') {
   console.log('[ayra] telegram: off for this process (AYRA_TELEGRAM=off)')
 } else if (TELEGRAM_TOKEN && TELEGRAM_OWNER) {
@@ -775,6 +788,7 @@ if (env('TELEGRAM', 'on') === 'off') {
   })
   CONVERSATIONS.add(telegram)
   phone = telegram
+  for (const text of early.splice(0)) telegram.notify(text)
   // "I'm back" after the laptop was off or asleep for a while (presence.mjs).
   watchPresence({ store: createStore(), notify: (text) => telegram.notify(text) })
 } else if (TELEGRAM_TOKEN) {
@@ -853,8 +867,8 @@ wss.on('connection', (socket, req) => {
       }),
       // What she may do without asking (rules.mjs).
       ayra_rules: rulesServer({ allowances: ALLOWANCES }),
-      // Long tasks in the background (jobs.mjs).
-      ayra_jobs: jobsServer({ jobs: JOBS, allowWrites: ALLOW_WRITES }),
+      // Long tasks in the background (jobs.mjs); their reports go to Telegram when it is on.
+      ayra_jobs: jobsServer({ jobs: JOBS, allowWrites: ALLOW_WRITES, reportsTo: phone ? 'Telegram' : null }),
     },
     emit,
     // Reloading the page carries on the same conversation (see brain.mjs).

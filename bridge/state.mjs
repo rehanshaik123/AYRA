@@ -29,9 +29,24 @@ export function createStore(file = STATE_FILE) {
 
   const write = (data) => {
     mkdirSync(dirname(file), { recursive: true })
-    const tmp = `${file}.tmp`
+    // Per process: a test copy of the bridge writing at the same moment must
+    // not rename the other's half-written file.
+    const tmp = `${file}.${process.pid}.tmp`
     writeFileSync(tmp, JSON.stringify(data, null, 2))
-    renameSync(tmp, file)
+    // Windows briefly locks a file another reader has open (an antivirus scan,
+    // the other process reading it): try again for a moment rather than fail.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        renameSync(tmp, file)
+        return
+      } catch (err) {
+        if (attempt >= 5 || !['EPERM', 'EBUSY', 'EACCES'].includes(err?.code)) throw err
+        const until = Date.now() + 20 * (attempt + 1)
+        while (Date.now() < until) {
+          /* a short, synchronous wait: this store is synchronous by design */
+        }
+      }
+    }
   }
 
   return {

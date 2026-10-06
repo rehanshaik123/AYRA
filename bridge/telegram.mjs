@@ -277,11 +277,20 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
   let offset = 0
   /** Notes for the owner waiting for Telegram to be reachable (notify). */
   let outbox = []
+  // Long notes (a job's report) go in pieces Telegram accepts. Only a failure
+  // that might pass — the network, Telegram busy — is tried again; a note
+  // Telegram refuses outright is dropped rather than retried for ever.
   const flush = () => {
     const notes = outbox
     outbox = []
     for (const text of notes) {
-      call('sendMessage', { chat_id: ownerId, text }).catch(() => outbox.push(text))
+      for (const piece of chunk(text)) {
+        call('sendMessage', { chat_id: ownerId, text: piece }).catch((err) => {
+          const passing = !err?.code || err.code === 429 || err.code >= 500
+          if (passing) outbox.push(piece)
+          else console.warn(`[ayra] telegram: a note was refused (${err.message})`)
+        })
+      }
     }
   }
 
@@ -354,13 +363,18 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
       conversation?.interrupt()
     },
     /** "Show me": a picture to the owner's phone (a JPEG, base64). */
+    /** Resolves true once Telegram has the picture, false if it could not be sent. */
     photo(jpegBase64, caption = '') {
       const form = new FormData()
       form.append('chat_id', String(ownerId))
       if (caption) form.append('caption', String(caption).slice(0, 1000))
       form.append('photo', new Blob([Buffer.from(jpegBase64, 'base64')], { type: 'image/jpeg' }), 'ayra.jpg')
-      return call('sendPhoto', form, 60_000).catch((err) =>
-        console.warn(`[ayra] telegram: could not send a picture — ${err.message}`),
+      return call('sendPhoto', form, 60_000).then(
+        () => true,
+        (err) => {
+          console.warn(`[ayra] telegram: could not send a picture — ${err.message}`)
+          return false
+        },
       )
     },
     /** A note to the owner from AYRA herself; held until Telegram is reachable. */
