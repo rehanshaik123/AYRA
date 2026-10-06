@@ -39,6 +39,8 @@ export type Approval = {
   /** Exactly what would happen — the command, the file, the button. */
   detail: string
   tool: string
+  /** "Always on linkedin.com" when it can be allowed ahead of time, else ''. */
+  always?: string
 }
 
 export type Turn = {

@@ -1398,6 +1398,7 @@ html[data-still='1'] *::after {
   background: transparent;
 }
 .approve-yes { color: #5affc8; }
+.approve-always { color: #9fe8ff; }
 .approve-no { color: #ff6b6b; }
 .approve-acts button:hover { background: rgba(255, 255, 255, 0.08); }
 .approve-more { margin-left: auto; font-size: 11px; opacity: 0.7; }

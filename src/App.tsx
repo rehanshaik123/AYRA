@@ -225,8 +225,8 @@ export default function App() {
   // -- the owner's Approve ---------------------------------------------------
 
   /** Answer an Approve card; the bridge tells every screen it is settled. */
-  const answer = (id: string, ok: boolean) => {
-    answerApproval(id, ok)
+  const answer = (id: string, ok: boolean, always = false) => {
+    answerApproval(id, ok, always)
     store.getState().removeApproval(id)
     sfx.play(ok ? 'done' : 'error')
   }
@@ -540,11 +540,13 @@ export default function App() {
         return
       }
 
-      // Y / N answer the oldest Approve card.
+      // Y / N answer the oldest Approve card; A is "yes, and always here".
       const waiting = store.getState().approvals[0]
-      if (waiting && (e.key === 'y' || e.key === 'n') && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const key = e.key.toLowerCase()
+      const always = key === 'a' && Boolean(waiting?.always)
+      if (waiting && (key === 'y' || key === 'n' || always) && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault()
-        answer(waiting.id, e.key === 'y')
+        answer(waiting.id, key !== 'n', always)
         return
       }
 

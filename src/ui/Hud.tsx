@@ -189,8 +189,8 @@ function ApproveCard() {
   const more = useStore((s) => s.approvals.length - 1)
   const removeApproval = useStore((s) => s.removeApproval)
   if (!waiting) return null
-  const pick = (ok: boolean) => {
-    answerApproval(waiting.id, ok)
+  const pick = (ok: boolean, always = false) => {
+    answerApproval(waiting.id, ok, always)
     removeApproval(waiting.id)
   }
   return (
@@ -204,6 +204,11 @@ function ApproveCard() {
         <button className="approve-no" onClick={() => pick(false)}>
           No <kbd>N</kbd>
         </button>
+        {waiting.always && (
+          <button className="approve-always" onClick={() => pick(true, true)} title="Yes, and don't ask again here">
+            {waiting.always} <kbd>A</kbd>
+          </button>
+        )}
         {more > 0 && <span className="approve-more">+{more} waiting</span>}
       </div>
     </div>

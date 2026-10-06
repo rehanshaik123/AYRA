@@ -34,6 +34,7 @@ type Frame = {
   reason?: string
   detail?: string
   tool?: string
+  always?: string
   ok?: boolean
   by?: string
   servers?: Array<string | { name?: string }>
@@ -69,9 +70,9 @@ export function watchApprovals(fn: (e: ApprovalEvent) => void) {
   onApproval = fn
 }
 
-/** The owner's answer to an Approve card. */
-export function answerApproval(id: string, ok: boolean): void {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'approval', id, ok }))
+/** The owner's answer to an Approve card; `always`: yes, and from now on here. */
+export function answerApproval(id: string, ok: boolean, always = false): void {
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'approval', id, ok, always }))
 }
 
 /** The kill switch: decline everything waiting and stop every answer in flight. */
@@ -168,7 +169,13 @@ function dispatch(ws: WebSocket) {
     } else if (msg.type === 'approve' && msg.id) {
       onApproval?.({
         type: 'approve',
-        approval: { id: msg.id, reason: msg.reason ?? '', detail: msg.detail ?? '', tool: msg.tool ?? '' },
+        approval: {
+          id: msg.id,
+          reason: msg.reason ?? '',
+          detail: msg.detail ?? '',
+          tool: msg.tool ?? '',
+          always: typeof msg.always === 'string' ? msg.always : '',
+        },
       })
     } else if (msg.type === 'approved' && msg.id) {
       onApproval?.({ type: 'approved', id: msg.id, ok: msg.ok === true, by: msg.by ?? '' })
