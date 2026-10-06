@@ -14,7 +14,8 @@ README for GitHub).
   brain, the HUD's WebSocket, live hearing and Telegram. The face is an avatar with the ElevenLabs
   voice Lily. Her tools: **web search and pages, the HUD display, PowerShell and the laptop's files**
   — plus her own Chrome and the Windows apps; four kinds of action wait for the owner's Approve.
-  No cloud until the owner has the budget.
+  She starts with Windows in the tray (AYRA.exe) and the laptop stays on as her home; no cloud
+  until the owner has the budget.
 - **Target:** two homes, one AYRA. **AYRA Core** in the cloud, always on (brain, one conversation,
   memory, Telegram, gate, guardian, audit, scheduler, agents). **AYRA Desk** on the laptop while
   it's on (HUD + voice, AYRA's own Chrome, files, PC control), dialling out to the core over
@@ -60,7 +61,8 @@ Laptop, today (Windows — PowerShell or Git Bash):
 npm install            # once, after cloning
 npm start              # daily use, light: builds the face if needed, one process → open http://localhost:5173
 npm run start:dev      # working on the face: bridge + Vite dev server (hot reload)
-npm run shortcuts      # Desktop shortcuts: "AYRA" (one click) and "Chrome (AYRA)" (her Chrome)
+npm run shortcuts      # builds AYRA.exe (tray, starts with Windows, hotkey) + Desktop/Start/Startup shortcuts
+npm run icon           # redraws desktop/ayra.ico from public/favicon.svg (only after changing the icon)
 npm run bridge         # brain only                       npm run dev   # face only (Vite)
 npm run build          # type-check + production build (must pass)
 npm run lint           # oxlint (must stay at 0 warnings)
@@ -81,8 +83,8 @@ npm test               # unit tests (gate, wake phrase, identity, avatar, …)
   `cmd /c title AYRA & npm start` window instead.
 
 Planned — they arrive with their phase; don't call them working before they exist:
-`npm run core` (Phase 8) · `npm run desk` (Phase 9; `npm start` becomes desk + face) ·
-`deploy/setup.sh`, `deploy/update.sh` (Phase 8).
+`npm run core` (Phase 9) · `npm run desk` (Phase 10; `npm start` becomes desk + face) ·
+`deploy/setup.sh`, `deploy/update.sh` (Phase 9).
 
 ## 5. Map — what each file is for
 
@@ -90,7 +92,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 |---|---|
 | `PLAN.md` · `PROGRESS.md` | Vision, target architecture and every phase · the log, findings, known issues, "▶ Continue here" |
 | `config/identity.json` | **Who AYRA is**: name, wordmark, tagline, honorific, language, timezone, voice, wake words. The only place identity is set. |
-| `bridge/server.mjs` | Today's all-in-one bridge: HTTP + WebSocket on :8787 (the HUD channel), `/health`, ElevenLabs `/tts` `/stt`, the `/img` `/media` `/page` proxies for blades, Telegram start-up, banner. Splits into core + desk (Phases 8–9). |
+| `bridge/server.mjs` | Today's all-in-one bridge: HTTP + WebSocket on :8787 (the HUD channel), `/health`, ElevenLabs `/tts` `/stt`, the `/img` `/media` `/page` proxies for blades, Telegram start-up, banner. Splits into core + desk (Phases 9–10). |
 | `bridge/brain.mjs` | **The brain**, channel-independent: `createBrain().open({ systemPrompt, servers, emit })` → one Claude session with `ask / interrupt / close`; emits `ready text tool done error` |
 | `bridge/gate.mjs` | **The safety gate**: `createGate()` → `decide(tool)` / `review(tool, input)`, the ask-first rules for commands, paths, pages and apps, files of secrets (refused) and `redactSecrets`, connector policy. Tested in `test/gate*.test.mjs` |
 | `bridge/audit.mjs` · `bridge/state.mjs` | Audit log `data/logs/YYYY-MM-DD.jsonl` (never tool inputs or secrets) · `data/state.json`, small state that survives restarts |
@@ -114,14 +116,14 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `src/ui/Boot.tsx` · `Ignition.tsx` · `Diagnostics.tsx` · `Suggestions.tsx` | Start-up sequence · INITIALISE button · diagnostics (D) · rotating example questions |
 | `src/store.ts` · `src/index.css` | App state · all styles incl. the `.hud-*` design system blades use |
 | `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` · `bench.mjs` · `bridge-copy.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test · `npm run bench` speed table · `npm run bridge:test` |
-| `scripts/open.mjs` · `shortcuts.mjs` | The "AYRA" shortcut (start if needed, open her app window) · `npm run shortcuts` |
+| `desktop/ayra.cs` · `desktop/ayra.ico` | **AYRA.exe**, the tray app: starts with Windows, keeps the bridge running hidden, opens her window, Ctrl+Alt+A to talk · her icon. C# 5 (the compiler that ships with Windows) |
+| `scripts/shortcuts.mjs` · `icon.mjs` | `npm run shortcuts`: builds AYRA.exe into `desktop/bin/` (gitignored) with `ayra.ini`, makes the shortcuts · `npm run icon` |
 | `test/*.test.mjs` | Unit tests, run by `npm test` |
 | `index.html` · `vite.config.ts` | Page shell + strict CSP · dev server, `%AYRA_WORDMARK%` title |
 | `data/` | AYRA's runtime data (logs, state; later memory) — gitignored, never committed |
 
-Planned, with their phase: `db.mjs`, `memory.mjs`
-(7) · `core.mjs`, `deploy/` (8) · `link.mjs`, `desk.mjs`, `jobs.mjs` (9) · `notify.mjs`,
-`scheduler.mjs` (10) · `agents/<name>/` (11).
+Planned, with their phase: `jobs.mjs` (6) · `db.mjs`, `memory.mjs` (8) · `core.mjs`, `deploy/`
+(9) · `link.mjs`, `desk.mjs` (10) · `notify.mjs`, `scheduler.mjs` (11) · `agents/<name>/` (12).
 
 Live hearing (`/listen` WebSocket): face sends 16 kHz PCM (binary), `commit`, `warm`; bridge sends
 `partial {text}`, `final {text}`, `error {code,message}` — see `bridge/listen.mjs`.
@@ -132,7 +134,7 @@ wake a sleeping brain), `approval {id,ok}`, `halt`; brain sends `approve {id,rea
 `ready {servers}`, `text {delta}`, `tool {name}`, `done {text}`, `error {message}`, `blade` — turn
 frames carry `ask: <id>`. Inside the bridge the brain also emits `sources {query, links}`, which the
 HUD channel turns into a `blade`. Change both sides together or not at all. The core ↔ desk link protocol
-will live in `bridge/link.mjs` (Phase 9), and the same rule applies.
+will live in `bridge/link.mjs` (Phase 10), and the same rule applies.
 
 ## 6. Configuration
 
@@ -142,7 +144,7 @@ will live in `bridge/link.mjs` (Phase 9), and the same rule applies.
   default `claude-opus-5-5`, `EFFORT` `low`, `BRIDGE_PORT` 8787, `ALLOWED_ORIGINS`,
   `ALLOW_NO_ORIGIN`, `VOICE_ID`, `DEBUG`, `RESUME_HOURS` — default 6, `SLEEP_MINUTES` — the brain
   naps after this long idle, default 10, `FACE_PORT` 5173, `SERVE_FACE`, `ALLOW_WRITES` — `0` turns
-  laptop control off, `CHROME_PORT` 9222, `CHROME_PATH`, `TRUSTED_SITES` — sites she may grant mic /
+  laptop control off, `CHROME_PORT` 9222, `CHROME_PATH`, `HOTKEY` — AYRA.exe's, default `ctrl+alt+a`, `TRUSTED_SITES` — sites she may grant mic /
   camera herself, `TELEGRAM_TOKEN`,
   `TELEGRAM_OWNER_ID`, `TELEGRAM` — `off` disables it, `CONNECTORS` — default `none`) plus
   `ELEVENLABS_API_KEY`. Writes are off in code (`ALLOW_WRITES = false` in server.mjs) until the
