@@ -422,6 +422,11 @@ export function createGate({ allowWrites, laptop = false, connectors = DEFAULT_C
       // button does — so it widens nothing.
       if (server === 'ayra_rules') return true
 
+      // Background jobs (jobs.mjs): a job is one more conversation with the same
+      // tools, each call reviewed by this gate as usual; starting one is only
+      // offered with writes on.
+      if (server === 'ayra_jobs') return true
+
       const tool = mcpToolOf(name)
       if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {
         return allowWrites

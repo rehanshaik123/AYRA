@@ -29,6 +29,7 @@ import { createApprovals } from './approvals.mjs'
 import { createAllowances } from './allowances.mjs'
 import { rulesServer } from './rules.mjs'
 import { watchPresence } from './presence.mjs'
+import { createJobs, jobsServer } from './jobs.mjs'
 import { createStore } from './state.mjs'
 import { browserServer } from './browser.mjs'
 import { appsServer } from './apps.mjs'
@@ -693,6 +694,41 @@ const BRAIN = createBrain({
 })
 
 /**
+ * Background jobs (jobs.mjs, PLAN.md 6.2): a long task done start to finish in
+ * its own conversation, with her hands but no jobs server of its own, reported
+ * on Telegram. The kill switch stops it like any conversation.
+ */
+const JOBS = createJobs({
+  open: ({ emit, onEnd }) =>
+    BRAIN.open({
+      channel: 'job',
+      systemPrompt: TEXT_PROMPT,
+      servers: {
+        ayra_browser: browserServer({
+          allowWrites: ALLOW_WRITES,
+          channel: 'job',
+          approve: (request) => APPROVALS.ask(request),
+          sendPhoto: (jpeg, caption) => phone?.photo(jpeg, caption),
+        }),
+        ...(WINDOWS && {
+          ayra_apps: appsServer({
+            allowWrites: ALLOW_WRITES,
+            channel: 'job',
+            approve: (request) => APPROVALS.ask(request),
+            sendPhoto: (jpeg, caption) => phone?.photo(jpeg, caption),
+          }),
+        }),
+        ayra_rules: rulesServer({ allowances: ALLOWANCES }),
+      },
+      emit,
+      onEnd,
+    }),
+  tell: (text) => (phone ? phone.notify(text) : console.log(`[ayra] job: ${text.split('\n')[0]}`)),
+  audit: AUDIT,
+})
+CONVERSATIONS.add(JOBS)
+
+/**
  * The Telegram channel (PLAN.md 3.2) — on when the bot token and the owner's
  * Telegram id are both set. AYRA_TELEGRAM=off keeps it off for this process,
  * which a second bridge started for testing needs: two processes reading the
@@ -728,8 +764,10 @@ if (env('TELEGRAM', 'on') === 'off') {
         }),
       }),
       ayra_rules: rulesServer({ allowances: ALLOWANCES }),
+      ayra_jobs: jobsServer({ jobs: JOBS, allowWrites: ALLOW_WRITES }),
     },
     allowances: ALLOWANCES,
+    jobs: JOBS,
     audit: AUDIT,
     // Approve buttons on the phone, and /stop.
     approvals: APPROVALS,
@@ -815,6 +853,8 @@ wss.on('connection', (socket, req) => {
       }),
       // What she may do without asking (rules.mjs).
       ayra_rules: rulesServer({ allowances: ALLOWANCES }),
+      // Long tasks in the background (jobs.mjs).
+      ayra_jobs: jobsServer({ jobs: JOBS, allowWrites: ALLOW_WRITES }),
     },
     emit,
     // Reloading the page carries on the same conversation (see brain.mjs).

@@ -76,7 +76,7 @@ export const fromOwner = (message, ownerId) =>
  *   onHalt    — the kill switch, for `/stop`
  *   request   — how Bot API calls are made; tests pass a fake, the bridge uses the real API
  */
-export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {}, audit, approvals, allowances, onHalt, request }) {
+export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {}, audit, approvals, allowances, jobs, onHalt, request }) {
   const call = request ?? botApi
 
   async function botApi(method, body, timeoutMs = 15_000) {
@@ -250,6 +250,10 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
     // What she may do without asking, and taking an allowance back.
     if (text === '/rules') {
       await reply(chatId, `${formatRules(allowances?.list() ?? [])}\n\nSend /forget 2 to take back number 2.`)
+      return
+    }
+    if (text === '/jobs') {
+      await reply(chatId, jobs?.status() ?? 'Background jobs are not on.')
       return
     }
     if (/^\/forget\b/.test(text)) {
