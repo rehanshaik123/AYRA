@@ -69,6 +69,7 @@ npm run lint           # oxlint (must stay at 0 warnings)
 npm run setup          # preflight: login, SDK binary, identity, ElevenLabs key
 npm run smoke          # one real end-to-end turn; needs a running bridge
 npm run bench          # times five standard questions (first word, done); needs a running bridge
+npm run demo           # eleven real tasks (web, Chrome, apps, files, asks, job) → data/demo/<time>/; acts on the laptop
 npm run bridge:test    # a test copy of the bridge: port 8788, Telegram off
 npm test               # unit tests (gate, wake phrase, identity, avatar, …)
 ```
@@ -117,7 +118,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `src/ui/Hud.tsx` · `Blades.tsx` · `sanitise.ts` | The HUD chrome and transcript · the blades (the one surface for results) · the sanitiser for model-written HTML |
 | `src/ui/Boot.tsx` · `Ignition.tsx` · `Diagnostics.tsx` · `Suggestions.tsx` | Start-up sequence · INITIALISE button · diagnostics (D) · rotating example questions |
 | `src/store.ts` · `src/index.css` | App state · all styles incl. the `.hud-*` design system blades use |
-| `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` · `bench.mjs` · `bridge-copy.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test · `npm run bench` speed table · `npm run bridge:test` |
+| `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` · `bench.mjs` · `demo.mjs` · `bridge-copy.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test · `npm run bench` speed table · `npm run demo` what she can do, live · `npm run bridge:test` |
 | `desktop/ayra.cs` · `desktop/ayra.ico` | **AYRA.exe**, the tray app: starts with Windows, keeps the bridge running hidden, opens her window, Ctrl+Alt+A to talk · her icon. C# 5 (the compiler that ships with Windows) |
 | `scripts/shortcuts.mjs` · `icon.mjs` | `npm run shortcuts`: builds AYRA.exe into `desktop/bin/` (gitignored) with `ayra.ini`, makes the shortcuts · `npm run icon` |
 | `test/*.test.mjs` | Unit tests, run by `npm test` |
