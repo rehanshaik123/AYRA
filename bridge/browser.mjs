@@ -28,6 +28,15 @@ import { env } from './identity.mjs'
 import { isOwnPage, redactSecrets, riskOfPageAction, touchesSecrets } from './gate.mjs'
 import { SEND_WORDS } from './allowances.mjs'
 
+// Only a conversation that can send pictures (Telegram) offers the phone, and the
+// tool says where a picture went — at the laptop she once said a screenshot was
+// "on its way to your phone" when nothing could send it.
+const PHONE_HINT = ' `toOwner`: send it to the owner\'s phone too — when they asked to see it ("show me").'
+const photoNote = (asked, sent) =>
+  sent === true ? 'Sent to the owner\'s phone.'
+    : sent === false ? 'Could not send it to the phone.'
+      : asked ? 'Shown on the HUD only; this conversation cannot send pictures to the phone.' : ''
+
 /** Where "Chrome (AYRA)" keeps its profile — the owner's logins live here. */
 export const PROFILE_DIR = join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'AYRA', 'Chrome')
 /** Chrome's remote-control port. Chrome binds it to 127.0.0.1 only. */
@@ -440,7 +449,7 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
 
     tool(
       'browser_screenshot',
-      'See the current tab as a picture (it also shows on the HUD). `toOwner`: send it to the owner\'s phone too — when they asked to see it ("show me"). Use when the layout matters or they want to see; reading is faster.',
+      `See the current tab as a picture (it also shows on the HUD).${sendPhoto ? PHONE_HINT : ''} Use when the layout matters or they want to see; reading is faster.`,
       { toOwner: z.boolean().optional() },
       guard(async ({ toOwner = false }) => {
         const page = await pick(me)
@@ -460,7 +469,7 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
           hold: 'turn',
         })
         const sent = toOwner && sendPhoto ? await sendPhoto(data, `${await page.title()} — ${host(page.url())}`) : null
-        const note = sent === true ? 'Sent to the owner\'s phone.' : sent === false ? 'Could not send it to the phone.' : ''
+        const note = photoNote(toOwner, sent)
         return { content: [{ type: 'image', data, mimeType: 'image/jpeg' }, ...(note ? [{ type: 'text', text: note }] : [])] }
       }),
     ),

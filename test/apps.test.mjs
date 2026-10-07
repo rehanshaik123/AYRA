@@ -237,6 +237,14 @@ test('a window whose words show a key is not pictured either', async () => {
   assert.equal(apps.sent.some((s) => s.op === 'shot'), false)
 })
 
+test("at the laptop the phone isn't offered, and a picture asked for there says it stayed on the HUD", async () => {
+  const apps = fakeApps({ describe: { window: NOTEPAD }, shot: { window: NOTEPAD, jpeg: 'AAAA' } })
+  const tools = appsTools({ allowWrites: false, channel: 'hud', apps, approve: async () => false, emitBlade: () => {} })
+  assert.doesNotMatch(tools.find((t) => t.name === 'apps_screenshot').description, /phone/)
+  const res = await handler(tools, 'apps_screenshot')({ window: 'notes', toOwner: true })
+  assert.match(res.content[1].text, /HUD only/)
+})
+
 test('"Always" is offered only for a plainly sending click in an ordinary program', async () => {
   const asked = []
   const approve = async (r) => (asked.push(r), false)

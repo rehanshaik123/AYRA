@@ -27,6 +27,15 @@ import { fileURLToPath } from 'node:url'
 import { isOwnWindow, redactSecrets, riskOfAppAction, touchesSecrets } from './gate.mjs'
 import { SEND_WORDS } from './allowances.mjs'
 
+// Only a conversation that can send pictures (Telegram) offers the phone, and the
+// tool says where a picture went — at the laptop she once said a screenshot was
+// "on its way to your phone" when nothing could send it.
+const PHONE_HINT = ' `toOwner`: send it to the owner\'s phone too — when they asked to see it ("show me").'
+const photoNote = (asked, sent) =>
+  sent === true ? 'Sent to the owner\'s phone.'
+    : sent === false ? 'Could not send it to the phone.'
+      : asked ? 'Shown on the HUD only; this conversation cannot send pictures to the phone.' : ''
+
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'apps.ps1')
 /** Longest a single request may take before the worker is presumed stuck. */
 const CALL_TIMEOUT_MS = 20_000
@@ -363,7 +372,7 @@ export function appsTools({ allowWrites, channel, approve, apps = null, emitBlad
 
     tool(
       'apps_screenshot',
-      'See a window as a picture (it also shows on the HUD); works even behind other windows. `toOwner`: send it to the owner\'s phone too — when they asked to see it ("show me"). Reading is faster when only the words matter.',
+      `See a window as a picture (it also shows on the HUD); works even behind other windows.${sendPhoto ? PHONE_HINT : ''} Reading is faster when only the words matter.`,
       { window: which, toOwner: z.boolean().optional() },
       guard(async ({ window, toOwner = false }) => {
         const { window: target } = await call('describe', { window: String(window) })
@@ -388,7 +397,7 @@ export function appsTools({ allowWrites, channel, approve, apps = null, emitBlad
           hold: 'turn',
         })
         const sent = toOwner && sendPhoto ? await sendPhoto(jpeg, `${w.title} (${w.app})`) : null
-        const note = sent === true ? 'Sent to the owner\'s phone.' : sent === false ? 'Could not send it to the phone.' : ''
+        const note = photoNote(toOwner, sent)
         return { content: [{ type: 'image', data: jpeg, mimeType: 'image/jpeg' }, ...(note ? [{ type: 'text', text: note }] : [])] }
       }),
     ),
