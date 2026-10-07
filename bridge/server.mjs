@@ -33,6 +33,7 @@ import { JOB_LIMITS, createJobs, jobsServer } from './jobs.mjs'
 import { createStore } from './state.mjs'
 import { browserServer } from './browser.mjs'
 import { appsServer } from './apps.mjs'
+import { createResearch, researchServer } from './research.mjs'
 import { homedir } from 'node:os'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -86,6 +87,13 @@ const MODEL = env('MODEL', 'claude-opus-5-5')
  * AYRA_EFFORT when a task genuinely needs the depth.
  */
 const EFFORT = env('EFFORT', 'low')
+
+/**
+ * The research agent's workers — planner, searchers, extractors, cross-checker
+ * (research.mjs). Narrow, structured jobs, so the lighter model does them well
+ * and keeps a run inside the Pro limits; the answer itself is written by MODEL.
+ */
+const RESEARCH_MODEL = env('RESEARCH_MODEL', 'claude-sonnet-5-5')
 
 /**
  * Every tool loaded up front, none deferred behind ToolSearch.
@@ -631,7 +639,7 @@ console.log(`[ayra] ${IDENTITY.name} bridge listening on ws://localhost:${PORT}`
 console.log(
   `[ayra] speech ${elevenKey() ? `via ElevenLabs, voice ${VOICE_ID}` : 'using browser fallback voice'}`,
 )
-console.log(`[ayra] model ${MODEL} · effort ${EFFORT}`)
+console.log(`[ayra] model ${MODEL} · effort ${EFFORT} · research workers ${RESEARCH_MODEL}`)
 console.log(
   ALLOW_WRITES
     ? '[ayra] tools: web, the HUD display, the laptop (PowerShell, files, her Chrome, Windows apps) · asks first: money, sending as you, deleting for good, passwords/security'
@@ -676,6 +684,22 @@ function halt(by) {
   for (const c of CONVERSATIONS) c.interrupt()
   console.log(`[ayra] stopped by ${by}${declined ? ` — ${declined} waiting action(s) declined` : ''}`)
 }
+
+/**
+ * The research agent (research.mjs): search, read, extract quoted evidence,
+ * cross-check, answer with citations. One engine for every channel, so only
+ * one run happens at a time and its Claude calls stay capped. It joins the
+ * kill switch like a conversation — Esc or /stop ends a run in flight.
+ */
+const RESEARCH = createResearch({
+  model: MODEL,
+  workerModel: RESEARCH_MODEL,
+  effort: EFFORT,
+  audit: AUDIT,
+  // A planner stays started after each run, so the next one skips its ~2.6 s start-up.
+  keepPlanner: true,
+})
+CONVERSATIONS.add({ interrupt: () => RESEARCH.interrupt() })
 
 const BRAIN = createBrain({
   model: MODEL,
@@ -726,6 +750,8 @@ const JOBS = createJobs({
           }),
         }),
         ayra_rules: rulesServer({ allowances: ALLOWANCES }),
+        // No screen in a job: the tool returns the report as text.
+        ayra_research: researchServer({ research: RESEARCH, channel: 'job' }),
       },
       emit,
       onEnd,
@@ -778,6 +804,8 @@ if (env('TELEGRAM', 'on') === 'off') {
       }),
       ayra_rules: rulesServer({ allowances: ALLOWANCES }),
       ayra_jobs: jobsServer({ jobs: JOBS, allowWrites: ALLOW_WRITES }),
+      // Research answers as a text report with numbered sources — no board on a phone.
+      ayra_research: researchServer({ research: RESEARCH, channel: 'telegram' }),
     },
     allowances: ALLOWANCES,
     jobs: JOBS,
@@ -869,6 +897,13 @@ wss.on('connection', (socket, req) => {
       ayra_rules: rulesServer({ allowances: ALLOWANCES }),
       // Long tasks in the background (jobs.mjs); their reports go to Telegram when it is on.
       ayra_jobs: jobsServer({ jobs: JOBS, allowWrites: ALLOW_WRITES, reportsTo: phone ? 'Telegram' : null }),
+      // The research agent: its live board lands on this screen as one blade,
+      // replaced in place on every update.
+      ayra_research: researchServer({
+        research: RESEARCH,
+        emitBlade: (blade) => send({ type: 'blade', blade }),
+        channel: 'hud',
+      }),
     },
     emit,
     // Reloading the page carries on the same conversation (see brain.mjs).
@@ -901,7 +936,12 @@ wss.on('connection', (socket, req) => {
     if (msg.type === 'interrupt') conversation.interrupt()
 
     // The owner has started speaking: wake a sleeping brain while they talk.
-    if (msg.type === 'warm') conversation.warm()
+    // A research planner is started too: if this turns out to be research, its first stage
+    // skips the start-up (an idle one sends nothing and closes after ten minutes).
+    if (msg.type === 'warm') {
+      conversation.warm()
+      RESEARCH.ready()
+    }
 
     // The owner's answer to an Approve card, or the kill switch.
     if (msg.type === 'approval' && typeof msg.id === 'string') {

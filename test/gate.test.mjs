@@ -79,6 +79,16 @@ test("AYRA's display is always allowed; removed servers get no free pass", () =>
   assert.equal(readOnly.decide('mcp__ayra_eyes__look'), false)
 })
 
+test('the research agent only reads, so it is allowed with writes off', () => {
+  for (const gate of [readOnly, writes]) {
+    assert.equal(gate.decide('mcp__ayra_research__research'), true)
+    assert.equal(gate.decide('mcp__ayra_research__recent_research'), true)
+    assert.deepEqual(gate.review('mcp__ayra_research__research', { question: 'Is coffee good for you?' }), { verdict: 'allow' })
+  }
+  // A look-alike name gets no free pass.
+  assert.equal(readOnly.decide('mcp__ayra_researcher__delete_report'), false)
+})
+
 test('other MCP servers: read verbs pass, effectful verbs need writes', () => {
   assert.equal(readOnly.decide('mcp__android__list_devices'), true)
   assert.equal(readOnly.decide('mcp__android__install_apk'), false)

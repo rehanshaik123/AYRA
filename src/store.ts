@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { Research } from './lib/research'
 
 export type Phase =
   | 'offline'   // waiting for the click that unlocks audio
@@ -18,13 +19,15 @@ export type Phase =
 export type Blade = {
   id: string
   title: string
-  kind: 'article' | 'image' | 'gallery' | 'video' | 'embed' | 'markup'
+  kind: 'article' | 'image' | 'gallery' | 'video' | 'embed' | 'markup' | 'research'
   /** article / image / video / embed. */
   url?: string
   /** gallery. */
   images?: string[]
   /** markup — model-authored HTML, sanitised before it renders. */
   html?: string
+  /** research — the research agent's live board state (bridge/research.mjs). */
+  research?: Research
   /** article only: the words restyled, or the real page. */
   mode?: 'reader' | 'live'
   size: 'compact' | 'tall' | 'wide' | 'full'

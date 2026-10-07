@@ -1411,3 +1411,813 @@ html[data-cards='1'] .log { left: 30%; width: min(560px, 52vw); }
   html[data-cards='1'] .log { left: 50%; width: 92vw; }
 }
 
+/* ----------------------------------------------------------- research board */
+
+/*
+   The research agent's live board (src/ui/Research.tsx). It is shown on a
+   projector as often as on the laptop, so it is set larger than the rest of
+   the HUD — body 16px, the question up to 28px — in near-white rather than the
+   accent, which washes out on a projector. The vocabulary is the blades':
+   Chakra Petch for words, JetBrains Mono for figures, thin cyan lines on dark
+   glass. Layout follows the board's own width (a container query), not the
+   window's, because the same board is a full-screen card or a 420px dock.
+*/
+
+/* The board stays interface-cyan whatever phase she is in: status colours on
+   it (green, amber, red) carry meaning, and a purple "tooling" frame around
+   them would muddy every one. */
+.bl-k-research { --accent: var(--interface) }
+
+.rs {
+  --rs-green: #3ef2a8;
+  --rs-amber: #ffb547;
+  --rs-red: #ff6b6b;
+  --rs-ink: #e6f8ff;
+  --rs-dim: rgba(198, 232, 244, 0.68);
+  --rs-line: color-mix(in srgb, var(--accent) 22%, transparent);
+  --rs-glass: color-mix(in srgb, var(--accent) 5%, rgba(2, 10, 16, 0.5));
+  --tone: var(--accent);
+  container: rs / inline-size;
+  height: 100%;
+  color: var(--rs-ink);
+  font-size: 16px;
+  line-height: 1.5;
+  /* The HUD around it is capitals with wide tracking; prose is neither. */
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.rs-t-green  { --tone: var(--rs-green) }
+.rs-t-amber  { --tone: var(--rs-amber) }
+.rs-t-red    { --tone: var(--rs-red) }
+.rs-t-dim    { --tone: var(--rs-dim) }
+.rs-t-accent { --tone: var(--accent) }
+
+.rs-in {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 22px 0;
+}
+.rs-in > * { flex-shrink: 0 }
+
+.rs-label {
+  font-size: 11.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 82%, white);
+}
+
+/* ---- header */
+
+.rs-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 30px;
+}
+.rs-top-l { flex: 1 1 380px; min-width: 0 }
+.rs-top-r { flex: 0 0 auto; display: flex; align-items: center; gap: 26px }
+
+.rs-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.rs-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 11px 3px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--tone) 60%, transparent);
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+  color: var(--tone);
+  font: 400 12px/1.3 'JetBrains Mono', monospace;
+  letter-spacing: 0.16em;
+}
+.rs-pill i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+.rs-pulse i { animation: rsPulse 1.4s ease-in-out infinite }
+
+.rs-tag,
+.rs-saved {
+  font: 400 12px/1.3 'JetBrains Mono', monospace;
+  color: var(--rs-dim);
+  letter-spacing: 0.08em;
+}
+.rs-tag {
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border: 1px solid var(--rs-line);
+  border-radius: 4px;
+}
+
+.rs-q {
+  margin: 0;
+  font-size: clamp(19px, 1.7cqi, 28px);
+  font-weight: 600;
+  line-height: 1.25;
+  color: #f2fbff;
+  overflow-wrap: anywhere;
+  text-shadow: 0 0 22px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.rs-clock { display: flex; flex-direction: column; align-items: flex-end; gap: 2px }
+.rs-clock-v {
+  font: 300 30px/1.1 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  color: #f2fbff;
+  white-space: nowrap;
+}
+
+.rs-gauge { display: flex; align-items: center; gap: 12px }
+.rs-ring { position: relative; width: 76px; height: 76px; flex: 0 0 auto }
+.rs-ring svg {
+  width: 100%;
+  height: 100%;
+  /* The arc starts at twelve o'clock. */
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+.rs-ring-track { fill: none; stroke: color-mix(in srgb, var(--tone) 18%, transparent); stroke-width: 7 }
+.rs-ring-fill {
+  fill: none;
+  stroke: var(--tone);
+  stroke-width: 7;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--tone) 70%, transparent));
+}
+.rs-ring-pct {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font: 400 19px/1 'JetBrains Mono', monospace;
+  color: #f2fbff;
+}
+.rs-gauge-words { display: flex; flex-direction: column; gap: 2px }
+.rs-gauge-label {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--tone);
+  text-shadow: 0 0 18px color-mix(in srgb, var(--tone) 45%, transparent);
+}
+
+/* ---- pipeline */
+
+.rs-pipe {
+  list-style: none;
+  margin: 0;
+  padding: 12px 4px 9px;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  border: 1px solid var(--rs-line);
+  border-radius: 10px;
+  background: var(--rs-glass);
+}
+
+.rs-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 0 6px;
+  min-width: 0;
+}
+
+/* The line from the stage before to this one: lit once this stage is
+   reached, flowing while it runs. */
+.rs-stage + .rs-stage::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  left: calc(-50% + 26px);
+  right: calc(50% + 26px);
+  height: 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.rs-stage + .rs-stage:is(.rs-s-run, .rs-s-done, .rs-s-fail)::before {
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.rs-stage + .rs-s-run::before {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 20%, transparent) 0%,
+    var(--accent) 50%,
+    color-mix(in srgb, var(--accent) 20%, transparent) 100%);
+  background-size: 200% 100%;
+  animation: rsFlow 1.1s linear infinite;
+}
+
+.rs-node {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  background: rgba(2, 10, 16, 0.85);
+  color: color-mix(in srgb, var(--accent) 55%, transparent);
+  font: 400 16px/1 'JetBrains Mono', monospace;
+  transition: border-color 300ms ease, color 300ms ease, background 300ms ease;
+}
+.rs-s-run .rs-node {
+  border-color: var(--accent);
+  color: #f2fbff;
+  background: color-mix(in srgb, var(--accent) 16%, rgba(2, 10, 16, 0.85));
+  animation: rsGlow 1.6s ease-in-out infinite;
+}
+/* A spinning arc around the stage at work. */
+.rs-s-run .rs-node::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  border-right-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  animation: rsSpin 1s linear infinite;
+}
+.rs-s-done .rs-node {
+  border-color: var(--rs-green);
+  color: var(--rs-green);
+  background: color-mix(in srgb, var(--rs-green) 14%, rgba(2, 10, 16, 0.85));
+  font-size: 18px;
+}
+.rs-s-fail .rs-node {
+  border-color: var(--rs-red);
+  color: var(--rs-red);
+  background: color-mix(in srgb, var(--rs-red) 14%, rgba(2, 10, 16, 0.85));
+}
+.rs-s-skip .rs-node { border-style: dashed; opacity: 0.6 }
+
+.rs-stage-name {
+  margin-top: 8px;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rs-ink);
+  line-height: 1.25;
+  max-width: 100%;
+}
+.rs-s-wait .rs-stage-name,
+.rs-s-skip .rs-stage-name { color: var(--rs-dim) }
+.rs-s-run .rs-stage-name { color: color-mix(in srgb, var(--accent) 70%, white) }
+
+.rs-stage-ms {
+  min-height: 1.5em;
+  font: 400 12.5px/1.5 'JetBrains Mono', monospace;
+  color: color-mix(in srgb, var(--accent) 75%, white);
+}
+.rs-s-done .rs-stage-ms,
+.rs-s-skip .rs-stage-ms { color: var(--rs-dim) }
+.rs-s-fail .rs-stage-ms { color: var(--rs-red) }
+
+.rs-stage-note {
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--rs-dim);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  animation: rsIn 400ms ease-out;
+}
+.rs-s-fail .rs-stage-note { color: color-mix(in srgb, var(--rs-red) 80%, white) }
+
+/* ---- plan */
+
+.rs-plan { display: flex; flex-direction: column; gap: 8px }
+.rs-plan-head { display: flex; align-items: baseline; gap: 14px; min-width: 0 }
+.rs-intent {
+  font-size: 14.5px;
+  color: var(--rs-dim);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rs-subqs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 6px 18px;
+}
+.rs-subqs li {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  font-size: 14.5px;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--rs-ink) 90%, transparent);
+  min-width: 0;
+}
+/* One line each beside the full-width board, to leave the height to the
+   evidence; the whole question is in the tooltip, and a narrow board wraps. */
+.rs-subqs li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.rs-subqs b {
+  flex: 0 0 auto;
+  font: 400 12px/1.4 'JetBrains Mono', monospace;
+  color: var(--accent);
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 4px;
+}
+
+/* ---- the two columns */
+
+.rs-cols {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.2fr);
+  gap: 22px;
+}
+.rs-col {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 8px 14px 0;
+  overscroll-behavior: contain;
+}
+.rs-col::-webkit-scrollbar { width: 8px }
+.rs-col::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 8px;
+}
+
+.rs-h {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 10px;
+  padding: 2px 0 7px;
+  border-bottom: 1px solid var(--rs-line);
+  /* Opaque enough to hide rows scrolling under it, tinted to sit on the card. */
+  background: rgba(4, 25, 32, 0.94);
+  font-size: 12.5px;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 85%, white);
+}
+.rs-h-gap { margin-top: 18px }
+.rs-h-sub {
+  margin-left: auto;
+  font: 400 12px/1.4 'JetBrains Mono', monospace;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--rs-dim);
+}
+.rs-empty { margin: 4px 0; color: var(--rs-dim); font-size: 15px }
+
+/* ---- sources */
+
+.rs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rs-src-btn {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 10px 12px 10px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 10%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+.rs-src-btn:disabled { cursor: default }
+.rs-src-btn:not(:disabled):hover,
+.rs-hot .rs-src-btn {
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.rs-hot .rs-src-btn {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 24px -6px var(--accent);
+}
+.rs-src-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.rs-inj .rs-src-btn { border-color: color-mix(in srgb, var(--rs-red) 40%, transparent) }
+
+.rs-n {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font: 400 16px/1 'JetBrains Mono', monospace;
+  color: color-mix(in srgb, var(--accent) 80%, white);
+}
+.rs-src-found .rs-n { border-style: dashed; background: none; color: var(--rs-dim) }
+.rs-hot .rs-n { background: var(--accent); color: #01141c }
+
+.rs-src-main { display: flex; flex-direction: column; min-width: 0; gap: 3px }
+.rs-src-title {
+  font-size: 15.5px;
+  line-height: 1.3;
+  color: var(--rs-ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.rs-src-failed .rs-src-title,
+.rs-src-skipped .rs-src-title { color: var(--rs-dim) }
+
+.rs-src-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 9px;
+  font-size: 12.5px;
+  color: var(--rs-dim);
+}
+.rs-domain {
+  font-family: 'JetBrains Mono', monospace;
+  color: color-mix(in srgb, var(--accent) 75%, white);
+  overflow-wrap: anywhere;
+}
+.rs-date,
+.rs-subq { font-family: 'JetBrains Mono', monospace; font-size: 12px }
+
+.rs-kind {
+  --tone: var(--rs-dim);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 0 6px;
+  line-height: 1.6;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--tone) 55%, transparent);
+  color: var(--tone);
+}
+.rs-kind-gov,
+.rs-kind-academic { --tone: var(--rs-green) }
+.rs-kind-reference,
+.rs-kind-news,
+.rs-kind-org { --tone: color-mix(in srgb, var(--accent) 85%, white) }
+.rs-kind-blog,
+.rs-kind-forum { --tone: var(--rs-amber) }
+.rs-kind-social { --tone: var(--rs-red) }
+
+.rs-trust {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 2px;
+  font: 400 12px/1.4 'JetBrains Mono', monospace;
+  color: var(--rs-dim);
+}
+
+/* A bar is a track plus a fill in the tone of whatever it measures. */
+.rs-bar {
+  flex: 0 0 110px;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.rs-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--tone);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--tone) 60%, transparent);
+  transition: width 600ms ease;
+}
+
+.rs-badge {
+  padding: 0 7px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--tone);
+  border: 1px solid color-mix(in srgb, var(--tone) 60%, transparent);
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+}
+
+.rs-why {
+  flex: 1 1 140px;
+  min-width: 0;
+  font-family: 'Chakra Petch', system-ui, sans-serif;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--rs-dim) 85%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rs-src-err { font-size: 12.5px; color: var(--rs-red) }
+
+.rs-src-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 6px;
+}
+.rs-state {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+}
+.rs-state-reading {
+  border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-top-color: var(--accent);
+  animation: rsSpin 0.8s linear infinite;
+}
+.rs-state-read {
+  color: var(--rs-green);
+  background: color-mix(in srgb, var(--rs-green) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rs-green) 55%, transparent);
+}
+.rs-state-failed {
+  color: var(--rs-red);
+  background: color-mix(in srgb, var(--rs-red) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rs-red) 55%, transparent);
+}
+.rs-state-skipped,
+.rs-state-found { color: var(--rs-dim) }
+.rs-claims {
+  font: 400 12px/1.2 'JetBrains Mono', monospace;
+  color: var(--rs-dim);
+  white-space: nowrap;
+}
+.rs-claims b { font-weight: 400; color: var(--rs-ink) }
+
+/* ---- answer */
+
+.rs-answer { font-size: 17.5px; line-height: 1.6; color: var(--rs-ink) }
+.rs-answer p { margin: 0 0 10px }
+.rs-answer ul { margin: 0 0 10px; padding-left: 22px }
+.rs-answer li { margin-bottom: 5px }
+.rs-answer li::marker { color: var(--accent) }
+
+/* A citation: a small raised chip against the word it supports. Raised with
+   `top`, not vertical-align, so it never opens up the line spacing. */
+.rs-cite {
+  all: unset;
+  position: relative;
+  top: -0.42em;
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 19px;
+  padding: 0 4px;
+  margin: 0 1px 0 3px;
+  box-sizing: border-box;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: color-mix(in srgb, var(--accent) 80%, white);
+  font: 400 12px/1 'JetBrains Mono', monospace;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+.rs-cite:hover,
+.rs-cite.rs-hot {
+  background: var(--accent);
+  color: #01141c;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.rs-cite:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px }
+.rs-cite-x { opacity: 0.5; cursor: default }
+.rs-cite-against {
+  border-color: color-mix(in srgb, var(--rs-red) 60%, transparent);
+  background: color-mix(in srgb, var(--rs-red) 14%, transparent);
+  color: color-mix(in srgb, var(--rs-red) 75%, white);
+}
+.rs-cite-against:hover,
+.rs-cite-against.rs-hot { background: var(--rs-red); color: #1c0303 }
+.rs-fact-srcs .rs-cite { top: 0 }
+
+.rs-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1.05em;
+  margin-left: 3px;
+  vertical-align: -0.16em;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+  animation: rsBlink 1s steps(1) infinite;
+}
+
+.rs-wait { display: flex; flex-direction: column; gap: 11px; padding: 4px 0 6px }
+.rs-wait-text {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15.5px;
+  color: color-mix(in srgb, var(--accent) 70%, white);
+}
+.rs-spin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-top-color: var(--accent);
+  animation: rsSpin 0.8s linear infinite;
+}
+.rs-skel {
+  display: block;
+  height: 11px;
+  border-radius: 6px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 6%, transparent) 0%,
+    color-mix(in srgb, var(--accent) 18%, transparent) 50%,
+    color-mix(in srgb, var(--accent) 6%, transparent) 100%);
+  background-size: 200% 100%;
+  animation: rsShimmer 1.8s linear infinite;
+}
+
+.rs-alert {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--tone) 60%, transparent);
+  background: color-mix(in srgb, var(--tone) 11%, transparent);
+  color: color-mix(in srgb, var(--tone) 40%, white);
+  font-size: 15.5px;
+  line-height: 1.45;
+}
+
+/* ---- evidence */
+
+.rs-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rs-fact {
+  padding: 10px 14px 11px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--tone) 22%, transparent);
+  border-left: 3px solid var(--tone);
+  background: color-mix(in srgb, var(--tone) 5%, transparent);
+}
+.rs-fact-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px }
+.rs-chip {
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--tone) 55%, transparent);
+  background: color-mix(in srgb, var(--tone) 13%, transparent);
+  color: var(--tone);
+  font-size: 11.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.rs-fact-conf {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font: 400 13px/1 'JetBrains Mono', monospace;
+}
+.rs-fact-conf .rs-bar { flex-basis: 90px; width: 90px }
+.rs-fact-conf b { font-weight: 400; color: var(--rs-ink); min-width: 3.2em; text-align: right }
+.rs-fact-text { margin: 7px 0 6px; font-size: 15.5px; line-height: 1.45; color: var(--rs-ink) }
+.rs-fact-srcs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px }
+.rs-fact-srcs .rs-cite { margin: 0 }
+.rs-mini {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rs-dim);
+  margin-right: 2px;
+}
+.rs-mini-against { color: var(--rs-red); margin-left: 8px }
+.rs-fact-note { margin: 7px 0 0; font-size: 13.5px; font-style: italic; color: var(--rs-dim) }
+
+.rs-gaps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px }
+.rs-gaps li { font-size: 14.5px; color: var(--rs-dim); padding-left: 18px; position: relative }
+.rs-gaps li::before {
+  content: '—';
+  position: absolute;
+  left: 0;
+  color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* ---- footer */
+
+.rs-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 20px;
+  margin: 0 -22px;
+  padding: 10px 22px 12px;
+  border-top: 1px solid var(--rs-line);
+  background: color-mix(in srgb, var(--accent) 5%, rgba(1, 6, 10, 0.6));
+  font: 400 12.5px/1.4 'JetBrains Mono', monospace;
+  color: var(--rs-dim);
+}
+.rs-m b { font-weight: 400; color: var(--rs-ink) }
+.rs-m.rs-t-green b,
+.rs-m.rs-t-amber b,
+.rs-m.rs-t-red b { color: var(--tone) }
+.rs-m i { font-style: normal; opacity: 0.8 }
+.rs-cost { margin-left: auto; opacity: 0.85 }
+
+/* ---- the board's width, not the window's */
+
+@container rs (max-width: 900px) {
+  /* One column, and the card scrolls as a whole. */
+  .rs-in { height: auto }
+  .rs-cols { display: flex; flex-direction: column; gap: 8px }
+  .rs-col { overflow: visible; padding-right: 0 }
+  .rs-subqs li > span { white-space: normal }
+}
+@container rs (max-width: 560px) {
+  .rs-in { padding: 14px 14px 0; gap: 12px }
+  .rs-foot { margin: 0 -14px; padding: 8px 14px 10px; gap: 4px 12px; font-size: 11.5px }
+  .rs-top-r { gap: 16px }
+  .rs-clock-v { font-size: 22px }
+  .rs-ring { width: 58px; height: 58px }
+  .rs-ring-pct { font-size: 15px }
+  .rs-gauge-label { font-size: 20px }
+  .rs-node { width: 30px; height: 30px; font-size: 13px }
+  .rs-s-done .rs-node { font-size: 14px }
+  .rs-stage + .rs-stage::before { top: 14px; left: calc(-50% + 20px); right: calc(50% + 20px) }
+  .rs-stage-name { font-size: 10px; letter-spacing: 0.04em }
+  .rs-stage-ms { font-size: 10.5px }
+  .rs-stage-note,
+  .rs-why { display: none }
+  .rs-bar { flex-basis: 70px }
+  .rs-answer { font-size: 16px }
+}
+
+/* Full screen means the whole frame in a narrow window too: the docked
+   stack's raised bottom (the 760px rule above) pushed a full-screen card,
+   the board included, half off the top. */
+@media (max-width: 760px) {
+  .blades-stack.blades-stack-full { inset: 0; width: auto }
+}
+
+@keyframes rsPulse {
+  0%, 100% { opacity: 1; transform: scale(1) }
+  50% { opacity: 0.35; transform: scale(0.8) }
+}
+@keyframes rsGlow {
+  0%, 100% { box-shadow: 0 0 10px -2px color-mix(in srgb, var(--accent) 50%, transparent) }
+  50% { box-shadow: 0 0 22px 1px color-mix(in srgb, var(--accent) 75%, transparent) }
+}
+@keyframes rsSpin { to { transform: rotate(360deg) } }
+@keyframes rsFlow {
+  from { background-position: 100% 0 }
+  to { background-position: -100% 0 }
+}
+@keyframes rsShimmer {
+  from { background-position: 100% 0 }
+  to { background-position: -100% 0 }
+}
+@keyframes rsBlink { 50% { opacity: 0 } }
+@keyframes rsIn {
+  from { opacity: 0; transform: translateY(3px) }
+  to { opacity: 1; transform: none }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rs *,
+  .rs *::before,
+  .rs *::after { animation: none !important; transition: none !important }
+}
+

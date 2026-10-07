@@ -23,6 +23,7 @@
     "smoke": "node scripts/smoke.mjs",
     "bench": "node scripts/bench.mjs",
     "demo": "node scripts/demo.mjs",
+    "research": "node scripts/research.mjs",
     "test": "node --import tsx --test"
   },
   "dependencies": {

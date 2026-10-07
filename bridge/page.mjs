@@ -230,6 +230,11 @@ function articleBody(html) {
  * nothing else. Same rules, one implementation, no disagreement possible.
  */
 function readableText(body) {
+  return readableParts(body).join(' ')
+}
+
+/** The blocks readableText joins — readArticle keeps them as paragraphs. */
+function readableParts(body) {
   const parts = []
   let seenProse = false
   const pattern = /<(h1|h2|h3|p|li|blockquote)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi
@@ -242,7 +247,89 @@ function readableText(body) {
     if (tag === 'p' && text.split(/\s+/).length > 8) seenProse = true
     parts.push(text)
   }
-  return parts.join(' ')
+  return parts
+}
+
+/**
+ * A page's publication date as YYYY-MM-DD, or '' when it does not say.
+ *
+ * Read from the raw document, because the places a date lives — <meta> tags
+ * and JSON-LD <script> blocks — are exactly what stripDangerous removes.
+ * Scholarly pages carry it as citation_publication_date ("2022/05/10").
+ */
+function publishedOf(html) {
+  const candidates = []
+  for (const name of [
+    'article:published_time', 'og:published_time', 'datePublished', 'citation_publication_date',
+    'citation_date', 'date', 'dc.date', 'dc.date.issued', 'dcterms.date', 'pubdate', 'publishdate',
+    'sailthru.date', 'parsely-pub-date',
+  ]) {
+    const re = new RegExp(
+      `<meta[^>]+(?:property|name|itemprop)\\s*=\\s*["']${name.replace(/[.]/g, '\\.')}["'][^>]*>`,
+      'i',
+    )
+    const tag = re.exec(html)?.[0]
+    const value = tag && /content\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1]
+    if (value) candidates.push(value)
+  }
+  const ld = /"datePublished"\s*:\s*"([^"]+)"/.exec(html)?.[1]
+  if (ld) candidates.splice(2, 0, ld)
+  const time = /<time\b[^>]*\bdatetime\s*=\s*["']([^"']+)["']/i.exec(html)?.[1]
+  if (time) candidates.push(time)
+
+  for (const raw of candidates) {
+    const iso = isoDate(raw)
+    if (iso) return iso
+  }
+  return ''
+}
+
+/** '2026-03-02T10:00Z', '2022/5/10', 'May 10, 2022' → 'YYYY-MM-DD'; '' for anything else. */
+function isoDate(raw) {
+  const s = String(raw ?? '').trim()
+  const m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/.exec(s)
+  // Otherwise it needs a month name as well as a year — "2022" alone is not a date.
+  const t = m || !/[a-z]{3}/i.test(s) || !/\d{4}/.test(s) ? null : new Date(s)
+  if (!m && (!t || Number.isNaN(t.getTime()))) return ''
+  const [y, mo, d] = m
+    ? [Number(m[1]), Number(m[2]), Number(m[3])]
+    : [t.getFullYear(), t.getMonth() + 1, t.getDate()]
+  if (y < 1900 || mo < 1 || mo > 12 || d < 1 || d > 31) return ''
+  // A date in the future is a template placeholder or a timezone accident.
+  if (Date.UTC(y, mo - 1, d) > Date.now() + 2 * 86_400_000) return ''
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+}
+
+/**
+ * The article in a page, as text a model can read (research.mjs).
+ *
+ * The same extraction as the reading view — one implementation, so what the
+ * research agent reads is what the owner sees when they open the source — but
+ * as plain text with a blank line between blocks, so passages can be ranked
+ * and quotes checked against it. Nothing here is ever rendered as HTML.
+ *
+ * @returns {{ title: string, text: string, published: string, author: string, site: string }}
+ */
+export function readArticle(html, url) {
+  const raw = String(html ?? '')
+  const body = articleBody(stripDangerous(raw))
+  const host = (() => {
+    try {
+      return new URL(url).hostname.replace(/^www\./, '')
+    } catch {
+      return ''
+    }
+  })()
+  const author =
+    metaContent(raw, ['author', 'article:author', 'parsely-author', 'sailthru.author', 'dc.creator', 'citation_author']) ||
+    textOf(/"author"\s*:\s*(?:\[\s*)?\{[^{}]*?"name"\s*:\s*"([^"]+)"/.exec(raw)?.[1] ?? '')
+  return {
+    title: titleOf(raw).slice(0, 300),
+    text: readableParts(body).join('\n\n'),
+    published: publishedOf(raw),
+    author: author.slice(0, 120),
+    site: metaContent(raw, ['og:site_name', 'application-name']).slice(0, 120) || host,
+  }
 }
 
 /** Absolute-ise a URL found in the document against the page it came from. */

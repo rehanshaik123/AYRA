@@ -314,6 +314,44 @@ everyday sites in "Chrome (AYRA)".
       and a restart (6.5).
 - [ ] 6.5 🧑 Demo: jobs from the phone with the lid closed.
 
+## Research agent (event demo, 2026-10-07) · branch `research-agent`
+
+**Goal:** "AYRA, research <question>" → a full-screen live board on the HUD shows the agent plan,
+search, read, pull quoted evidence, cross-check and answer with numbered citations and a confidence
+score; she says the verdict in a sentence or two. The same from Telegram (the report as text, with
+its sources) and from the terminal (`npm run research -- "question"`).
+
+**Why:** the owner's college "Legacy to Modern" challenge, PS 1 — "Search Engine → AI Research Agent:
+search, compare, verify sources, and generate a reliable summarized answer". Judges will ask about
+feasibility, cost, safety and offline use.
+
+**Architecture:** code, not a model, runs the control flow (`bridge/research.mjs`): plan → search →
+read → extract → cross-check → answer. Each model step is a one-shot Claude agent on the owner's Pro
+login with a narrow job and a fixed output schema; the workers use `AYRA_RESEARCH_MODEL` (Sonnet),
+the answer uses `AYRA_MODEL`. Ranking, page reading (through `net.mjs`), the injection scan, the
+quote check and the confidence maths are plain code (`bridge/trust.mjs`). Agents that read page
+text have no tools, so an injection in a page cannot act; the searcher has WebSearch only. At most
+10 Claude calls and 4 minutes a run, one run at a time; Esc or `/stop` ends it. Every report is kept
+in `data/research/`: the same question within 12 hours replays it, and with no web it falls back to
+the closest saved one, marked offline.
+
+- [ ] R.1 Engine: `bridge/research.mjs` — the pipeline, live board state, limits, kill switch, audit
+      line, cache replay and offline fallback; tool server `ayra_research` (`research`,
+      `recent_research`). Check: a fake-agent run ends `done` with numbered sources and a cited answer.
+- [ ] R.2 Trust & verification: `bridge/trust.mjs` — source kind and prior trust, domain diversity,
+      injection scan, every quote checked against its page, fact status and confidence.
+      Check: `test/trust.test.mjs` covers every export.
+- [ ] R.3 HUD board: `src/ui/Research.tsx`, `src/lib/research.ts`, a `research` blade — pipeline strip,
+      sources with trust bars, streaming answer with citation chips, evidence, gaps, metrics.
+      Check: the board renders a live run; `npm run build` and `npm run lint` clean.
+- [ ] R.4 Wiring: the gate allows `ayra_research` (reads only), the persona knows when to use it, the
+      HUD, Telegram and job conversations get it, the kill switch stops it.
+      Check: gate test passes; the tool shows in the HUD's systems list.
+- [ ] R.5 CLI + tests: `npm run research -- "question"`, `test/research.test.mjs` (pipeline, quote drop,
+      injection, cache, offline, stop, call limit). Check: `npm test` passes.
+- [ ] R.6 Live demo + timings: three real questions on the HUD (one contested), one from Telegram,
+      one replayed offline; time to the board and to the verdict in PROGRESS.md.
+
 ## Phase 7 — Apps, one at a time · branch `phase-7-apps`
 
 **Goal:** AYRA reads Gmail, Google Calendar and Google Drive again, then Notion — each added as its

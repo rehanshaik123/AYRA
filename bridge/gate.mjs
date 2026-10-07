@@ -442,6 +442,13 @@ export function createGate({ allowWrites, laptop = false, connectors = DEFAULT_C
       // offered with writes on.
       if (server === 'ayra_jobs') return true
 
+      // The research agent (research.mjs): it searches and reads the web —
+      // every page through net.mjs — and changes nothing. The agents that read
+      // page text have no tools at all, so an injection in a page cannot act,
+      // and what comes back is framed as data. Named here because `research`
+      // is neither a read nor a write verb to the rules below.
+      if (server === 'ayra_research') return true
+
       const tool = mcpToolOf(name)
       if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {
         return allowWrites

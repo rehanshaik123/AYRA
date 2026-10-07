@@ -71,6 +71,7 @@ npm run smoke          # one real end-to-end turn; needs a running bridge
 npm run bench          # times five standard questions (first word, done); needs a running bridge
 npm run demo           # eleven real tasks (web, Chrome, apps, files, asks, job) → data/demo/<time>/; acts on the laptop
 npm run bridge:test    # a test copy of the bridge: port 8788, Telegram off
+npm run research -- "question"   # the research agent in the terminal: stages live, cited answer; real Claude calls
 npm test               # unit tests (gate, wake phrase, identity, avatar, …)
 ```
 
@@ -104,6 +105,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/apps.mjs` · `bridge/apps.ps1` | Tool server `ayra_apps`: her Windows apps through UI Automation · the PowerShell worker behind it (ASCII only) |
 | `bridge/allowances.mjs` · `bridge/rules.mjs` | "Always allow here": standing allowances for sending/posting on one site or in one app — only the owner's button adds one · tool server `ayra_rules` (list, take back; no add) |
 | `bridge/jobs.mjs` · `bridge/presence.mjs` | Background jobs — one at a time, 30 min / 60 steps, reported on Telegram; tool server `ayra_jobs` · "I'm back" on Telegram after the laptop was off or asleep |
+| `bridge/research.mjs` · `bridge/trust.mjs` | **The research agent**: `createResearch()` → `run / interrupt / busy / recent / report`; code runs plan → search → read → extract → cross-check → answer with one-shot Claude agents (readers get no tools), reports saved in `data/research/` for replay and offline; tool server `ayra_research` · pure: source trust, injection scan, quote check, confidence |
 | `bridge/approvals.mjs` | The owner's Approve: holds each "ask" until the first answer (HUD, voice, Telegram) or 2 min → no; `halt()` is the kill switch |
 | `bridge/listen.mjs` | Live hearing: relays the face's microphone stream (`/listen` socket) to ElevenLabs Scribe Realtime and the words back |
 | `bridge/face.mjs` | Serves the built face (`dist/`) on 127.0.0.1:5173 in daily use — no dev server |
@@ -116,9 +118,10 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `src/lib/tts.ts` · `fillers.ts` · `vocative.ts` · `sfx.ts` | Speaking (ElevenLabs, browser voice as fallback) · short "On it!" lines · the comma before "boss" · synthesised interface beeps |
 | `src/ui/Avatar.tsx` · `src/ui/avatar.css` · `src/lib/avatar.ts` | **The avatar face**: the SVG character · her poses and animations · which pose for which phase, lip-sync, blinking |
 | `src/ui/Hud.tsx` · `Blades.tsx` · `sanitise.ts` | The HUD chrome and transcript · the blades (the one surface for results) · the sanitiser for model-written HTML |
+| `src/ui/Research.tsx` · `src/lib/research.ts` | The research board — a full-screen `research` blade, updated live · its types (the board state) and pure helpers |
 | `src/ui/Boot.tsx` · `Ignition.tsx` · `Diagnostics.tsx` · `Suggestions.tsx` | Start-up sequence · INITIALISE button · diagnostics (D) · rotating example questions |
 | `src/store.ts` · `src/index.css` | App state · all styles incl. the `.hud-*` design system blades use |
-| `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` · `bench.mjs` · `demo.mjs` · `bridge-copy.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test · `npm run bench` speed table · `npm run demo` what she can do, live · `npm run bridge:test` |
+| `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` · `bench.mjs` · `demo.mjs` · `bridge-copy.mjs` · `research.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test · `npm run bench` speed table · `npm run demo` what she can do, live · `npm run bridge:test` · `npm run research` |
 | `desktop/ayra.cs` · `desktop/ayra.ico` | **AYRA.exe**, the tray app: starts with Windows, keeps the bridge running hidden, opens her window, Ctrl+Alt+A to talk · her icon. C# 5 (the compiler that ships with Windows) |
 | `scripts/shortcuts.mjs` · `icon.mjs` | `npm run shortcuts`: builds AYRA.exe into `desktop/bin/` (gitignored) with `ayra.ini`, makes the shortcuts · `npm run icon` |
 | `test/*.test.mjs` | Unit tests, run by `npm test` |
@@ -135,7 +138,8 @@ Face ↔ brain protocol (WebSocket): face sends `ask {id,text}`, `interrupt`, `w
 wake a sleeping brain), `approval {id,ok,always}`, `halt`; brain sends `approve {id,reason,detail,tool,always}`
 (`always`: the third button's words, or ''),
 `approved {id,ok,by}`, `halt {by}`,
-`ready {servers}`, `text {delta}`, `tool {name}`, `done {text}`, `error {message}`, `blade` — turn
+`ready {servers}`, `text {delta}`, `tool {name}`, `done {text}`, `error {message}`, `blade` (one with
+`kind: 'research'` carries `research`, the board state — same id each update) — turn
 frames carry `ask: <id>`. Inside the bridge the brain also emits `sources {query, links}`, which the
 HUD channel turns into a `blade`. Change both sides together or not at all. The core ↔ desk link protocol
 will live in `bridge/link.mjs` (Phase 10), and the same rule applies.
@@ -150,7 +154,8 @@ will live in `bridge/link.mjs` (Phase 10), and the same rule applies.
   naps after this long idle, default 10, `FACE_PORT` 5173, `SERVE_FACE`, `ALLOW_WRITES` — `0` turns
   laptop control off, `CHROME_PORT` 9222, `CHROME_PATH`, `HOTKEY` — AYRA.exe's, default `ctrl+alt+a`, `TRUSTED_SITES` — sites she may grant mic /
   camera herself, `TELEGRAM_TOKEN`,
-  `TELEGRAM_OWNER_ID`, `TELEGRAM` — `off` disables it, `CONNECTORS` — default `none`) plus
+  `TELEGRAM_OWNER_ID`, `TELEGRAM` — `off` disables it, `CONNECTORS` — default `none`,
+  `RESEARCH_MODEL` — the research agent's workers, default `claude-sonnet-5-5`) plus
   `ELEVENLABS_API_KEY`. Writes are off in code (`ALLOW_WRITES = false` in server.mjs) until the
   laptop-hands phase. The bridge sets `ENABLE_TOOL_SEARCH=false` for Claude Code (tools load up
   front; measured faster).

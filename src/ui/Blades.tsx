@@ -1,8 +1,9 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useStore, type Blade } from '../store'
 import { BRIDGE_HTTP_URL } from '../config'
 import { sanitisePanelHtml } from './sanitise'
+import { ResearchBoard } from './Research'
 
 /**
  * The blades.
@@ -166,6 +167,12 @@ const Body = memo(function Body({ blade }: { blade: Blade }) {
     )
   }
 
+  // The research agent's live board. Its words come off the open web, so the
+  // board renders them as text — never through the markup path above.
+  if (blade.kind === 'research' && blade.research) {
+    return <ResearchBoard research={blade.research} />
+  }
+
   return <p className="bl-note">Nothing to show.</p>
 })
 
@@ -187,6 +194,7 @@ const KIND_LABEL: Record<Blade['kind'], string> = {
   video: 'video',
   embed: 'video',
   markup: '',
+  research: 'research',
 }
 
 function Card({
@@ -215,9 +223,11 @@ function Card({
 
   // Closing by itself: the clock runs only while nobody is looking at it. A
   // page, a video or a player is something to read or watch, not glance at,
-  // so those never close on their own.
+  // so those never close on their own — nor does a research board, which is
+  // a report the owner is still reading while she speaks the verdict.
   const life = blade.hold === 'sticky' ? STICKY_MS : TURN_MS
-  const lasting = blade.kind === 'article' || blade.kind === 'video' || blade.kind === 'embed'
+  const lasting =
+    blade.kind === 'article' || blade.kind === 'video' || blade.kind === 'embed' || blade.kind === 'research'
   const [hover, setHover] = useState(false)
   const kept = blade.kept === true
   const keepBlade = useStore((s) => s.keepBlade)
@@ -445,6 +455,35 @@ export function Blades() {
 
   const front = ordered[0]
 
+  /**
+   * A research board opens full screen. Docked it would be a 420px strip, and
+   * the board is the subject while a run is on — the plan, the sources, the
+   * evidence. Once per run: if the owner shrinks it (E), updates leave it
+   * shrunk. A layout effect, so the docked frame never paints first.
+   */
+  const boardsSeen = useRef(new Set<string>())
+  useLayoutEffect(() => {
+    for (const b of blades) {
+      if (b.kind !== 'research' || boardsSeen.current.has(b.id)) continue
+      boardsSeen.current.add(b.id)
+      expandBlade(b.id)
+    }
+  }, [blades, expandBlade])
+
+  /**
+   * A source opened from a board is read full screen (Research.tsx gives its
+   * card the id `rd-<research id>-<n>`). Closing that card goes back to the
+   * board rather than to an empty frame; shrinking it (E) does not.
+   */
+  const lastExpanded = useRef<string | null>(null)
+  useEffect(() => {
+    const prev = lastExpanded.current
+    lastExpanded.current = expandedBlade
+    if (expandedBlade || !prev?.startsWith('rd-') || blades.some((b) => b.id === prev)) return
+    const board = blades.find((b) => b.kind === 'research' && prev.startsWith(`rd-${b.id}-`))
+    if (board) expandBlade(board.id)
+  }, [expandedBlade, blades, expandBlade])
+
   // She steps aside while a card is docked beside her (index.css, data-cards).
   useEffect(() => {
     document.documentElement.dataset.cards = blades.length && !expandedBlade ? '1' : '0'
@@ -493,7 +532,11 @@ export function Blades() {
         expandBlade(expandedBlade ? null : (front?.id ?? null))
       } else if (e.key === 'x') {
         e.preventDefault()
-        if (front) closeBlade(front.id)
+        // The card on screen, which while one is full screen is that one — a
+        // research board updating behind a source it opened keeps taking the
+        // focus, and X must not close the board instead of the page.
+        const target = expandedBlade ?? front?.id
+        if (target) closeBlade(target)
       } else if (e.key === ']') {
         e.preventDefault()
         cycle(1)
