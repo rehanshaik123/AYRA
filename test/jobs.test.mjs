@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createJobs, jobBrief, jobsTools, report } from '../bridge/jobs.mjs'
 import { createGate } from '../bridge/gate.mjs'
+import { rankQuery } from '../bridge/triage.mjs'
 
 /** A fake brain conversation the test drives by hand. */
 function rig(options = {}) {
@@ -13,7 +14,7 @@ function rig(options = {}) {
     open: (h) => {
       emit = h.emit
       return {
-        ask: (text, id) => convo.asked.push({ text, id }),
+        ask: (text, id, meta) => convo.asked.push({ text, id, meta }),
         interrupt: () => convo.interrupted++,
         close: () => convo.closed++,
       }
@@ -39,6 +40,20 @@ test('a job starts in its own conversation, is told the whole brief, and reports
   assert.match(told.at(-1), /2 steps/)
   assert.equal(jobs.running(), null)
   assert.match(jobs.status(), /The last one \(done\)/)
+})
+
+test('a job is ranked on its task, not on the brief around it', () => {
+  const { jobs, convo } = rig()
+  jobs.start('research the impact of AI on jobs in India and write it up')
+  const { meta } = convo.asked[0]
+  assert.deepEqual(meta.rank, rankQuery('research the impact of AI on jobs in India and write it up'))
+  assert.equal(meta.rank.level, 'complex')
+  assert.equal(meta.text, 'research the impact of AI on jobs in India and write it up')
+  jobs.stop()
+  const simple = rig()
+  simple.jobs.start('open notepad and type hello')
+  assert.equal(simple.convo.asked[0].meta.rank.level, 'simple')
+  simple.jobs.stop()
 })
 
 test('one at a time, and nothing to do is refused', () => {

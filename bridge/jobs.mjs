@@ -20,6 +20,7 @@
 
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
+import { rankQuery } from './triage.mjs'
 
 export const JOB_LIMITS = { minutes: 30, steps: 60 }
 const PROGRESS_MS = 3 * 60_000
@@ -143,7 +144,9 @@ export function createJobs({ open, tell, limits = JOB_LIMITS, progressMs = PROGR
       store?.set('job', { task: what, started: job.started })
       audit?.log({ type: 'job', id: job.id, outcome: 'started' })
       tell(`🛠️ Started a background job: ${short(what, 300)}\nI'll report back here — /jobs to check, /stop to stop it.`)
-      job.conversation.ask(jobBrief(what), job.id)
+      // Ranked on the task, not the brief: the brief's own long instructions
+      // would say nothing about how deep the task itself goes.
+      job.conversation.ask(jobBrief(what), job.id, { rank: rankQuery(what), text: what })
       return { ok: true, id: job.id }
     },
 

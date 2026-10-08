@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { chunk, fromOwner, startTelegram } from '../bridge/telegram.mjs'
 import { SYSTEM_PROMPT, TEXT_PROMPT } from '../bridge/persona.mjs'
+import { rankQuery } from '../bridge/triage.mjs'
 
 const OWNER = '1300190813'
 
@@ -32,7 +33,7 @@ test('long replies split under the limit, at line breaks when possible', () => {
 })
 
 /** A fake Telegram + brain: one burst of updates, replies recorded, nothing on the network. */
-function harness(updates) {
+function harness(updates, options = {}) {
   const asks = []
   const sent = []
   const logged = []
@@ -40,8 +41,8 @@ function harness(updates) {
   const brain = {
     open({ emit }) {
       return {
-        ask(text, id) {
-          asks.push({ text, id })
+        ask(text, id, meta) {
+          asks.push({ text, id, meta })
           setTimeout(() => emit({ type: 'done', text: `reply ${asks.length}`, ask: id }), 5)
         },
         close() {},
@@ -62,13 +63,60 @@ function harness(updates) {
   const tg = startTelegram({
     token: 'test', ownerId: OWNER, brain, systemPrompt: 'test', request,
     audit: { log: (e) => logged.push(e) },
+    ...options,
   })
   return { asks, sent, logged, stop: () => tg.stop() }
 }
 
-const msg = (id, text, from = 1300190813) => ({
+const msg = (id, text, from = 1300190813, date = Math.floor(Date.now() / 1000)) => ({
   update_id: id,
-  message: { message_id: id, date: Math.floor(Date.now() / 1000), chat: { id: 77, type: 'private' }, from: { id: from }, text },
+  message: { message_id: id, date, chat: { id: 77, type: 'private' }, from: { id: from }, text },
+})
+
+test('each message of a burst is ranked, and the deepest rank goes with the question', async () => {
+  const warmed = []
+  const h = harness(
+    [msg(1, 'hey'), msg(2, 'research the impact of AI on jobs in India'), msg(3, 'thanks')],
+    { onComplex: (rank) => warmed.push(rank) },
+  )
+  await new Promise((r) => setTimeout(r, 120))
+  h.stop()
+  assert.equal(h.asks.length, 1)
+  const { meta } = h.asks[0]
+  assert.deepEqual(meta.rank, rankQuery('research the impact of AI on jobs in India'))
+  assert.equal(meta.rank.level, 'complex')
+  assert.equal(meta.text, 'hey\nresearch the impact of AI on jobs in India\nthanks')
+  // The research planner is started while the brain reads the question.
+  assert.equal(warmed.length, 1)
+})
+
+test('small talk stays simple however many lines it takes, and nothing is warmed', async () => {
+  const warmed = []
+  const h = harness(
+    [msg(1, 'hey ayra'), msg(2, "how's your day going"), msg(3, "lol I'm so bored")],
+    { onComplex: (rank) => warmed.push(rank) },
+  )
+  await new Promise((r) => setTimeout(r, 120))
+  h.stop()
+  assert.equal(h.asks[0].meta.rank.level, 'simple')
+  assert.equal(warmed.length, 0)
+})
+
+test('a message sent while offline is ranked and remembered in the owner\'s words', async () => {
+  const h = harness([msg(1, 'research it', OWNER, Math.floor(Date.now() / 1000) - 3600)])
+  await new Promise((r) => setTimeout(r, 120))
+  h.stop()
+  assert.match(h.asks[0].text, /^\[Sent at .+, while you were offline\]\nresearch it$/)
+  assert.equal(h.asks[0].meta.text, 'research it')
+  assert.equal(h.asks[0].meta.rank.level, 'complex')
+})
+
+test('a warm-up that throws never keeps the question from the brain', async () => {
+  const h = harness([msg(1, 'research it')], { onComplex: () => { throw new Error('boom') } })
+  await new Promise((r) => setTimeout(r, 120))
+  h.stop()
+  assert.equal(h.asks.length, 1)
+  assert.equal(h.sent.length, 1)
 })
 
 test('a burst of messages becomes one question and one reply', async () => {

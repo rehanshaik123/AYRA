@@ -9,12 +9,19 @@
  *   { type: 'ready', servers }            servers this session can use
  *   { type: 'text', delta, ask }          answer text, as it streams
  *   { type: 'tool', name, ask }           a tool that actually ran
+ *   { type: 'sources', query, links, text, ask }  a web search's links and result text
+ *   { type: 'fetched', url, text, ask }   a page WebFetch read
  *   { type: 'done', text, costUsd, ask }  the turn finished
  *   { type: 'error', message, ask }       a plain sentence, safe to speak
  *
  * `ask` echoes the id the channel gave the question. Everything a channel
  * adds of its own — the HUD's display tools — comes in through `servers` when
  * the conversation is opened.
+ *
+ * The channel ranks each question from the owner's own words (triage.mjs) and
+ * passes the rank with it; a complex one gets the ranker's depth line in front,
+ * and `turn()` tells the research tool which question, in whose words, it is
+ * working for.
  *
  * A conversation sleeps when idle: after `sleepMinutes` with no question its
  * Claude process is closed (a few hundred MB back on the owner's laptop) and
@@ -30,6 +37,68 @@ import { stamp } from './context.mjs'
 import { createStore } from './state.mjs'
 import { clip, createAudit } from './audit.mjs'
 import { searchSources } from './sources.mjs'
+import { depthHint } from './triage.mjs'
+
+/**
+ * The user message for one question: the local-time stamp (context.mjs) and,
+ * only for a question the channel ranked complex, the ranker's depth line in
+ * front of it. Anything else is sent exactly as it was before ranking existed,
+ * so the simple path costs nothing new — not even tokens.
+ */
+export function composeMessage(text, rank, now = new Date()) {
+  const hint = depthHint(rank)
+  return hint ? `${hint}\n${stamp(text, now)}` : stamp(text, now)
+}
+
+/**
+ * How much of a web tool's result the channel is handed. Enough for the server
+ * to check a figure on screen against what the search or page really said
+ * (show_data), small enough that a long page doesn't sit in memory per turn.
+ */
+export const RESULT_TEXT_MAX = 20_000
+
+/** A tool_result's content as one string: it comes as a string or as blocks. */
+export function resultText(content) {
+  const text = typeof content === 'string'
+    ? content
+    : Array.isArray(content)
+      ? content.map((b) => (typeof b?.text === 'string' ? b.text : '')).filter(Boolean).join('\n')
+      : ''
+  return text.length > RESULT_TEXT_MAX ? text.slice(0, RESULT_TEXT_MAX) : text
+}
+
+/**
+ * What a finished web tool tells the channel, or null.
+ *
+ *   WebSearch → { type: 'sources', query, links, text } — links from the
+ *               result itself (sources.mjs), never from the model's prose
+ *   WebFetch  → { type: 'fetched', url, text } — only a page that really came
+ *               back: a refusal, an error or a redirect to another host is not
+ *               a source
+ *
+ * The page's URL is the one the model asked for (the tool_use input), which is
+ * what it will name again later; the SDK's structured result is the fallback.
+ *
+ * @param {{ name?: string, input?: object, block: object, structured?: object | null }} result
+ */
+export function webResultEvent({ name, input, block, structured = null }) {
+  if (!block || block.is_error === true) return null
+  if (name === 'WebSearch') {
+    const sources = searchSources(structured, block.content)
+    return sources ? { type: 'sources', ...sources, text: resultText(block.content) } : null
+  }
+  if (name === 'WebFetch') {
+    const code = Number(structured?.code)
+    if (structured?.code != null && !(code >= 200 && code < 300)) return null
+    const url = typeof input?.url === 'string' && input.url.trim()
+      ? input.url.trim()
+      : typeof structured?.url === 'string' ? structured.url.trim() : ''
+    if (!/^https?:\/\//i.test(url)) return null
+    const text = resultText(block.content) || resultText(typeof structured?.result === 'string' ? structured.result : '')
+    return { type: 'fetched', url, text }
+  }
+  return null
+}
 
 /**
  * What to tell the channel when a turn ends badly. Plain sentences, because
@@ -68,11 +137,13 @@ const SETTLE_CAP_MS = 400
  *                  (0 = never); the next question wakes it
  *   approve      — asks the owner about a call the gate marked "ask" (approvals.mjs);
  *                  without one, every such call is declined
+ *   run          — starts a Claude session; the SDK's query(), and a fake in tests
  */
 export function createBrain({
   model, effort, gate, mcpServers,
   store = createStore(), audit = createAudit(), resumeHours = 6, sleepMinutes = 10,
   approve = async () => false,
+  run = query,
 }) {
   /**
    * Open one conversation.
@@ -142,19 +213,20 @@ export function createBrain({
     let busy = false
     let napTimer = null
 
-    /** The input generator for one process: questions in, one at a time. */
+    /** The input generator for one process: questions ({ text, rank }) in, one at a time. */
     async function* userMessages(proc) {
       while (!closed && !proc.done) {
-        const text =
+        const question =
           proc.inbox.shift() ??
           (await new Promise((resolve) => {
             proc.deliver = resolve
           }))
-        if (closed || proc.done || text == null) return
+        if (closed || proc.done || question == null) return
         yield {
           type: 'user',
-          // Stamped with the local time as it is sent — see context.mjs.
-          message: { role: 'user', content: stamp(text) },
+          // Stamped with the local time as it is sent — see context.mjs — and,
+          // for a complex rank only, the ranker's depth line in front.
+          message: { role: 'user', content: composeMessage(question.text, question.rank) },
           parent_tool_use_id: null,
         }
       }
@@ -172,6 +244,13 @@ export function createBrain({
      */
     let answering = null
     let askedAt = 0
+    /**
+     * The question being answered, in the owner's words, with the channel's
+     * rank of it: { ask, rank, text }, null before the first. The research tool
+     * reads it to admit a run on the owner's words rather than the model's
+     * restatement, and the HUD tags its cards with `ask`.
+     */
+    let current = null
     const emitTurn = (event) => {
       emit({ ...event, ask: answering })
       if (event.type === 'tool') audit.log({ type: 'tool', channel, ask: answering, name: event.name })
@@ -209,6 +288,9 @@ export function createBrain({
     const heldTools = new Map()
     // Every tool call's name by id, so a result can be told apart (sources).
     const toolNames = new Map()
+    // Every tool call's input by id, from the completed assistant message — a
+    // page's result does not always say which URL was asked for.
+    const toolInputs = new Map()
 
     const announceTool = (id, name) => {
       if (!name || (id && seenTools.has(id))) return
@@ -216,8 +298,9 @@ export function createBrain({
       if (id) toolNames.set(id, name)
       // The display tool isn't work being done, it's the HUD drawing itself —
       // announcing it would put "ayra · display" in the tool badge and trigger
-      // a "working on it" filler for something already on screen.
-      if (name === 'mcp__ayra__display') return
+      // a "working on it" filler for something already on screen. show_data is
+      // the same: the answer's card, drawn after she has said it.
+      if (name === 'mcp__ayra__display' || name === 'mcp__ayra__show_data') return
       // The ui_* tools are the same case one step further: retinting the
       // interface is the interface talking about itself, not work being done
       // for the user, and the badge would be describing what they can see.
@@ -261,7 +344,7 @@ export function createBrain({
     /** Start a Claude process — at open, and again when a question wakes a nap. */
     const wake = (resumeId) => {
       const proc = { inbox: [], deliver: null, done: false, napping: false, started: false, resumeId }
-      proc.session = query({
+      proc.session = run({
         prompt: userMessages(proc),
         options: {
           // Continue the channel's last conversation, when there is a recent one.
@@ -429,6 +512,9 @@ export function createBrain({
               // than partial events. Deduped against the stream_event path.
               for (const block of msg.content ?? msg.message?.content ?? []) {
                 if (block.type === 'tool_use') {
+                  // Only the completed message carries the whole input; the
+                  // stream's block start has it empty.
+                  if (block.id && block.input && typeof block.input === 'object') toolInputs.set(block.id, block.input)
                   announceTool(block.id, block.name)
                 }
               }
@@ -442,16 +528,21 @@ export function createBrain({
               // ran.
               const blocks = msg.message?.content
               if (!Array.isArray(blocks)) break
-              for (const block of blocks) {
-                if (block?.type === 'tool_result') {
-                  settleTool(block.tool_use_id, block.is_error === true)
-                  // A web search's links, for the channel to show at once
-                  // (sources.mjs). Channels that can't show them ignore it.
-                  if (toolNames.get(block.tool_use_id) === 'WebSearch' && !block.is_error) {
-                    const sources = searchSources(msg.tool_use_result, block.content)
-                    if (sources) emitTurn({ type: 'sources', ...sources })
-                  }
-                }
+              // The SDK's structured result describes the message, so it can
+              // only be trusted for a block when that block is the only result.
+              const results = blocks.filter((b) => b?.type === 'tool_result')
+              for (const block of results) {
+                settleTool(block.tool_use_id, block.is_error === true)
+                // A web search's links and text, or a page that was read, for
+                // the channel's sources card and its number check
+                // (server.mjs). Channels that can't show them ignore them.
+                const event = webResultEvent({
+                  name: toolNames.get(block.tool_use_id),
+                  input: toolInputs.get(block.tool_use_id),
+                  block,
+                  structured: results.length === 1 ? msg.tool_use_result : null,
+                })
+                if (event) emitTurn(event)
               }
               break
             }
@@ -514,6 +605,7 @@ export function createBrain({
               seenTools.clear()
               heldTools.clear()
               toolNames.clear()
+              toolInputs.clear()
               busy = false
               if (resumeFailed) {
                 // Nothing more can happen in this session. Forget it and end,
@@ -588,25 +680,42 @@ export function createBrain({
        *
        * Waiting costs nothing when nothing is interrupting — the chain is an
        * already-resolved promise — and removes the cross-talk when there is.
+       *
+       * `meta.rank` is the channel's rankQuery of the owner's own words
+       * (triage.mjs): a complex one puts the depth line in front of the
+       * question. `meta.text` is those words when `text` is not them — a job
+       * asks with its whole brief — so turn() names what the owner asked.
        */
-      ask(text, id = null) {
+      ask(text, id = null, meta = {}) {
+        const rank = meta?.rank ?? null
+        const words = typeof meta?.text === 'string' ? meta.text : text
         void settling.then(() => {
           if (closed) return
           answering = id
+          current = { ask: id, rank, text: words }
           askedAt = Date.now()
-          audit.log({ type: 'question', channel, ask: id, text: clip(text) })
+          audit.log({
+            type: 'question', channel, ask: id, text: clip(text),
+            ...(rank ? { depth: rank.score, level: rank.level } : {}),
+          })
           busy = true
           clearTimeout(napTimer)
           // Asleep: wake on the same conversation.
           const proc = live ?? wake(lastSession)
+          const question = { text, rank }
           if (proc.deliver) {
             const resolve = proc.deliver
             proc.deliver = null
-            resolve(text)
+            resolve(question)
           } else {
-            proc.inbox.push(text)
+            proc.inbox.push(question)
           }
         })
+      },
+
+      /** The question being answered: { ask, rank, text } (the owner's words), or null before the first. */
+      turn() {
+        return current
       },
 
       /**

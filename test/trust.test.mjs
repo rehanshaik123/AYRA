@@ -2,8 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  classifySource, confidenceLabel, factConfidence, independent, normalise, overallConfidence, questionKey,
-  registrableDomain, sameQuestion, scanInjection, scoreSource, verifyQuote,
+  classifySource, confidenceLabel, factConfidence, independent, normalise, numbersIn, overallConfidence, questionKey,
+  registrableDomain, sameFact, sameQuestion, scanInjection, scoreSource, supportsNumbers, verifyQuote,
 } from '../bridge/trust.mjs'
 
 test('registrableDomain: www and subdomains go, two-level suffixes stay', () => {
@@ -259,4 +259,115 @@ test('questionKey and sameQuestion: the same question however it is asked', () =
   assert.ok(sameQuestion(a, 'Who won the 2026 cricket world cup?') < 0.2)
   assert.equal(sameQuestion('what is it', 'what is it'), 0)
   assert.equal(questionKey('What is it?'), '')
+})
+
+test('numbersIn: Indian and Western grouping, decimals kept, trailing zeros only after a point', () => {
+  assert.deepEqual(numbersIn('Gold: ₹1,23,450 per 10 g'), [{ value: 123450, raw: '1,23,450' }, { value: 10, raw: '10' }])
+  assert.deepEqual(numbersIn('123,450'), [{ value: 123450, raw: '123,450' }])
+  assert.deepEqual(numbersIn('$2,345.60'), [{ value: 2345.6, raw: '2,345.60' }])
+  assert.deepEqual(numbersIn('2300 and 5.0'), [{ value: 2300, raw: '2300' }, { value: 5, raw: '5.0' }])
+  // A comma after a number is punctuation, not part of it.
+  assert.deepEqual(numbersIn('rose 100, then fell'), [{ value: 100, raw: '100' }])
+  assert.deepEqual(numbersIn('no digits here'), [])
+  assert.deepEqual(numbersIn(null), [])
+})
+
+test('numbersIn: scale words multiply, and a % stays in the raw', () => {
+  const one = (text) => numbersIn(text)[0]
+  assert.deepEqual(one('₹2.5 lakh'), { value: 250000, raw: '2.5 lakh' })
+  assert.deepEqual(one('3 lakhs'), { value: 300000, raw: '3 lakhs' })
+  assert.deepEqual(one('4 lac'), { value: 400000, raw: '4 lac' })
+  assert.deepEqual(one('₹4,000 crore'), { value: 4e10, raw: '4,000 crore' })
+  assert.deepEqual(one('Rs 5cr'), { value: 5e7, raw: '5cr' })
+  assert.deepEqual(one('1.2 million'), { value: 1.2e6, raw: '1.2 million' })
+  assert.deepEqual(one('7 mn'), { value: 7e6, raw: '7 mn' })
+  assert.deepEqual(one('$3bn'), { value: 3e9, raw: '3bn' })
+  assert.deepEqual(one('2 billion'), { value: 2e9, raw: '2 billion' })
+  assert.deepEqual(one('1.5 trillion'), { value: 1.5e12, raw: '1.5 trillion' })
+  assert.deepEqual(one('$1 tn'), { value: 1e12, raw: '1 tn' })
+  assert.deepEqual(one('10k steps'), { value: 10000, raw: '10k' })
+  assert.deepEqual(one('5 thousand'), { value: 5000, raw: '5 thousand' })
+  assert.deepEqual(one('6.2%'), { value: 6.2, raw: '6.2%' })
+  assert.deepEqual(one('up 3 %'), { value: 3, raw: '3 %' })
+  // "m" is a million only after money; otherwise it is likelier metres.
+  assert.deepEqual(one('$5m'), { value: 5e6, raw: '5m' })
+  assert.deepEqual(one('Rs. 3 m'), { value: 3e6, raw: '3 m' })
+  assert.deepEqual(one('ran 5 m'), { value: 5, raw: '5' })
+  // A unit that merely starts with a scale letter is not one.
+  assert.deepEqual(one('5 km'), { value: 5, raw: '5' })
+  assert.deepEqual(one('10 kg'), { value: 10, raw: '10' })
+})
+
+test('supportsNumbers: the same value however it is grouped or padded', () => {
+  assert.deepEqual(supportsNumbers('₹1,23,450', 'Gold closed at ₹123450 for 10 grams.'), { ok: true, missing: [] })
+  assert.deepEqual(supportsNumbers('123,450', 'Rate: 1,23,450 rupees'), { ok: true, missing: [] })
+  assert.deepEqual(supportsNumbers('2,345.60', 'the index ended at 2345.6'), { ok: true, missing: [] })
+  assert.deepEqual(supportsNumbers('2345.6', 'the index ended at 2,345.600'), { ok: true, missing: [] })
+  assert.deepEqual(supportsNumbers('5', 'it was 5.00 exactly'), { ok: true, missing: [] })
+  // A % is kept in the raw but matched by value.
+  assert.deepEqual(supportsNumbers('6.2%', 'inflation was 6.2 per cent'), { ok: true, missing: [] })
+  assert.deepEqual(supportsNumbers('6.2%', 'inflation was 6.25%'), { ok: false, missing: ['6.2%'] })
+})
+
+test('supportsNumbers: lakh, crore, million and billion agree within 0.5 %', () => {
+  assert.equal(supportsNumbers('₹1.23 lakh', 'gold is ₹1,23,450').ok, true)
+  assert.equal(supportsNumbers('₹1,23,450', 'gold is about ₹1.23 lakh').ok, true)
+  assert.equal(supportsNumbers('₹4,000 crore', 'a ₹40 billion deal').ok, true)
+  assert.equal(supportsNumbers('$2.5 billion', 'a $2,500 million round').ok, true)
+  assert.equal(supportsNumbers('1.2 million', '1,203,000 people').ok, true)
+  assert.equal(supportsNumbers('1.2 million', '1,250,000 people').ok, false)
+  assert.equal(supportsNumbers('2 crore', '2.5 crore').ok, false)
+  // Without a scale word on either side, near is not equal.
+  assert.equal(supportsNumbers('123000', 'gold is 123450').ok, false)
+  // A bare figure whose unit is written apart is still the page's figure...
+  assert.equal(supportsNumbers('1.23', 'gold is ₹1.23 lakh').ok, true)
+  // ...but a scale word the page does not give is not.
+  assert.equal(supportsNumbers('1.23 lakh', 'gold is 1.23').ok, false)
+})
+
+test('supportsNumbers: whole tokens only, never a piece of a year or a date', () => {
+  assert.deepEqual(supportsNumbers('12', 'in 2012 the rate rose'), { ok: false, missing: ['12'] })
+  assert.deepEqual(supportsNumbers('2612', 'published 7 October 2026'), { ok: false, missing: ['2612'] })
+  assert.equal(supportsNumbers('2026', 'published 7 October 2026').ok, true)
+  assert.equal(supportsNumbers('12', 'about 12.5 kg').ok, false)
+  // Every number must be there.
+  assert.deepEqual(supportsNumbers('69,104 (up 312)', 'Sensex 69,104, up 213'), { ok: false, missing: ['312'] })
+  assert.deepEqual(supportsNumbers('', ''), { ok: true, missing: [] })
+})
+
+test('supportsNumbers: a value with no digits has nothing to check', () => {
+  assert.deepEqual(supportsNumbers('Yes', 'no numbers here'), { ok: true, missing: [] })
+  assert.deepEqual(supportsNumbers('India', ''), { ok: true, missing: [] })
+  assert.deepEqual(supportsNumbers(undefined, 'x'), { ok: true, missing: [] })
+})
+
+test('sameFact: near-identical wording merges', () => {
+  assert.equal(sameFact('Gold prices rose 2% in September 2026.', 'gold prices rose 2% in September 2026'), true)
+  assert.equal(sameFact('The price of gold hit a record high in October', 'Price of gold hit a record high in October'), true)
+  assert.equal(sameFact('Gold is ₹1,23,450 per 10 grams in Mumbai', 'Gold is ₹123450 per 10 grams in Mumbai'), true)
+  assert.equal(sameFact({ text: 'Coffee is a mild diuretic', support: [1] }, { text: 'Coffee is a mild diuretic.', support: [2] }), true)
+})
+
+test('sameFact: a negation, a direction or a number that differs never merges', () => {
+  assert.equal(sameFact('Coffee does cause dehydration', 'Coffee does not cause dehydration'), false)
+  assert.equal(sameFact('Coffee does cause dehydration', 'Coffee doesn’t cause dehydration'), false)
+  assert.equal(sameFact('Trials found a benefit with fasting', 'Trials found no benefit with fasting'), false)
+  assert.equal(sameFact('Gold rose 2% in September', 'Gold fell 2% in September'), false)
+  assert.equal(sameFact('Electric cars cost more to buy in India', 'Electric cars cost less to buy in India'), false)
+  assert.equal(sameFact('Gold rose 2% in September', 'Gold rose 3% in September'), false)
+  assert.equal(sameFact('Sales were 1.2 million in 2025', 'Sales were 1.2 million in 2024'), false)
+})
+
+test('sameFact: never when one is contradicted by the other’s sources', () => {
+  const a = { text: 'Coffee is a mild diuretic', support: [1], contradict: [] }
+  const b = { text: 'Coffee is a mild diuretic', support: [2], contradict: [1] }
+  assert.equal(sameFact(a, b), false)
+  assert.equal(sameFact(b, a), false)
+  assert.equal(sameFact({ ...a, contradict: [3] }, { ...b, contradict: [] }), true)
+})
+
+test('sameFact: different facts stay apart, and empty text is never a match', () => {
+  assert.equal(sameFact('Gold hit a record high in October', 'Silver hit a record high in October'), false)
+  assert.equal(sameFact('', ''), false)
+  assert.equal(sameFact(null, undefined), false)
 })

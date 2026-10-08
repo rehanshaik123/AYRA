@@ -22,6 +22,7 @@
 import { formatRules } from './rules.mjs'
 import { describe } from './allowances.mjs'
 import { localTime } from './context.mjs'
+import { rankQuery } from './triage.mjs'
 
 const API = 'https://api.telegram.org'
 
@@ -70,13 +71,15 @@ export const fromOwner = (message, ownerId) =>
  *           systemPrompt: string, servers?: Record<string, object>,
  *           audit: ReturnType<import('./audit.mjs').createAudit>,
  *           approvals?: ReturnType<import('./approvals.mjs').createApprovals>,
- *           onHalt?: () => void,
+ *           onHalt?: () => void, onComplex?: (rank: object) => void,
  *           request?: (method: string, body?: object, timeoutMs?: number) => Promise<any> }} options
  *   approvals — the shared Approve requests: shown here with Yes / No buttons
  *   onHalt    — the kill switch, for `/stop`
+ *   onComplex — a question ranked complex is on its way to the brain (server.mjs:
+ *               start the research planner now, so the research skips its start-up)
  *   request   — how Bot API calls are made; tests pass a fake, the bridge uses the real API
  */
-export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {}, audit, approvals, allowances, jobs, onHalt, request }) {
+export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {}, audit, approvals, allowances, jobs, onHalt, onComplex, request }) {
   const call = request ?? botApi
 
   async function botApi(method, body, timeoutMs = 15_000) {
@@ -137,7 +140,24 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
     const id = `tg-${last.messageId}`
     typing(last.chatId)
     turn = { id, chatId: last.chatId, text: '', typing: setInterval(() => typing(last.chatId), TYPING_EVERY_MS) }
-    ensureConversation().ask(batch.map((m) => m.text).join('\n'), id)
+    // Each message is ranked on its own and the deepest wins: "hey" then
+    // "research the impact of AI on jobs" is a research question, and three
+    // lines of small talk joined together must not add up to one.
+    const rank = batch
+      .map((m) => rankQuery(m.words))
+      .reduce((deepest, r) => (r.score > deepest.score ? r : deepest))
+    // A warm-up only: whatever goes wrong there, the question still goes.
+    if (rank.level === 'complex') {
+      try {
+        onComplex?.(rank)
+      } catch (err) {
+        console.warn(`[ayra] telegram: research warm-up failed — ${err?.message ?? err}`)
+      }
+    }
+    ensureConversation().ask(batch.map((m) => m.text).join('\n'), id, {
+      rank,
+      text: batch.map((m) => m.words).join('\n'),
+    })
   }
 
   function finish(text) {
@@ -262,6 +282,8 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
       return
     }
     if (text === '/start') text = 'Hi!'
+    // The owner's own words, ranked and remembered as they wrote them.
+    const words = text
     // Answered late because the laptop was off or asleep: say so, so "remind
     // me in five minutes" isn't taken as five minutes from now.
     const age = Date.now() / 1000 - message.date
@@ -270,7 +292,7 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
     }
     // Queued, not asked: the poll loop calls next() once the whole batch of
     // updates is in, so a burst of messages becomes one question.
-    waiting.push({ chatId, messageId: message.message_id, text })
+    waiting.push({ chatId, messageId: message.message_id, text, words })
   }
 
   let stopped = false
