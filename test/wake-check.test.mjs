@@ -54,6 +54,61 @@ test('the hourly cap: checks stop, the face hears once, and they resume after th
   assert.equal(calls, 3)
 })
 
+test('a burst from the speakers: no check, not counted, nothing for the face, one log line', async () => {
+  const client = fakeClient()
+  const heard = []
+  const judged = []
+  const logs = []
+  const checks = []
+  const owner = Buffer.alloc(3200, 1)
+  const video = Buffer.alloc(3200, 2)
+  const speakers = {
+    judge: (pcm, at) => {
+      judged.push(at)
+      return pcm[0] === 2
+        ? { fromSpeakers: true, corr: 0.823, active: 0.9, why: 'speakers' }
+        : { fromSpeakers: false, corr: 0.1, active: 0.9, why: 'a different sound' }
+    },
+  }
+  relayWake(client, {
+    key: 'k',
+    perHour: 1,
+    checks,
+    now: () => 1_800_000_000_000,
+    log: (m) => logs.push(m),
+    speakers,
+    transcribe: async (pcm) => (heard.push(pcm[0]), 'Hey AYRA'),
+  })
+  client.emit('message', video, true)
+  client.emit('message', video, true)
+  // The cap is one an hour: the owner still gets theirs after two speaker bursts.
+  client.emit('message', owner, true)
+  await flush()
+  assert.deepEqual(heard, [1])
+  assert.equal(checks.length, 1)
+  assert.deepEqual(judged, [1_800_000_000_000, 1_800_000_000_000, 1_800_000_000_000])
+  assert.deepEqual(client.sent, [{ type: 'ready' }, { type: 'heard', text: 'Hey AYRA' }])
+  assert.equal(logs.length, 2)
+  assert.match(logs[0], /^\[ayra\] wake: that burst came from the speakers \(corr 0\.82\) — ignored$/)
+})
+
+test('a speaker judge that fails, or has no verdict, never costs the owner a check', async () => {
+  const client = fakeClient()
+  let calls = 0
+  const broken = () => {
+    throw new Error('meter broke')
+  }
+  const verdicts = [broken, () => undefined, () => ({ fromSpeakers: false, corr: 0, why: 'no meter' })]
+  relayWake(client, {
+    key: 'k',
+    speakers: { judge: () => verdicts.shift()() },
+    transcribe: async () => (calls++, ''),
+  })
+  for (let i = 0; i < 3; i++) client.emit('message', Buffer.alloc(3200), true)
+  await flush()
+  assert.equal(calls, 3)
+})
+
 test('without the ElevenLabs key, hands-free says so and closes', () => {
   const client = fakeClient()
   relayWake(client, { key: null })

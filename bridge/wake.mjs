@@ -13,6 +13,9 @@
  *   - the face's own speech detector (listen-worklet.js) sends only a short
  *     burst — at most CLIP_MS — of speech that began after a quiet moment;
  *   - sound that hardly stops (music, a video, a call) is never sent at all;
+ *   - a burst that came out of the laptop's own speakers (a video's voice
+ *     after a pause, an app, a TTS voice) is dropped here, before the cap and
+ *     before Scribe — bridge/echo.mjs compares it with the speakers' meter;
  *   - at most `perHour` checks an hour (AYRA_WAKE_CHECKS_PER_HOUR, default 120).
  *
  * The words go back to the face, and wake.ts (the one place her name and its
@@ -73,11 +76,15 @@ export async function scribe(pcm, { key, language = 'en', keyterms = [], fetchIm
  *
  * @param {{ send: (d: string) => void, on: Function, close: () => void, readyState: number, OPEN: number }} client
  * @param {{ key: string | null, transcribe?: (pcm: Uint8Array) => Promise<string>,
- *           perHour?: number, now?: () => number, log?: (m: string) => void, onAudio?: (pcm: Uint8Array) => void }} options
+ *           perHour?: number, now?: () => number, log?: (m: string) => void, onAudio?: (pcm: Uint8Array) => void,
+ *           speakers?: { judge: (pcm: Uint8Array, arrivedAt: number) => { fromSpeakers: boolean, corr: number } } }} options
  *   transcribe — injected so tests needn't call ElevenLabs
  *   onAudio    — sees each burst (data/logs/wake.pcm when recording is on)
+ *   speakers   — the speaker meter (echo.mjs createSpeakerMeter); `now` must be
+ *                epoch ms when it is given, since the judge lines the burst up
+ *                with the meter by its arrival time
  */
-export function relayWake(client, { key, keyterms = [], language = 'en', transcribe, perHour = PER_HOUR, now = Date.now, log = () => {}, onAudio, checks = [] }) {
+export function relayWake(client, { key, keyterms = [], language = 'en', transcribe, perHour = PER_HOUR, now = Date.now, log = () => {}, onAudio, checks = [], speakers }) {
   const toFace = (msg) => {
     if (client.readyState === client.OPEN) client.send(JSON.stringify(msg))
   }
@@ -87,12 +94,30 @@ export function relayWake(client, { key, keyterms = [], language = 'en', transcr
     return
   }
   const hear = transcribe ?? ((pcm) => scribe(pcm, { key, keyterms, language }))
+  /**
+   * Did this burst come out of the laptop's speakers? Then it is nobody
+   * calling her: no check, nothing counted, nothing for the face. Any doubt or
+   * error and it is the owner's (echo.mjs fails open too).
+   */
+  const fromSpeakers = (pcm, t) => {
+    if (!speakers) return false
+    let verdict
+    try {
+      verdict = speakers.judge(pcm, t)
+    } catch {
+      return false
+    }
+    if (!verdict?.fromSpeakers) return false
+    log(`[ayra] wake: that burst came from the speakers (corr ${Number(verdict.corr).toFixed(2)}) — ignored`)
+    return true
+  }
   toFace({ type: 'ready' })
   let warned = false
   client.on('message', async (data, isBinary) => {
     if (!isBinary) return
     onAudio?.(data)
     const t = now()
+    if (fromSpeakers(data, t)) return
     // The hourly cap, shared by every open face (`checks` is the bridge's list).
     while (checks.length && t - checks[0] > 3_600_000) checks.shift()
     if (checks.length >= perHour) {
