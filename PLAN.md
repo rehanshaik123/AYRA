@@ -314,43 +314,56 @@ everyday sites in "Chrome (AYRA)".
       and a restart (6.5).
 - [ ] 6.5 🧑 Demo: jobs from the phone with the lid closed.
 
-## Research agent (event demo, 2026-10-07) · branch `research-agent`
+## Research agent · branch `research-agent` (redesigned 2026-10-08 to the owner's spec)
 
-**Goal:** "AYRA, research <question>" → a full-screen live board on the HUD shows the agent plan,
-search, read, pull quoted evidence, cross-check and answer with numbered citations and a confidence
-score; she says the verdict in a sentence or two. The same from Telegram (the report as text, with
-its sources) and from the terminal (`npm run research -- "question"`).
+**Goal (the owner):** "rank my queries" — simple ones get one quick search (no extra tokens); a
+clearly complex one is split into 3–4 parts, one sub-agent per part searches and reports, a reviewer
+scores, removes duplicates and checks relevance to the original question. On screen: exactly two
+result cards — a **data card** (the figure itself: "price of gold" shows a number) and a **sources
+card** (only the sources used, clickable) — on every web answer, research or not; a small progress
+card while research runs.
 
-**Why:** the owner's college "Legacy to Modern" challenge, PS 1 — "Search Engine → AI Research Agent:
-search, compare, verify sources, and generate a reliable summarized answer". Judges will ask about
-feasibility, cost, safety and offline use.
+**Architecture:** `bridge/triage.mjs` ranks the owner's own words in code (0–10, no model call);
+only *complex* questions carry a depth line to the brain and are admitted by the `research` tool.
+`bridge/research.mjs`: rank → split (planner) → per part, all at once: search agent → pages read in
+code (net.mjs, injection scan) → report agent (exact quotes) → review (main model: relevance,
+duplicates, data) → code checks every figure against the page (`trust.mjs` numbersIn /
+supportsNumbers, sameFact). At most 10 Claude calls, 180 s. Ordinary web answers: `show_data`
+(panels.mjs) after she speaks, numbers checked against the search results; the bridge emits the one
+sources card per turn (sources.mjs).
 
-**Architecture:** code, not a model, runs the control flow (`bridge/research.mjs`): plan → search →
-read → extract → cross-check → answer. Each model step is a one-shot Claude agent on the owner's Pro
-login with a narrow job and a fixed output schema; the workers use `AYRA_RESEARCH_MODEL` (Sonnet),
-the answer uses `AYRA_MODEL`. Ranking, page reading (through `net.mjs`), the injection scan, the
-quote check and the confidence maths are plain code (`bridge/trust.mjs`). Agents that read page
-text have no tools, so an injection in a page cannot act; the searcher has WebSearch only. At most
-10 Claude calls and 4 minutes a run, one run at a time; Esc or `/stop` ends it. Every report is kept
-in `data/research/`: the same question within 12 hours replays it, and with no web it falls back to
-the closest saved one, marked offline.
+- [x] R.1 Engine: rank / split / agents / review, limits, kill switch, cache + offline, audit.
+- [x] R.2 Trust: source kinds and trust, injection scan, quote check, number check, duplicate check.
+- [x] R.3 Face: progress card, data card, sources card (clickable), docked column, stale cards dropped.
+- [x] R.4 Wiring: triage on HUD / Telegram / jobs, explicit gate names, `show_data`, persona.
+- [x] R.5 CLI + tests: `npm run research -- "question"`; 301 tests.
+- [x] R.6 Live check (2026-10-11): gold price → data card ₹1,51,420 / 10 g + 2 sources, no research;
+      iPhone 17 vs Pixel 10 → complex 8/10, 4 agents + reviewer, 10 calls, 53 s, 40 % confidence.
+- [ ] R.7 Page reading: many sites refuse the bridge's fetch (1 of 9 pages read on two parts) —
+      read the blocked ones through her Chrome, or prefer sources that allow reading.
+- [ ] R.8 Ordinary answers: she sometimes draws the data card before speaking (17.9 s to the first
+      word on the gold price); measure with `npm run bench`, nudge or restructure.
+- [ ] R.9 The adversarial review the usage limit cut off; the owner's OK to merge.
 
-- [ ] R.1 Engine: `bridge/research.mjs` — the pipeline, live board state, limits, kill switch, audit
-      line, cache replay and offline fallback; tool server `ayra_research` (`research`,
-      `recent_research`). Check: a fake-agent run ends `done` with numbered sources and a cited answer.
-- [ ] R.2 Trust & verification: `bridge/trust.mjs` — source kind and prior trust, domain diversity,
-      injection scan, every quote checked against its page, fact status and confidence.
-      Check: `test/trust.test.mjs` covers every export.
-- [ ] R.3 HUD board: `src/ui/Research.tsx`, `src/lib/research.ts`, a `research` blade — pipeline strip,
-      sources with trust bars, streaming answer with citation chips, evidence, gaps, metrics.
-      Check: the board renders a live run; `npm run build` and `npm run lint` clean.
-- [ ] R.4 Wiring: the gate allows `ayra_research` (reads only), the persona knows when to use it, the
-      HUD, Telegram and job conversations get it, the kill switch stops it.
-      Check: gate test passes; the tool shows in the HUD's systems list.
-- [ ] R.5 CLI + tests: `npm run research -- "question"`, `test/research.test.mjs` (pipeline, quote drop,
-      injection, cache, offline, stop, call limit). Check: `npm test` passes.
-- [ ] R.6 Live demo + timings: three real questions on the HUD (one contested), one from Telegram,
-      one replayed offline; time to the board and to the verdict in PROGRESS.md.
+## Hybrid hearing · branch `research-agent` (2026-10-11)
+
+**Goal (the owner):** keep Space (it works well), and add a way to talk while working in other
+apps: say "AYRA" from anywhere, she listens, answers and waits for the next command.
+
+**Architecture:** while hands-free is on, the face streams its microphone to the bridge's `/wake`
+socket (loopback only) and an offline keyword spotter (sherpa-onnx, Apache-2.0, 5 MB model from
+`npm run models`) listens for her name — nothing goes to ElevenLabs until it hears it. The 2 s
+before the wake go to Scribe with the turn; the words must be spoken *to* her (`wake.ts`
+`addressed`), which rejects look-alikes ("Ira went to the market"). After an answer she listens
+15 s for a follow-up without her name. W, Ctrl+Alt+W or the tray menu switch it (bridge `/hearing`,
+tray-only). Chrome runs without background throttling so her window keeps time behind other apps.
+
+- [x] H.1 Spotter: `bridge/wake.mjs`, `/wake` socket, tuned spellings in identity.json (`wake.spotter`).
+- [x] H.2 Face: worklet streaming + `armFrom`, `listen.ts`, `voice.ts` handsFree/wake, App follow-up.
+- [x] H.3 Switches: W, the tray menu and Ctrl+Alt+W (AYRA.exe → `/hearing`), the HUD status line.
+- [x] H.4 Tests + live check with a fake microphone: chatter ignored, "Ira…" rejected, "Hey AYRA,
+      what time is it?" answered 1.0 s after it was said, 15 s follow-up, back to standby.
+- [ ] H.5 🧑 The owner's own voice, in the room, from another app (accent, distance, a video playing).
 
 ## Phase 7 — Apps, one at a time · branch `phase-7-apps`
 

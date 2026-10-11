@@ -29,6 +29,13 @@ and transcription (otherwise the browser's own speech is used), and the Telegram
 ID. In the HUD: **Space** to talk, **Space** again to send, **Space Space** or **Esc** to stop,
 **D** diagnostics, **T** an audio test.
 
+## Hands-free
+
+Press **W** in her window (or **Ctrl+Alt+W** / the tray menu from any app) and just say "AYRA" —
+from any app, her window needn't be in front. An offline wake-word spotter runs on the laptop
+(`npm run models` downloads it once), so nothing is sent anywhere until she hears her name. After
+answering she listens about 15 seconds for a follow-up. **Space** works as before.
+
 ## Research agent
 
 Every question is ranked in code first (`bridge/triage.mjs`, no model call). Only a clearly complex

@@ -72,6 +72,7 @@ npm run bench          # times five standard questions (first word, done); needs
 npm run demo           # eleven real tasks (web, Chrome, apps, files, asks, job) → data/demo/<time>/; acts on the laptop
 npm run bridge:test    # a test copy of the bridge: port 8788, Telegram off
 npm run research -- "question"   # the research agent in the terminal: stages live, cited answer; real Claude calls
+npm run models         # downloads the offline wake-word model for hands-free (once, 17.6 MB)
 npm test               # unit tests (gate, wake phrase, identity, avatar, …)
 ```
 
@@ -108,6 +109,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/research.mjs` · `bridge/trust.mjs` | **The research agent**: `createResearch()` → `run / interrupt / busy / recent / report`; code runs plan → search → read → extract → cross-check → answer with one-shot Claude agents (readers get no tools), reports saved in `data/research/` for replay and offline; tool server `ayra_research` · pure: source trust, injection scan, quote check, confidence |
 | `bridge/approvals.mjs` | The owner's Approve: holds each "ask" until the first answer (HUD, voice, Telegram) or 2 min → no; `halt()` is the kill switch |
 | `bridge/listen.mjs` | Live hearing: relays the face's microphone stream (`/listen` socket) to ElevenLabs Scribe Realtime and the words back |
+| `bridge/wake.mjs` · `bridge/triage.mjs` | Hands-free: the offline wake-word spotter (sherpa-onnx) on the `/wake` socket — nothing leaves the laptop · ranks a question's depth in code (simple / moderate / complex) |
 | `bridge/face.mjs` | Serves the built face (`dist/`) on 127.0.0.1:5173 in daily use — no dev server |
 | `bridge/panels.mjs` · `bridge/sources.mjs` | Tool server `ayra`: `display`, `blade`, `probe_url` — what appears on the HUD · a web search's links turned into a card by the bridge, no model in the way |
 | `bridge/origin.mjs` · `bridge/net.mjs` · `bridge/page.mjs` | Which pages may talk to the bridge · SSRF-safe outbound fetching (use for EVERY server-side fetch) · web pages for blades |
@@ -130,6 +132,11 @@ Planned — they arrive with their phase; don't call them working before they ex
 
 Planned, with their phase: `db.mjs`, `memory.mjs` (8) · `core.mjs`, `deploy/`
 (9) · `link.mjs`, `desk.mjs` (10) · `notify.mjs`, `scheduler.mjs` (11) · `agents/<name>/` (12).
+
+Hands-free (`/wake` WebSocket, loopback): face sends 16 kHz PCM (binary) continuously while hands-free is on;
+bridge sends `ready`, `wake {at}`, `error {code,message}`. HUD socket: face sends `hearing {mode}` (push |
+hands-free); bridge sends `hearing {mode, by}` when the tray switches it (AYRA.exe → `GET/POST /hearing`,
+tray only: `x-ayra: tray`, no Origin).
 
 Live hearing (`/listen` WebSocket): face sends 16 kHz PCM (binary), `commit`, `warm`; bridge sends
 `partial {text}`, `final {text}`, `error {code,message}` — see `bridge/listen.mjs`.
@@ -155,7 +162,8 @@ will live in `bridge/link.mjs` (Phase 10), and the same rule applies.
   laptop control off, `CHROME_PORT` 9222, `CHROME_PATH`, `HOTKEY` — AYRA.exe's, default `ctrl+alt+a`, `TRUSTED_SITES` — sites she may grant mic /
   camera herself, `TELEGRAM_TOKEN`,
   `TELEGRAM_OWNER_ID`, `TELEGRAM` — `off` disables it, `CONNECTORS` — default `none`,
-  `RESEARCH_MODEL` — the research agent's workers, default `claude-sonnet-5-5`) plus
+  `RESEARCH_MODEL` — the research agent's workers, default `claude-sonnet-5-5`, `HANDSFREE_HOTKEY` —
+  AYRA.exe's hands-free switch, default `ctrl+alt+w`, `WAKE_THRESHOLD` — the spotter's eagerness, default 0.1) plus
   `ELEVENLABS_API_KEY`. Writes are off in code (`ALLOW_WRITES = false` in server.mjs) until the
   laptop-hands phase. The bridge sets `ENABLE_TOOL_SEARCH=false` for Claude Code (tools load up
   front; measured faster).
