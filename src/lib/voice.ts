@@ -196,6 +196,12 @@ type Assembler = {
   feed: (text: string, active: boolean) => void
   /** Send whatever is held right now, if anything. */
   flush: () => void
+  /**
+   * The speech that kept the held words waiting came to nothing (an empty
+   * segment): decide again as if the user had stopped, instead of sitting out
+   * the whole MAX_HOLD_MS.
+   */
+  settle: () => void
   /** Throw away whatever is held — used when he stands down. */
   cancel: () => void
   held: () => string
@@ -208,10 +214,27 @@ function makeAssembler(h: {
   let held = ''
   let timer: ReturnType<typeof setTimeout> | null = null
   let firstAt = 0
+  /** The held words are waiting on more speech (the MAX_HOLD_MS timer), not on a pause. */
+  let waitingOnSpeech = false
 
   const clear = () => {
     if (timer) clearTimeout(timer)
     timer = null
+    waitingOnSpeech = false
+  }
+
+  /** Wait as the words themselves suggest — or send them now. */
+  const decide = () => {
+    const wait = Math.min(
+      holdFor(held),
+      Math.max(0, MAX_HOLD_MS - (Date.now() - firstAt)),
+    )
+    diag.waitedMs = wait
+    if (wait === 0) {
+      fire()
+      return
+    }
+    timer = setTimeout(fire, wait)
   }
 
   const fire = () => {
@@ -237,21 +260,21 @@ function makeAssembler(h: {
       // part of this same sentence and will bring more of it.
       if (active) {
         timer = setTimeout(fire, MAX_HOLD_MS)
+        waitingOnSpeech = true
         return
       }
-
-      const wait = Math.min(
-        holdFor(held),
-        Math.max(0, MAX_HOLD_MS - (Date.now() - firstAt)),
-      )
-      diag.waitedMs = wait
-      if (wait === 0) {
-        fire()
-        return
-      }
-      timer = setTimeout(fire, wait)
+      decide()
     },
     flush: fire,
+    settle() {
+      // Measured by the latency audit (2026-10-12): a cough or a key click in
+      // the ~0.3 s between the commit and its words left a finished question
+      // waiting the full 6 s, because the empty segment that followed never
+      // looked at it again.
+      if (!held || !waitingOnSpeech) return
+      clear()
+      decide()
+    },
     cancel() {
       clear()
       held = ''
@@ -449,6 +472,8 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
   let discard = 0
   /** Hands-free: the microphone stays, streaming to the offline spotter. */
   let hands = false
+  /** What the last name check heard — the burst a wake replays from. */
+  let lastBurst = ''
 
   /**
    * Transcripts become turns here rather than one-per-segment.
@@ -474,6 +499,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
     if (mode === 'deaf') return
     if (!said) {
       drop('nothing intelligible in the segment')
+      assemble.settle()
       return
     }
     // Her own voice, come back through the microphone. The raised guard
@@ -577,6 +603,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
         if (dropped) discard++
         else if (!empty) awaiting++
         else if (sending && awaiting === 0) finishSend()
+        else assemble.settle()
       },
       onPartial: (text) => {
         if (h.mode() !== 'command' || !text.trim()) return
@@ -604,6 +631,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
       onHeard: (text) => {
         diag.heard = text
         diag.heardAt = Date.now()
+        lastBurst = text
         if (speakingNow() || !WAKE.test(text)) {
           drop(`hands-free heard "${text.slice(-40)}" — not her name`)
           return
@@ -631,6 +659,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
           if (discard > 0) discard--
           else awaiting = Math.max(0, awaiting - 1)
           if (sending && awaiting === 0) finishSend()
+          else assemble.settle()
           return
         }
         fallBack(code)
@@ -736,7 +765,11 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
       if (releaseTimer) clearTimeout(releaseTimer)
       releaseTimer = null
       listener.warm()
-      listener.armFromCandidate()
+      // The burst already held a command after her name ("Hey AYRA, what time
+      // is it?"): end the replayed segment as soon as the room is quiet rather
+      // than SILENCE_MS after the wake — ~0.6 s sooner (latency audit). The
+      // bare name keeps the wait: the command may follow it.
+      listener.armFromCandidate(Boolean(afterWake(lastBurst)))
     },
   }
 }

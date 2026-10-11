@@ -19,14 +19,16 @@ import { createGate } from './gate.mjs'
 import { WebSocket, WebSocketServer } from 'ws'
 import { createBrain } from './brain.mjs'
 import { createOriginCheck } from './origin.mjs'
-import { createAudit } from './audit.mjs'
+import { clip, createAudit } from './audit.mjs'
 import { startTelegram } from './telegram.mjs'
-import { displayServer } from './panels.mjs'
+import { checkData, displayServer } from './panels.mjs'
+import { createTagFilter, parseCard, stripTags } from './datatag.mjs'
 import { createTurnCards } from './sources.mjs'
 import { rankQuery } from './triage.mjs'
 import { relayListening } from './listen.mjs'
 import { PER_HOUR, relayWake } from './wake.mjs'
 import { createMedia } from './media.mjs'
+import { elevenRequest, preconnect, readAll } from './eleven.mjs'
 import { serveFace } from './face.mjs'
 import { createApprovals } from './approvals.mjs'
 import { createAllowances } from './allowances.mjs'
@@ -34,9 +36,12 @@ import { rulesServer } from './rules.mjs'
 import { watchPresence } from './presence.mjs'
 import { JOB_LIMITS, createJobs, jobsServer } from './jobs.mjs'
 import { createStore } from './state.mjs'
-import { browserServer } from './browser.mjs'
-import { appsServer } from './apps.mjs'
+import { browserServer, openInChrome } from './browser.mjs'
+import { appsCall, appsServer, warmApps } from './apps.mjs'
 import { createResearch, researchServer } from './research.mjs'
+import { createDeepResearch } from './deep.mjs'
+import { createSpeakerMeter } from './echo.mjs'
+import { createHands, noteFor, parseFast, runFast } from './fastpath.mjs'
 import { homedir } from 'node:os'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -498,31 +503,34 @@ const handleRequest = async (req, res) => {
       return res.end('no text')
     }
     try {
-      const upstream = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream` +
-          // 22kHz mono is half the bytes of 44kHz and indistinguishable through
-          // a laptop speaker; optimize_streaming_latency=3 trades a little
-          // prosody for a much earlier first byte.
-          `?output_format=mp3_22050_32&optimize_streaming_latency=3`,
-        {
-          method: 'POST',
-          headers: { 'xi-api-key': key, 'content-type': 'application/json' },
-          body: JSON.stringify({
-            text,
-            // Flash is the low-latency model — a conversation needs speed more
-            // than it needs the last few percent of quality.
-            model_id: 'eleven_flash_v2_5',
-            voice_settings: {
-              stability: 0.4,
-              similarity_boost: 0.75,
-              speed: 1.05,
-            },
-          }),
-        },
-      )
-      if (!upstream.ok) {
-        res.writeHead(upstream.status, cors)
-        return res.end(await upstream.text())
+      const speak = () =>
+        elevenRequest(
+          `/v1/text-to-speech/${VOICE_ID}/stream` +
+            // 22kHz mono is half the bytes of 44kHz and indistinguishable through
+            // a laptop speaker; optimize_streaming_latency=3 trades a little
+            // prosody for a much earlier first byte.
+            `?output_format=mp3_22050_32&optimize_streaming_latency=3`,
+          {
+            // Through the warm keep-alive socket (eleven.mjs), not a new handshake per answer.
+            headers: { 'xi-api-key': key, 'content-type': 'application/json' },
+            body: JSON.stringify({
+              text,
+              // Flash is the low-latency model — a conversation needs speed more
+              // than it needs the last few percent of quality.
+              model_id: 'eleven_flash_v2_5',
+              voice_settings: {
+                stability: 0.4,
+                similarity_boost: 0.75,
+                speed: 1.05,
+              },
+            }),
+          },
+        )
+      // A kept socket the server has meanwhile closed fails at once; one fresh try.
+      const upstream = await speak().catch((err) => (err?.code === 'ECONNRESET' ? speak() : Promise.reject(err)))
+      if (upstream.statusCode !== 200) {
+        res.writeHead(upstream.statusCode ?? 502, cors)
+        return res.end(await readAll(upstream))
       }
 
       // Pipe it through rather than buffering. Waiting for the whole file here
@@ -532,7 +540,7 @@ const handleRequest = async (req, res) => {
         'content-type': 'audio/mpeg',
         'cache-control': 'no-cache',
       })
-      for await (const chunk of upstream.body) res.write(Buffer.from(chunk))
+      for await (const chunk of upstream) res.write(chunk)
       return res.end()
     } catch (err) {
       res.writeHead(502, cors)
@@ -746,6 +754,20 @@ const RESEARCH = createResearch({
 })
 CONVERSATIONS.add({ interrupt: () => RESEARCH.interrupt() })
 
+/**
+ * Researcher mode (deep.mjs, the owner's R key): a reasoning planner, one agent
+ * per platform — Reddit, Quora, GitHub, Stack Overflow, Hacker News, arXiv,
+ * the web — relevance-ranked results and a final cited answer. One engine,
+ * one run at a time, on the kill switch like the research agent.
+ */
+const DEEP = createDeepResearch({ model: MODEL, workerModel: RESEARCH_MODEL, audit: AUDIT })
+CONVERSATIONS.add({ interrupt: () => DEEP.interrupt() })
+
+/** How a researcher-mode question is put to the brain (the face sends `mode: 'research'`). */
+const RESEARCHER_ASK =
+  '[Researcher mode is on: answer this with deep_research, passing the question made self-contained ' +
+  '(resolve "it" or "that" from our conversation). Then say the verdict in one or two sentences.]'
+
 const BRAIN = createBrain({
   model: MODEL,
   effort: EFFORT,
@@ -800,6 +822,7 @@ const JOBS = createJobs({
         // the job's task in the owner's words, which the research tool ranks.
         ayra_research: researchServer({
           research: RESEARCH,
+          deep: DEEP,
           channel: 'job',
           turn: () => conversation?.turn?.() ?? null,
         }),
@@ -862,6 +885,7 @@ if (env('TELEGRAM', 'on') === 'off') {
       // which admit a run and are the reviewer's original question.
       ayra_research: researchServer({
         research: RESEARCH,
+        deep: DEEP,
         channel: 'telegram',
         turn: () => phone?.turn?.() ?? null,
       }),
@@ -916,6 +940,19 @@ const WAKE_PER_HOUR = Number(env('WAKE_CHECKS_PER_HOUR', PER_HOUR)) || PER_HOUR
 /** Whatever is playing pauses while she listens (media.mjs). */
 const MEDIA = createMedia({ log: (msg) => console.log(msg) })
 
+/** The fast path's hands (fastpath.mjs): her apps worker, her Chrome, the music. */
+const HANDS = createHands({ appsCall, openInChrome, media: MEDIA })
+
+/**
+ * Sound from the laptop's own speakers is not the owner (echo.mjs): while any
+ * face streams for hands-free, a meter watches what the speakers play, and a
+ * burst that matches it is dropped before the name check. Measured 2026-10-12,
+ * before this: "Hey AYRA" played by a laptop app, by another Chrome, and even
+ * the owner's own recording through the speakers all woke her.
+ */
+const SPEAKERS = createSpeakerMeter({ log: (msg) => console.log(msg) })
+const WAKE_SOCKETS = new Set()
+
 /**
  * How the face is listening — 'push' (Space) or 'hands-free' (her name) — as it
  * last reported, and every open face, so AYRA.exe (tray menu, Ctrl+Alt+W) can
@@ -929,12 +966,20 @@ wss.on('connection', (socket, req) => {
   const path = (req.url ?? '/').split('?')[0]
   if (path === '/listen') return listen(socket)
   if (path === '/wake') {
+    // The meter runs exactly while some face is streaming for hands-free.
+    WAKE_SOCKETS.add(socket)
+    SPEAKERS.start()
+    socket.on('close', () => {
+      WAKE_SOCKETS.delete(socket)
+      if (!WAKE_SOCKETS.size) SPEAKERS.stop()
+    })
     return relayWake(socket, {
       key: elevenKey(),
       keyterms: [IDENTITY.name],
       language: IDENTITY.language.split('-')[0] || 'en',
       perHour: WAKE_PER_HOUR,
       checks: WAKE_CHECKS,
+      speakers: SPEAKERS,
       log: (msg) => console.warn(msg),
     })
   }
@@ -966,15 +1011,50 @@ wss.on('connection', (socket, req) => {
   // display server. Neither is something the owner can use, so the SYSTEMS rail
   // shows only what is really live.
   const removed = new Set(GATE.excludedConnectors.map((n) => `claude.ai ${n}`))
+
+  /**
+   * The answer's data card arrives as a <data>{…}</data> tag at the end of her
+   * text (datatag.mjs): cut out of what is spoken, checked like show_data
+   * (panels.mjs checkData) against this turn's results, and drawn.
+   */
+  let tags = null
+  const tagsFor = (ask) => {
+    if (tags?.ask !== ask) {
+      tags = {
+        ask,
+        filter: createTagFilter((json) => {
+          const args = parseCard(json)
+          const verdict = args ? checkData(args, cards.evidence()) : { ok: false, error: 'the card was not JSON' }
+          if (verdict.ok) cards.showData(verdict.data, verdict.urls)
+          else if (!verdict.already) console.warn(`[ayra] data card not shown: ${verdict.error}`)
+        }),
+      }
+    }
+    return tags.filter
+  }
+
   const emit = (msg) => {
     if (msg.type === 'ready' && Array.isArray(msg.servers)) {
       return send({ ...msg, servers: msg.servers.filter((n) => n !== 'ayra' && !removed.has(n)) })
+    }
+    if (msg.type === 'text' && typeof msg.delta === 'string') {
+      const delta = tagsFor(msg.ask).push(msg.delta)
+      if (!delta) return
+      msg = { ...msg, delta }
+    }
+    if (msg.type === 'done' || msg.type === 'error') {
+      const rest = tags?.ask === msg.ask ? tags.filter.end() : ''
+      tags = null
+      if (rest) send({ type: 'text', delta: rest, ask: msg.ask })
+      if (msg.type === 'done' && typeof msg.text === 'string') msg = { ...msg, text: stripTags(msg.text) }
     }
     // A web search's links and text, and the pages read, stay with the turn
     // for show_data and the sources card; the face never sees them. A turn's
     // end puts the sources card up when nothing else did — before the done
     // frame, so the card still belongs to the turn on the face.
     if (cards.observe(msg)) return
+    // Speech is about to be needed: keep her voice's socket open (eleven.mjs; at most every 10 s).
+    if ((msg.type === 'text' || msg.type === 'tool') && process.env.ELEVENLABS_API_KEY) preconnect()
     send(msg)
   }
 
@@ -1015,6 +1095,7 @@ wss.on('connection', (socket, req) => {
       // owner's question and its rank, which admit a run.
       ayra_research: researchServer({
         research: RESEARCH,
+        deep: DEEP,
         emitBlade: (blade) => cards.research(blade),
         channel: 'hud',
         turn: turnOf,
@@ -1036,6 +1117,40 @@ wss.on('connection', (socket, req) => {
   const unsubscribe = APPROVALS.subscribe((event) => send(event))
   for (const request of APPROVALS.pending()) send({ type: 'approve', ...request })
 
+  /** What the fast path did since the brain last heard from this screen (told on its next question). */
+  const done = []
+
+  /**
+   * A question for the brain. Ranked on the owner's own words (triage.mjs,
+   * microseconds, no model): a complex question gets the depth line in front
+   * of it, and the research planner is started while the brain reads it.
+   */
+  const askBrain = (text, id) => {
+    const rank = rankQuery(text)
+    if (rank.level === 'complex') {
+      // A warm-up only: whatever goes wrong there, the question still goes.
+      try {
+        RESEARCH.ready()
+      } catch (err) {
+        console.warn(`[ayra] research warm-up failed — ${err?.message ?? err}`)
+      }
+    }
+    const note = noteFor(done.splice(0))
+    conversation.ask(`${note}${text}`, id, note ? { rank, text } : { rank })
+  }
+
+  /** The fast path (fastpath.mjs): done and said in code, or the brain's after all. */
+  const quick = async (intent, text, id) => {
+    const t0 = Date.now()
+    const did = await runFast(intent, HANDS)
+    if (!did) return askBrain(text, id)
+    done.push(did.note)
+    send({ type: 'text', delta: did.said, ask: id ?? undefined })
+    send({ type: 'done', text: did.said, ask: id ?? undefined })
+    AUDIT.log({ type: 'fast', channel: 'hud', ask: id, text: clip(text), did: did.note, ms: Date.now() - t0 })
+    console.log(`[ayra] fast: ${did.note} (${Date.now() - t0} ms)`)
+  }
+
   socket.on('message', (raw) => {
     let msg
     try {
@@ -1045,26 +1160,38 @@ wss.on('connection', (socket, req) => {
     }
 
     if (msg.type === 'ask' && typeof msg.text === 'string') {
-      // Ranked on the owner's own words (triage.mjs, microseconds, no model):
-      // a complex question gets the depth line in front of it, and the
-      // research planner is started while the brain reads it, so the run
-      // skips the planner's start-up. Nothing is started for anything else.
-      const rank = rankQuery(msg.text)
-      if (rank.level === 'complex') {
-        // A warm-up only: whatever goes wrong there, the question still goes.
+      const id = typeof msg.id === 'string' ? msg.id : null
+      // Researcher mode (the R key): every question goes to deep_research.
+      // The planner starts while the brain reads the question.
+      if (msg.mode === 'research') {
         try {
-          RESEARCH.ready()
+          DEEP.ready()
         } catch (err) {
-          console.warn(`[ayra] research warm-up failed — ${err?.message ?? err}`)
+          console.warn(`[ayra] researcher warm-up failed — ${err?.message ?? err}`)
         }
+        conversation.ask(`${noteFor(done.splice(0))}${RESEARCHER_ASK}\n${msg.text}`, id, { text: msg.text })
+        return
       }
-      conversation.ask(msg.text, typeof msg.id === 'string' ? msg.id : null, { rank })
+      // "Open YouTube", "pause the music": done in code at once (fastpath.mjs),
+      // or handed to the brain after all.
+      const fast = ALLOW_WRITES && WINDOWS ? parseFast(msg.text) : null
+      if (fast) {
+        void quick(fast, msg.text, id)
+        return
+      }
+      askBrain(msg.text, id)
     }
 
     if (msg.type === 'interrupt') conversation.interrupt()
 
     // The owner has started speaking: wake a sleeping brain while they talk.
-    if (msg.type === 'warm') conversation.warm()
+    if (msg.type === 'warm') {
+      conversation.warm()
+      // Her voice's connection too, while they are still talking (eleven.mjs),
+      // and her Windows apps worker, which takes ~1 s to start (apps.mjs).
+      if (elevenKey()) preconnect()
+      if (WINDOWS && ALLOW_WRITES) warmApps()
+    }
 
     // The owner's answer to an Approve card, or the kill switch.
     if (msg.type === 'approval' && typeof msg.id === 'string') {

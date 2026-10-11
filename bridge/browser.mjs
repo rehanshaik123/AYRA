@@ -156,6 +156,20 @@ async function connect() {
 }
 
 /**
+ * Open an address in a new tab of her Chrome and bring it forward, without
+ * waiting for the page: the fast path (fastpath.mjs) says "Opening …" while it
+ * loads. Only http(s) addresses, never her own face.
+ */
+export async function openInChrome(url) {
+  const target = safeUrl(url)
+  if (!target || isOwnPage(target)) throw new Error('Only web addresses can be opened.')
+  const b = await connect()
+  const page = await b.newPage()
+  void page.goto(target, { waitUntil: 'domcontentloaded', timeout: LOAD_TIMEOUT_MS }).catch(() => {})
+  await page.bringToFront().catch(() => {})
+}
+
+/**
  * Normal web tabs, in window order — never her own face, which shares this
  * Chrome: its Approve card must stay out of reach of her own clicks.
  */
@@ -192,12 +206,55 @@ const host = (url) => {
   }
 }
 
-/** After a click or Enter: a moment for a navigation to start, then for it to land. */
+/**
+ * Runs inside the page: resolves once nothing in the document has changed for
+ * `quietMs`, or after `capMs` whatever happens. Plain browser JavaScript.
+ */
+function domQuiet(quietMs, capMs) {
+  return new Promise((resolve) => {
+    let timer = 0
+    const done = () => {
+      obs.disconnect()
+      clearTimeout(timer)
+      clearTimeout(cap)
+      resolve(true)
+    }
+    const obs = new MutationObserver(() => {
+      clearTimeout(timer)
+      timer = setTimeout(done, quietMs)
+    })
+    obs.observe(document, { subtree: true, childList: true, attributes: true, characterData: true })
+    timer = setTimeout(done, quietMs)
+    const cap = setTimeout(done, capMs)
+  })
+}
+
+/** Shortest settle: a click handler that navigates after a beat is still caught. */
+const SETTLE_MIN_MS = 250
+
+/**
+ * After a click or Enter: wait for a navigation to land, or for the page to
+ * stop changing. It used to be a flat race against 900 ms, paid in full on
+ * every click that changed the page in place (most of them) — the audit of
+ * 2026-10-12 counted ~2.5 s of fixed waits per click. Now a page that is quiet
+ * 150 ms after the click goes on at once, and a navigation (seen by its main-
+ * frame request) is still waited for.
+ */
 async function settle(page) {
-  await Promise.race([
-    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 4000 }).catch(() => {}),
-    wait(900),
-  ])
+  let navigating = false
+  const onRequest = (req) => {
+    if (req.isNavigationRequest() && req.frame() === page.mainFrame()) navigating = true
+  }
+  page.on('request', onRequest)
+  try {
+    const nav = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 4000 }).then(() => 'nav', () => null)
+    const quiet = Promise.all([page.evaluate(domQuiet, 150, 900), wait(SETTLE_MIN_MS)]).then(() => 'quiet', () => 'gone')
+    const first = await Promise.race([nav, quiet])
+    // The document went away under the probe, or a navigation began: wait for the new page.
+    if (first !== 'nav' && (first === 'gone' || navigating)) await nav
+  } finally {
+    page.off('request', onRequest)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -250,9 +307,12 @@ function snapshot(maxText, maxElements, attr) {
   }
 }
 
-/** The page as text the model can act on. */
-async function read(page, attr) {
-  const s = await page.evaluate(snapshot, MAX_TEXT, MAX_ELEMENTS, attr)
+/**
+ * The page as text the model can act on. `maxText` is smaller for the read an
+ * action hands back by itself (see `now`).
+ */
+async function read(page, attr, maxText = MAX_TEXT) {
+  const s = await page.evaluate(snapshot, maxText, MAX_ELEMENTS, attr)
   const list = s.elements
     .map((e) => `[${e.ref}] ${e.role}${e.field ? `(${e.field})` : ''} "${e.label}"`)
     .join('\n')
@@ -261,6 +321,22 @@ async function read(page, attr) {
     `${s.more ? `\n…and ${s.more} more further down; scroll and read again.` : ''}` +
     `\n\nPage text:\n${s.text}`
   )
+}
+
+/** Page text in the read an action hands back by itself. */
+const AFTER_TEXT = 2000
+
+/**
+ * The page an action left behind, read at once — so she can usually go on
+ * without a separate browser_read: one model step (~2–4 s) saved per action,
+ * as apps.mjs already does for windows. Refs are renumbered by this read.
+ */
+async function now(page, attr) {
+  try {
+    return `\n\nThe page now (refs renumbered):\n${await read(page, attr, AFTER_TEXT)}`
+  } catch {
+    return '' // still loading or closed: she can read it herself
+  }
 }
 
 /** What the element behind a ref is, for the ask-first check. */
@@ -450,7 +526,7 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
     tool('browser_back', 'Go back a page in the current tab.', {}, guard(async () => {
       const page = await pick(me)
       await page.goBack({ waitUntil: 'domcontentloaded', timeout: LOAD_TIMEOUT_MS }).catch(() => {})
-      return text(`Back on: ${await page.title()} — ${page.url()}`)
+      return text(`Went back.${await now(page, me.attr)}`)
     })),
 
     tool(
@@ -493,17 +569,23 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
           return fail(`The owner did not approve clicking "${label}". Leave it and say so in one sentence.`)
         }
         const el = await page.$(`[${me.attr}="${ref}"]`)
-        // A link that opens a new tab: she follows it there.
-        const opened = page.browser().waitForTarget((t) => t.opener() === page.target(), { timeout: 1500 }).catch(() => null)
+        // A link that opens a new tab: she follows it there. A new tab shows up
+        // within ~150 ms of the click, so it is looked for while the page
+        // settles — not waited on for 1.5 s after every click that opens none.
+        const b = page.browser()
+        const before = new Set(b.targets())
+        const isChild = (t) => t.opener() === page.target() && !before.has(t)
+        const opened = b.waitForTarget(isChild, { timeout: 1500 }).catch(() => null)
         await press(el)
-        const tab = await (await opened)?.page().catch(() => null)
+        await settle(page)
+        const target = (await Promise.race([opened, wait(100).then(() => null)])) ?? b.targets().find(isChild)
+        const tab = target ? await target.page().catch(() => null) : null
         if (tab) {
           me.current = tab
           await settle(tab)
-          return text(`Clicked "${label}"; it opened a new tab: ${await tab.title()} — ${tab.url()}. Working there now; read it.`)
+          return text(`Clicked "${label}"; it opened a new tab: ${await tab.title()} — ${tab.url()}. Working there now.${await now(tab, me.attr)}`)
         }
-        await settle(page)
-        return text(`Clicked "${label}". Now on: ${await page.title()} — ${page.url()}. Read the page to see what changed.`)
+        return text(`Clicked "${label}".${await now(page, me.attr)}`)
       }),
     ),
 
@@ -539,8 +621,9 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
           }
           await page.keyboard.press('Enter')
           await settle(page)
+          return text(`Typed into "${label}" and pressed Enter.${await now(page, me.attr)}`)
         }
-        return text(`Typed into "${label}"${submit ? ' and pressed Enter' : ''}. Now on: ${await page.title()}.`)
+        return text(`Typed into "${label}". Now on: ${await page.title()}.`)
       }),
     ),
 
@@ -558,7 +641,8 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
         }
         await page.keyboard.press(key)
         await settle(page)
-        return text(`Pressed ${key}.`)
+        // Enter usually changes the page; Tab or an arrow key usually doesn't need a read.
+        return text(`Pressed ${key}.${/^enter$/i.test(key) ? await now(page, me.attr) : ''}`)
       }),
     ),
 
@@ -598,7 +682,7 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
     name: 'ayra_browser',
     version: '1.0.0',
     instructions:
-      "The owner's Chrome. Read a page before acting on it, act by ref, and read again after it changes.",
+      "The owner's Chrome. Read a page before acting on it and act by ref; clicks, Enter and going back hand back the page they leave, so read again only when that wasn't enough.",
     alwaysLoad: true,
     tools: allowWrites ? [...reading, ...acting] : reading,
   })

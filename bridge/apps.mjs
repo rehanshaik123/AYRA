@@ -41,8 +41,12 @@ const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'apps.ps1')
 const CALL_TIMEOUT_MS = 20_000
 /** Opening an app waits for its window, which can take a while on this laptop. */
 const OPEN_TIMEOUT_MS = 30_000
-/** The worker closes after this long unused (it costs ~60 MB while open). */
-const IDLE_MS = 5 * 60_000
+/**
+ * The worker closes after this long unused (it costs ~60 MB while open).
+ * Was 5 minutes; a cold start costs ~1 s plus the Start-menu list on the next
+ * "open", which the owner felt as lag (2026-10-12).
+ */
+const IDLE_MS = 30 * 60_000
 /** Longest window read handed to the model. */
 const MAX_TEXT = 6000
 /** Keys that leave a file of secrets alone: a new tab, or another one. */
@@ -272,6 +276,18 @@ const fail = (t) => ({ isError: true, content: [{ type: 'text', text: t }] })
 /** One worker for every conversation: the owner has one desktop. */
 let shared = null
 const worker = () => (shared ??= createWorker())
+
+/** A request to the shared worker, for code outside the tools (the fast path, fastpath.mjs). */
+export const appsCall = (op, args = {}, timeoutMs) => worker().call(op, args, timeoutMs ?? (op === 'open' ? OPEN_TIMEOUT_MS : CALL_TIMEOUT_MS))
+
+/**
+ * Start the worker now, without waiting for it — the bridge calls this when the
+ * owner starts speaking, so its ~1 s start-up (UI Automation, the Start-menu
+ * list) overlaps their talking instead of their waiting.
+ */
+export function warmApps() {
+  appsCall('ping').catch(() => {})
+}
 
 /** The last window read, so an action can be checked with what it will press. */
 let last = null

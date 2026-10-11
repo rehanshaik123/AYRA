@@ -292,18 +292,24 @@ export class ListenCore {
     this.activity = 0
   }
 
-  /** Her name was heard in the last burst: listen from where that burst began. */
-  armFromCandidate() {
+  /**
+   * Her name was heard in the last burst: listen from where that burst began.
+   * `quietEnd`: the burst held a command too, so the segment's silence clock
+   * starts at the last loud moment, not now.
+   */
+  armFromCandidate(quietEnd = false) {
     const ms = this.candStart >= 0 ? this.t - this.candStart + STEP_MS : PRE_ROLL_MS
-    return this.armFrom(ms)
+    return this.armFrom(ms, quietEnd)
   }
 
   /**
    * The spotter heard her name: arm, and start a segment at once from the last
    * `ms` of audio rather than waiting for speech to be confirmed — the name was
    * said before the spotter knew, and the command may already be under way.
+   * With `quietEnd`, a speaker who has already stopped is not waited on for a
+   * fresh SILENCE_MS: the segment ends at the next step if the room is quiet.
    */
-  armFrom(ms) {
+  armFrom(ms, quietEnd = false) {
     this.events = []
     this.armed = true
     if (!this.speaking) {
@@ -312,7 +318,7 @@ export class ListenCore {
       this.preRoll = []
       this.speaking = true
       this.startedAt = this.t
-      this.lastLoud = this.t
+      this.lastLoud = quietEnd && this.heardAt >= 0 ? Math.min(this.t, this.heardAt) : this.t
       this.armedAt = -1
       this.events.push({ type: 'start', woken: true })
       this.flush()
@@ -373,7 +379,9 @@ if (typeof registerProcessor === 'function' && typeof AudioWorkletProcessor === 
         }
         if (e.data && 'stream' in e.data) this.core.setStream(e.data.stream)
         if (e.data && (typeof e.data.armFrom === 'number' || e.data.armFromCandidate)) {
-          const events = e.data.armFromCandidate ? this.core.armFromCandidate() : this.core.armFrom(e.data.armFrom)
+          const events = e.data.armFromCandidate
+            ? this.core.armFromCandidate(Boolean(e.data.quietEnd))
+            : this.core.armFrom(e.data.armFrom)
           for (const ev of events) {
             if (ev.type === 'audio') this.port.postMessage(ev, [ev.pcm.buffer])
             else this.port.postMessage(ev)

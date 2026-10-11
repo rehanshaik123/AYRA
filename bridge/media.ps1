@@ -16,6 +16,17 @@ $null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager,
 $manager = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
 $wanted = @($Ids.Split('|') | Where-Object { $_ })
 $done = @()
+# The owner's own commands ("play the music", "next song") act on the session
+# Windows shows in the volume flyout - the one they last used.
+if ($Action -in @('play', 'next', 'prev')) {
+  $s = $manager.GetCurrentSession()
+  if ($s) {
+    $op = switch ($Action) { 'play' { $s.TryPlayAsync() } 'next' { $s.TrySkipNextAsync() } 'prev' { $s.TrySkipPreviousAsync() } }
+    if (Await $op ([bool])) { $done += $s.SourceAppUserModelId }
+  }
+  $done -join '|'
+  exit
+}
 foreach ($s in $manager.GetSessions()) {
   $id = $s.SourceAppUserModelId
   $status = [string]$s.GetPlaybackInfo().PlaybackStatus

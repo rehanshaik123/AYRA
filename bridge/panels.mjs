@@ -159,7 +159,8 @@ You are designing the panel, not filling in a template — compose the markup fo
 the content at hand and choose the position that suits it.
 
 Not for a web answer. After a web search the sources card appears by itself and
-the answer's figure, name, date or score goes on \`show_data\`. Never compose a
+the answer's figure, name, date or score goes in the <data> tag at the end of
+your answer. Never compose a
 card of results, headlines or a page's substance — not even when the user asks
 to see them; the cards already show it. Answer out loud.
 
@@ -293,10 +294,12 @@ argument. You know those things. Overrule it whenever you have reason to.`
  */
 export const SHOWN = "Shown. If you haven't said the answer yet, say it now in one sentence, the figure first; otherwise say nothing more."
 
-const DATA_DESCRIPTION = `Put a web answer's data card on screen.
+const DATA_DESCRIPTION = `Put a web answer's data card on screen — the slow way.
 
-After a web search, SAY the answer first, the figure first. Then call this once,
-in the same message, and say nothing after it. Only when the answer is a figure,
+Prefer ending your spoken answer with the card as a <data>{…}</data> tag (same
+fields as below): it is drawn the same way and needs no second turn. Use this
+tool only if you could not. After a web search, SAY the answer first, the figure
+first. Then call this once, in the same message, and say nothing after it. Only when the answer is a figure,
 a name, a date, a score or a yes/no ("what's the price of gold", "who won the
 match", "when does it launch"); skip it for news, how-to and explanations.
 
@@ -551,8 +554,8 @@ export function displayServer(emitBlade, options = {}) {
     name: 'ayra',
     version: '1.0.0',
     instructions:
-      `The ${IDENTITY.name} heads-up display. \`show_data\` puts a web answer's figure on ` +
-      'screen; `display` and `blade` show anything else the owner asks to see.',
+      `The ${IDENTITY.name} heads-up display. A web answer's figure goes in a <data> tag at the end of ` +
+      'the answer (show_data is the slow fallback); `display` and `blade` show anything else the owner asks to see.',
     // Never defer this behind tool search — if the model has to go looking for
     // it, it won't occur to it to show anything.
     alwaysLoad: true,

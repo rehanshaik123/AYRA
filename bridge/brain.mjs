@@ -396,6 +396,12 @@ export function createBrain({
           // connectors they haven't allowed — both decided in gate.mjs.
           tools: gate.builtins,
           disallowedTools: gate.disallowed,
+          // With no connector allowed (AYRA_CONNECTORS=none, the default) the
+          // claude.ai ones are not even started: without this the bundled CLI
+          // connects to every one at each brain start and wake — remote MCP
+          // handshakes the owner waits through — only for the gate to remove
+          // them (latency audit, 2026-10-12). research.mjs does the same.
+          ...(gate.allowedConnectors?.length ? {} : { strictMcpConfig: true }),
           maxTurns,
           permissionMode: 'default',
           // Without this the SDK only emits whole assistant messages, and AYRA

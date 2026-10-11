@@ -157,6 +157,9 @@ const ABBREVIATION =
  */
 const MAX_UNSPOKEN = 220
 
+/** A stream that stops on a full stop for this long has finished that sentence. */
+const END_PAUSE_MS = 200
+
 // ---------------------------------------------------------------------------
 // Voice selection
 // ---------------------------------------------------------------------------
@@ -373,6 +376,11 @@ export function createSpeaker(): Speaker {
     } else {
       queue.push(item)
     }
+    // A sentence that arrives while another is playing (the usual case for the
+    // second one) starts generating now, still exactly one ahead — otherwise its
+    // request waited for the first to finish: ~0.5–0.9 s of silence between
+    // sentences (latency audit, 2026-10-12).
+    if (pumping) prime(queue[0])
     void pump()
   }
 
@@ -656,12 +664,32 @@ export function createSpeaker(): Speaker {
       })
     })
 
+  /**
+   * A finished sentence at the very end of the buffer has no space after it
+   * yet, so SENTENCE_END can't see it — a one-sentence answer used to be
+   * spoken only once the whole turn was done. When the stream pauses on one,
+   * it goes now.
+   */
+  let flushTimer = 0
+  const flushSoon = () => {
+    window.clearTimeout(flushTimer)
+    const tail = buffer.trimEnd()
+    // "version 24." may be "24.21.0" still arriving; those wait for end().
+    if (!/[.!?]["'”’)\]]?$/.test(tail) || /\d[.]$/.test(tail) || ABBREVIATION.test(tail)) return
+    flushTimer = window.setTimeout(() => {
+      if (cancelled || buffer.trimEnd() !== tail) return
+      enqueue(buffer)
+      buffer = ''
+    }, END_PAUSE_MS)
+  }
+
   return {
     say(text) {
       enqueue(text, true)
     },
     push(delta) {
       if (cancelled) return
+      window.clearTimeout(flushTimer)
       buffer += delta
 
       // Drain every complete sentence sitting in the buffer.
@@ -695,8 +723,10 @@ export function createSpeaker(): Speaker {
           buffer = buffer.slice(cut)
         }
       }
+      flushSoon()
     },
     async end() {
+      window.clearTimeout(flushTimer)
       if (buffer.trim()) {
         enqueue(buffer)
         buffer = ''
@@ -708,6 +738,7 @@ export function createSpeaker(): Speaker {
     cancel() {
       if (cancelled) return
       cancelled = true
+      window.clearTimeout(flushTimer)
       buffer = ''
       queue.length = 0
       // Keep the echo tail: the words already in the air still have to be
@@ -735,16 +766,74 @@ export function createSpeaker(): Speaker {
   }
 }
 
+/**
+ * Short lines she says again and again — "On it!", the wake greeting, "Opening
+ * YouTube." — kept once synthesised, so the second time costs no round trip
+ * (~0.5–0.9 s sooner) and no credits. Only short ones; never whole answers.
+ */
+const LINE_MAX = 48
+const LINES_KEPT = 60
+const lines = new Map<string, Blob>()
+
+/**
+ * The kept lines also go in the browser's Cache Storage, so a reload doesn't
+ * spend the owner's ElevenLabs characters on them again. Keyed by her voice:
+ * a new voice starts a new set.
+ */
+const LINE_CACHE = `ayra-lines-${IDENTITY.voice.elevenLabsId || 'default'}`
+const lineKey = (text: string) => `${location.origin}/__line/${encodeURIComponent(text)}`
+const lineStore = async (): Promise<Cache | null> => {
+  try {
+    return typeof caches === 'undefined' ? null : await caches.open(LINE_CACHE)
+  } catch {
+    return null
+  }
+}
+
+const keepLine = (text: string, blob: Blob) => {
+  if (text.length > LINE_MAX || !blob.size) return
+  lines.delete(text)
+  lines.set(text, blob)
+  if (lines.size > LINES_KEPT) lines.delete(lines.keys().next().value as string)
+  void lineStore().then((c) => c?.put(lineKey(text), new Response(blob, { headers: { 'content-type': 'audio/mpeg' } })).catch(() => {}))
+}
+
+/**
+ * Have these lines ready ahead of need (the fillers, after boot): from Cache
+ * Storage when an earlier visit kept them, else synthesised one at a time so
+ * nothing competes with a real answer.
+ */
+export async function prefetchLines(texts: readonly string[]): Promise<void> {
+  const store = await lineStore()
+  for (const raw of texts) {
+    const text = shape(raw)
+    if (!text || text.length > LINE_MAX || lines.has(text) || cloudRefused || !caps().tts) continue
+    const hit = await store?.match(lineKey(text)).catch(() => undefined)
+    if (hit) {
+      lines.set(text, await hit.blob())
+      continue
+    }
+    const url = await fetchCloudAudio(text)
+    if (url) URL.revokeObjectURL(url)
+  }
+}
+
 /** ElevenLabs through the bridge, which holds the key. null on any failure,
  *  which falls back to the browser's own voice for that sentence. */
 async function fetchCloudAudio(text: string): Promise<string | null> {
+  const kept = lines.get(text)
+  if (kept) return URL.createObjectURL(kept)
   try {
     const res = await fetch(`${BRIDGE_HTTP_URL}/tts`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text }),
     })
-    if (res.ok) return URL.createObjectURL(await res.blob())
+    if (res.ok) {
+      const blob = await res.blob()
+      keepLine(text, blob)
+      return URL.createObjectURL(blob)
+    }
     if ([401, 402, 403, 429].includes(res.status)) {
       cloudRefused = true
       console.warn(`[ayra] ElevenLabs refused speech (${res.status}) — using the browser voice from now on`)

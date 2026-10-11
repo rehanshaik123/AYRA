@@ -271,34 +271,62 @@ function Op-Read($req) {
   @{ window = (Describe-Window $win); items = $items; more = $more }
 }
 
+# The Start menu's apps, listed once in the background as the worker starts -
+# Get-StartApps takes a second or two, and the first "open" used to wait for it.
+$script:appsJob = [PowerShell]::Create().AddScript('@(Get-StartApps | Select-Object Name, AppID)')
+$script:appsAsync = $script:appsJob.BeginInvoke()
+
+function StartApps([bool]$fresh = $false) {
+  if ($script:appsJob) {
+    try { $script:startApps = @($script:appsJob.EndInvoke($script:appsAsync)) } catch { }
+    $script:appsJob.Dispose()
+    $script:appsJob = $null
+  }
+  if ($fresh -or -not $script:startApps) { $script:startApps = @(Get-StartApps) }
+  $script:startApps
+}
+
+# Exact name, then the name it begins with; `strict` stops there (the fast path:
+# "open notes" must not open "Sticky Notes" by accident). Otherwise any name
+# that contains it.
+function Find-App([string]$q, [bool]$strict, $apps) {
+  $hit = $apps | Where-Object { $_.Name -eq $q } | Select-Object -First 1
+  if (-not $hit) {
+    $hit = $apps | Where-Object { $_.Name.StartsWith($q, [StringComparison]::OrdinalIgnoreCase) } |
+      Sort-Object { $_.Name.Length } | Select-Object -First 1
+  }
+  if (-not $hit -and -not $strict) {
+    $hit = $apps | Where-Object { $_.Name.IndexOf($q, [StringComparison]::OrdinalIgnoreCase) -ge 0 } |
+      Sort-Object { $_.Name.Length } | Select-Object -First 1
+  }
+  $hit
+}
+
 function Op-Open($req) {
-  if (-not $script:startApps) { $script:startApps = @(Get-StartApps) }
   $q = "$($req.name)".Trim()
-  $hit = $script:startApps | Where-Object { $_.Name -eq $q } | Select-Object -First 1
-  if (-not $hit) {
-    $hit = $script:startApps | Where-Object { $_.Name.StartsWith($q, [StringComparison]::OrdinalIgnoreCase) } |
-      Sort-Object { $_.Name.Length } | Select-Object -First 1
-  }
-  if (-not $hit) {
-    $hit = $script:startApps | Where-Object { $_.Name.IndexOf($q, [StringComparison]::OrdinalIgnoreCase) -ge 0 } |
-      Sort-Object { $_.Name.Length } | Select-Object -First 1
-  }
+  $strict = [bool]$req.strict
+  $hit = Find-App $q $strict (StartApps)
+  # Installed since the list was made: look once more.
+  if (-not $hit) { $hit = Find-App $q $strict (StartApps $true) }
   if (-not $hit) { throw "No app called '$q' in the Start menu." }
 
   $before = @{}
   foreach ($w in Get-TopWindows) { $before[$w.Current.NativeWindowHandle] = $true }
   Start-Process explorer.exe "shell:AppsFolder\$($hit.AppID)"
+  # The fast path says "Opening ..." while the app starts; it doesn't wait for the window.
+  if ($req.wait -eq $false) { return @{ app = $hit.Name; window = $null } }
   # A new window means it opened; an app that allows only one window (Settings,
   # Calculator...) comes to the front in the one it has.
   $started = Get-Date
   while (((Get-Date) - $started).TotalSeconds -lt 10) {
-    Start-Sleep -Milliseconds 250
+    Start-Sleep -Milliseconds 100
     $elapsed = ((Get-Date) - $started).TotalSeconds
     foreach ($w in Get-TopWindows) {
       $c = $w.Current
       $new = -not $before.ContainsKey($c.NativeWindowHandle)
       if ($new -or ($elapsed -gt 2 -and $c.Name.IndexOf($hit.Name, [StringComparison]::OrdinalIgnoreCase) -ge 0)) {
-        Start-Sleep -Milliseconds 500
+        # A moment for its controls to appear before it is read.
+        Start-Sleep -Milliseconds 200
         return @{ app = $hit.Name; window = (Describe-Window $w) }
       }
     }

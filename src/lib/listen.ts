@@ -50,8 +50,12 @@ export type Listener = {
   finish: () => void
   /** Hands-free: send bursts of speech for a name check (true) or stop (false). */
   stream: (on: boolean) => void
-  /** Her name was heard: start a segment from where that burst began. */
-  armFromCandidate: () => void
+  /**
+   * Her name was heard: start a segment from where that burst began.
+   * `quietEnd`: the burst already held a command, so the segment may end as
+   * soon as the room is quiet (not SILENCE_MS after this moment).
+   */
+  armFromCandidate: (quietEnd?: boolean) => void
   live: () => boolean
   meter: () => { energy: number; floor: number; threshold: number; speaking: boolean }
 }
@@ -226,7 +230,7 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
         dialWake()
       } else closeWake()
     },
-    armFromCandidate: () => node.port.postMessage({ armFromCandidate: true }),
+    armFromCandidate: (quietEnd = false) => node.port.postMessage({ armFromCandidate: true, quietEnd }),
     live: () => !stopped && ctx.state !== 'closed',
     meter: () => meter,
   }

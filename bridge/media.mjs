@@ -33,7 +33,7 @@ function runScript(action, ids = []) {
 
 /**
  * @param {{ run?: (action: string, ids: string[]) => Promise<string[]>, enabled?: boolean, log?: (m: string) => void }} options
- * @returns {{ pause: () => Promise<void>, resume: () => Promise<void> }}
+ * @returns {{ pause: () => Promise<void>, resume: () => Promise<void>, command: (action: 'pause'|'play'|'next'|'prev') => Promise<boolean> }}
  */
 export function createMedia({ run = runScript, enabled = process.platform === 'win32', log = () => {} } = {}) {
   /** What she paused and hasn't resumed yet. */
@@ -56,6 +56,26 @@ export function createMedia({ run = runScript, enabled = process.platform === 'w
         const ids = paused
         paused = []
         await run('resume', ids)
+      }),
+    /**
+     * The owner's own command (fastpath.mjs). By the time they have said
+     * "pause the music" she has already paused it to listen, so a pause only
+     * forgets that it was hers — it then stays paused when she goes back to
+     * standby. Play, next and previous act on the session they last used
+     * (Windows' current media session).
+     * True when something was done.
+     */
+    command: (action) =>
+      queue(async () => {
+        if (!enabled) return false
+        if (action === 'pause') {
+          const held = paused.length > 0
+          paused = []
+          return held || (await run('pause')).length > 0
+        }
+        // A skip keeps what she paused to listen: it resumes, on the new track, at standby.
+        if (action === 'play') paused = []
+        return (await run(action)).length > 0
       }),
   }
 }

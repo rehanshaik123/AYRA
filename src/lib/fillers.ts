@@ -73,6 +73,13 @@ export const acknowledge = makePicker(ACKNOWLEDGE)
 export const attention = makePicker(ATTENTION)
 
 /**
+ * The lines most often said while the owner waits — on a tool, on her name —
+ * for the speaker to synthesise once after boot (tts.ts prefetchLines), so
+ * they play at once instead of after a round trip.
+ */
+export const COMMON_LINES: readonly string[] = [...new Set([...WORKING, ...ATTENTION, ...ACKNOWLEDGE])]
+
+/**
  * Naming the task is warmer than a generic acknowledgement and shows the
  * integration off on camera. Still participial, still under five words.
  *

@@ -173,6 +173,27 @@ test('her name heard: listening starts where the burst began', () => {
   assert.ok(secs >= 2.2 && secs <= 3.2, String(secs))
 })
 
+test('a burst that held the command ends as soon as the room is quiet (quietEnd)', () => {
+  const run = (quietEnd) => {
+    const core = new ListenCore(RATE)
+    core.arm(false)
+    core.setStream(true)
+    feed(core, 2000, () => noise(0.002)())
+    feed(core, 1500, voice(0.2))
+    feed(core, 1500, () => noise(0.002)())
+    core.armFromCandidate(quietEnd)
+    // How long, in quiet, until the segment ends.
+    for (let ms = 20; ms <= 2000; ms += 20) {
+      if (feed(core, 20, () => noise(0.002)()).some((e) => e.type === 'end')) return ms
+    }
+    return Infinity
+  }
+  const quick = run(true)
+  const usual = run(false)
+  assert.ok(quick <= 100, `quietEnd ended after ${quick} ms`)
+  assert.ok(usual >= 500, `the usual wake still waits (${usual} ms)`)
+})
+
 test('while she speaks, nothing goes for a check', () => {
   const core = new ListenCore(RATE)
   core.arm(false)

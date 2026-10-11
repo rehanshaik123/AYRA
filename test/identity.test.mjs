@@ -56,15 +56,18 @@ test("the persona's roasting and flirting keep their guardrails", () => {
   assert.ok(SYSTEM_PROMPT.includes('be serious'))
 })
 
-test('the voice persona: the ranker decides research, a web answer is said first then show_data', () => {
+test('the voice persona: the ranker decides research, a web answer is said first, its card a <data> tag after', () => {
   // The depth line the brain puts in front of a complex question (triage.mjs depthHint).
   assert.ok(SYSTEM_PROMPT.includes('[Depth'))
   assert.ok(SYSTEM_PROMPT.includes('use the research tool]'))
   assert.ok(SYSTEM_PROMPT.includes('Without that line, never use research'))
   assert.ok(SYSTEM_PROMPT.includes('for clearly complex questions'))
-  // Speak first, then one show_data call, only for a figure, name, date, score or yes/no.
+  // Speak first, then the card as a <data> tag at the end (datatag.mjs), only for a
+  // figure, name, date, score or yes/no — never the slow show_data turn.
   assert.ok(SYSTEM_PROMPT.includes('SAY the answer first'))
-  assert.ok(SYSTEM_PROMPT.includes('`show_data` once in the same message'))
+  assert.ok(SYSTEM_PROMPT.includes('end that same message with its data card'))
+  assert.ok(SYSTEM_PROMPT.includes('<data>{"title"'))
+  assert.ok(SYSTEM_PROMPT.includes('never call\n  `show_data`'))
   assert.ok(SYSTEM_PROMPT.includes('a figure, a name, a date, a score\n  or a yes/no'))
   assert.ok(SYSTEM_PROMPT.includes('Skip it for news, how-to and explanations'))
   assert.ok(SYSTEM_PROMPT.includes('never `display` it as well'))
