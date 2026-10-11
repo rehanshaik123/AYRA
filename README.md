@@ -35,7 +35,22 @@ Press **W** in her window (or **Ctrl+Alt+W** / the tray menu from any app) and j
 from any app, her window needn't be in front. Only short bursts of speech that start after a quiet
 moment are checked for her name (never the room, never while music plays), at most 120 an hour.
 After answering she listens about 15 seconds for a follow-up. **Ctrl+Alt+Space** is Space from any
-app. While she listens, whatever is playing (Spotify, a video) pauses, and resumes after.
+app. While she listens, whatever is playing (Spotify, a video) pauses, and resumes after. Sound that
+comes out of the laptop's own speakers — a video, another app saying her name — is recognised and
+ignored.
+
+## Researcher mode
+
+Press **R** in her window. Every question then goes to a deeper research run: a planner works out
+what you really need and picks the platforms; agents search GitHub, Stack Overflow, Hacker News and
+arXiv (their public APIs), Quora and the web at once; every result is scored for relevance (0–100)
+and ranked; and a final answer is written with citations. One to three minutes; the board shows each
+platform as it works. Press **R** again for normal mode. (Reddit needs its own API key — not yet set up.)
+
+## Quick commands
+
+"Open YouTube", "open Spotify", "open my downloads", "pause the music", "next song" are done at once,
+without a model turn (about a second).
 
 ## Research agent
 

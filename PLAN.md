@@ -341,7 +341,7 @@ sources card per turn (sources.mjs).
       iPhone 17 vs Pixel 10 → complex 8/10, 4 agents + reviewer, 10 calls, 53 s, 40 % confidence.
 - [ ] R.7 Page reading: many sites refuse the bridge's fetch (1 of 9 pages read on two parts) —
       read the blocked ones through her Chrome, or prefer sources that allow reading.
-- [ ] R.8 Ordinary answers: she sometimes draws the data card before speaking (17.9 s to the first
+- [x] R.8 Ordinary answers: she sometimes draws the data card before speaking (17.9 s to the first
       word on the gold price); measure with `npm run bench`, nudge or restructure.
 - [ ] R.9 The adversarial review the usage limit cut off; the owner's OK to merge.
 
@@ -368,6 +368,33 @@ all caught test voices but none caught the owner's own "Hey Aira" — dropped.
 - [x] H.5 The owner's own recorded "Hey Aira" (fake microphone, real face and bridge): woke on the first
       one, listened for the command, back to standby; Spotify's lyrics come back as "[background music]".
 - [ ] H.6 🧑 Live, in the room: say "AYRA" from another app with and without music playing.
+
+## Overnight work · branch `researcher-mode` (2026-10-12, built on `research-agent`)
+
+**Goal (the owner, 2026-10-12):** researcher mode on R — reason over the question, sub-agents search
+Reddit, Quora, GitHub and other high-relevance platforms, the results scored for relevance, a
+finalised answer — with normal AYRA kept as it is; AYRA faster at opening and clicking, with full
+control of the laptop; she must not answer sound from Chrome or other apps; less latency everywhere.
+The owner was asleep and asked for the recommended decisions, reported in the morning.
+
+- [x] O.1 Researcher mode: `deep.mjs` (a planner at high effort → one lane per platform → rank → a
+      final cited answer), `platforms.mjs` (GitHub, Stack Exchange, Hacker News and arXiv through
+      their public APIs; Quora and the web through WebSearch limited by allowed_domains); the face's R
+      key, RESEARCHER badge and board (lanes, ranked results with 0–100 scores). Live: 65 s, 9 calls.
+- [ ] O.1b 🧑 Reddit: Anthropic's web search refuses reddit.com, so the lane says so. Searching it needs
+      Reddit's own API — a free "script" app on the owner's Reddit account.
+- [x] O.2 Sound from the laptop's speakers is not the owner: `meter.ps1` + `echo.mjs` drop a hands-free
+      burst that matches what the speakers played. Live, real microphone: "Hey AYRA" from a laptop app,
+      from another Chrome and the owner's own recording through the speakers all woke her before, none after.
+- [x] O.3 Fast path (`fastpath.mjs`): open an app, a site or a folder, and pause/play/next/previous,
+      done in code — 1.0–1.9 s instead of ~7 s through the brain.
+- [x] O.4 Latency (the audit of 2026-10-12): the data card as a `<data>` tag after the spoken answer
+      (R.8), a keep-alive ElevenLabs socket, quicker browser clicks that hand back the page, TTS one
+      sentence ahead, no 6 s stall after a cough, a one-breath "Hey AYRA, …" ends sooner, the brain
+      woken on the press, no claude.ai connectors started, filler lines cached, the apps worker warm.
+- [ ] O.5 🧑 Whole-screen control (see the screen as a picture, click and type anywhere): a safety check
+      stopped it being built. The owner sets the scope — which apps, which actions run without Approve.
+- [ ] O.6 🧑 Live in the room: hands-free with a video playing; R and a real question.
 
 ## Phase 7 — Apps, one at a time · branch `phase-7-apps`
 

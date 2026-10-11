@@ -106,6 +106,9 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/allowances.mjs` · `bridge/rules.mjs` | "Always allow here": standing allowances for sending/posting on one site or in one app — only the owner's button adds one · tool server `ayra_rules` (list, take back; no add) |
 | `bridge/jobs.mjs` · `bridge/presence.mjs` | Background jobs — one at a time, 30 min / 60 steps, reported on Telegram; tool server `ayra_jobs` · "I'm back" on Telegram after the laptop was off or asleep |
 | `bridge/research.mjs` · `bridge/trust.mjs` | **The research agent**: `createResearch()` → `run / interrupt / busy / recent / report`; code runs plan → search → read → extract → cross-check → answer with one-shot Claude agents (readers get no tools), reports saved in `data/research/` for replay and offline; tool server `ayra_research` · pure: source trust, injection scan, quote check, confidence |
+| `bridge/deep.mjs` · `bridge/platforms.mjs` | **Researcher mode** (the R key): `createDeepResearch()` → `run / interrupt / busy / ready / report`; planner (high effort) → one lane per platform → rank (relevance + platform signal + trust + freshness) → final cited answer; tool `deep_research` on `ayra_research` · GitHub / Stack Exchange / Hacker News / arXiv public APIs through net.mjs, `signalScore` |
+| `bridge/fastpath.mjs` · `bridge/datatag.mjs` · `bridge/eleven.mjs` | "Open YouTube", "pause the music" done in code, no model turn · the answer's data card as a `<data>{…}</data>` tag after the spoken answer, cut from speech · a keep-alive ElevenLabs socket for her voice |
+| `bridge/echo.mjs` · `bridge/meter.ps1` | Hands-free ignores the laptop's own speakers: a Windows peak meter, and a burst whose loudness curve matches what was played is dropped before the name check |
 | `bridge/approvals.mjs` | The owner's Approve: holds each "ask" until the first answer (HUD, voice, Telegram) or 2 min → no; `halt()` is the kill switch |
 | `bridge/listen.mjs` | Live hearing: relays the face's microphone stream (`/listen` socket) to ElevenLabs Scribe Realtime and the words back |
 | `bridge/wake.mjs` · `bridge/media.mjs` · `bridge/triage.mjs` | Hands-free: short bursts of speech from the face (`/wake` socket) checked by ElevenLabs Scribe for her name, capped per hour · pauses whatever is playing while she listens (Windows media controls, `media.ps1`) · ranks a question's depth in code |
@@ -141,13 +144,13 @@ HUD socket: face sends `hearing {mode}` (push | hands-free) and `media {action: 
 Live hearing (`/listen` WebSocket): face sends 16 kHz PCM (binary), `commit`, `warm`; bridge sends
 `partial {text}`, `final {text}`, `error {code,message}` — see `bridge/listen.mjs`.
 
-Face ↔ brain protocol (WebSocket): face sends `ask {id,text}`, `interrupt`, `warm` (speech began:
+Face ↔ brain protocol (WebSocket): face sends `ask {id,text,mode?}` (`mode: 'research'` in researcher mode: the bridge steers the turn to deep_research), `interrupt`, `warm` (speech began:
 wake a sleeping brain), `approval {id,ok,always}`, `halt`; brain sends `approve {id,reason,detail,tool,always}`
 (`always`: the third button's words, or ''),
 `approved {id,ok,by}`, `halt {by}`,
 `ready {servers}`, `text {delta}`, `tool {name}`, `done {text}`, `error {message}`, `blade` (one with
 `kind: 'research'` carries `research`, the board state — same id each update) — turn
-frames carry `ask: <id>`. Inside the bridge the brain also emits `sources {query, links}`, which the
+frames carry `ask: <id>`. Her text may end with a `<data>{…}</data>` tag: the bridge cuts it from the `text`/`done` frames and draws the data card (datatag.mjs). A whole command like "open YouTube" may be answered by the bridge itself (`text` + `done`, no brain). Inside the bridge the brain also emits `sources {query, links}`, which the
 HUD channel turns into a `blade`. Change both sides together or not at all. The core ↔ desk link protocol
 will live in `bridge/link.mjs` (Phase 10), and the same rule applies.
 
