@@ -223,6 +223,8 @@ function ApproveCard() {
 export function Hud() {
   const phase = useStore((s) => s.phase)
   const hearing = useStore((s) => s.hearing)
+  const mode = useStore((s) => s.mode)
+  const researching = mode === 'research'
   const caption = useStore((s) => s.caption)
   const turns = useStore((s) => s.turns)
   const activeTool = useStore((s) => s.activeTool)
@@ -254,8 +256,19 @@ export function Hud() {
         <div className="status">
           <span className="dot" />
           <span className="status-text">
-            {phase === 'dormant' && hearing === 'hands-free' ? HANDS_FREE_STANDBY : statusText[phase]}
+            {phase === 'dormant' && hearing === 'hands-free'
+              ? HANDS_FREE_STANDBY
+              : researching && (phase === 'thinking' || phase === 'tooling')
+                ? 'RESEARCHING'
+                : statusText[phase]}
           </span>
+          {/* Researcher mode (R): every question goes to the researcher. */}
+          {researching && (
+            <span className="hud-mode" role="status" title="Researcher mode — R to go back to normal">
+              <i aria-hidden="true" />
+              RESEARCHER
+            </span>
+          )}
         </div>
       </header>
 
@@ -355,7 +368,8 @@ export function Hud() {
       <footer className="hud-bottom">
         <span className="hint">
           <kbd>Space</kbd> talk · <kbd>Space</kbd> again send · <kbd>Space</kbd><kbd>Space</kbd> stop ·{' '}
-          <kbd>W</kbd> hands-free {hearing === 'hands-free' ? 'on' : 'off'} · <kbd>L</kbd> still
+          <kbd>W</kbd> hands-free {hearing === 'hands-free' ? 'on' : 'off'} · <kbd>R</kbd> researcher{' '}
+          {researching ? 'on' : 'off'} · <kbd>L</kbd> still
           {voice && (
             <>
               {' · '}

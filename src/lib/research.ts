@@ -10,9 +10,45 @@
  *
  * Everything in here is pure on purpose: every decision about what a card shows
  * can be tested without a browser (test/research-face.test.mjs).
+ *
+ * Researcher mode (the R key; bridge/deep.mjs) sends the same object with
+ * `variant: 'deep'`: four other stages (reason → platforms → rank → final), one
+ * part per platform searched (Reddit, Quora, GitHub, …), and the results
+ * ranked by relevance. Every field it adds is optional, so an ordinary run's
+ * state is exactly what it was.
  */
 
 export type ResearchLevel = 'simple' | 'moderate' | 'complex'
+
+/** Where researcher mode looks. 'web' is anything else. */
+export type Platform = 'reddit' | 'quora' | 'github' | 'stackoverflow' | 'hackernews' | 'arxiv' | 'web'
+
+/** Researcher mode's first stage: what the question is really after. */
+export type ResearchReasoning = {
+  /** One line: what the owner wants to know. */
+  intent: string
+  /** 'how-to', 'comparison', 'opinion', … — a word or two. */
+  kind: string
+  /** What a good result has to show. */
+  criteria: string[]
+}
+
+/** One of researcher mode's results, ranked against the question. */
+export type RankedResult = {
+  n: number
+  title: string
+  url: string
+  domain: string
+  platform: Platform
+  /** 0..100, best first. */
+  score: number
+  /** 0..10, the ranker's relevance to the question. */
+  relevance: number
+  /** Why to trust it, in a few words: '1.2k stars · Mar 2025'. */
+  signal: string
+  /** One line. */
+  summary: string
+}
 
 /** The ranker's verdict on the question (bridge/triage.mjs). */
 export type ResearchRank = {
@@ -25,11 +61,12 @@ export type ResearchRank = {
   reasons: string[]
 }
 
-export type ResearchStageKey = 'rank' | 'split' | 'agents' | 'review'
+/** The ordinary run's four, then researcher mode's ('rank' is in both). */
+export type ResearchStageKey = 'rank' | 'split' | 'agents' | 'review' | 'reason' | 'platforms' | 'final'
 
 export type ResearchStage = {
   key: ResearchStageKey
-  /** 'Rank' | 'Split' | 'Agents' | 'Review' */
+  /** 'Rank' | 'Split' | 'Agents' | 'Review'; researcher mode 'Reason' | 'Platforms' | 'Rank' | 'Final' */
   label: string
   state: 'wait' | 'run' | 'done' | 'fail' | 'skip'
   note?: string
@@ -54,6 +91,8 @@ export type ResearchPart = {
   /** Quoted findings that survived the quote check. */
   findings: number
   error?: string
+  /** Researcher mode: the platform this lane searches. */
+  platform?: Platform
 }
 
 /** What the reviewer did with the findings. */
@@ -79,6 +118,9 @@ export type ResearchSource = {
   trust: number
   /** Cited by the answer, a kept fact or a figure. */
   used: boolean
+  /** Researcher mode: where it was found, and its rank score (0..100). */
+  platform?: Platform
+  score?: number
 }
 
 export type ResearchFact = {
@@ -126,6 +168,9 @@ export type BladeLink = {
   title: string
   url: string
   domain: string
+  /** Researcher mode: where it was found, and its rank score (0..100). */
+  platform?: Platform
+  score?: number
 }
 
 export type Research = {
@@ -165,6 +210,13 @@ export type Research = {
   sources: ResearchSource[]
   facts: ResearchFact[]
   gaps: string[]
+  /** Researcher mode (bridge/deep.mjs). Absent on an ordinary run. */
+  variant?: 'deep'
+  reasoning?: ResearchReasoning | null
+  /** At most twelve, best first. */
+  ranked?: RankedResult[]
+  /** At most two sentences, for her voice. */
+  spoken?: string
 }
 
 export type Tone = 'green' | 'amber' | 'red' | 'dim'
@@ -178,6 +230,19 @@ export const STAGES: ReadonlyArray<readonly [ResearchStageKey, string]> = [
   ['agents', 'Agents'],
   ['review', 'Review'],
 ]
+
+/** Researcher mode's four, in order. Its 'rank' ranks the results, not the question. */
+export const DEEP_STAGES: ReadonlyArray<readonly [ResearchStageKey, string]> = [
+  ['reason', 'Reason'],
+  ['platforms', 'Platforms'],
+  ['rank', 'Rank'],
+  ['final', 'Final'],
+]
+
+/** One lane per platform: seven today, room for one more. */
+const DEEP_PARTS = 8
+/** The ranked list's length (bridge/deep.mjs sends at most twelve). */
+const RANKED_MAX = 12
 
 const STATUSES: ReadonlySet<string> = new Set(['running', 'done', 'failed', 'stopped', 'skipped'])
 const MODES: ReadonlySet<string> = new Set(['live', 'cache', 'offline'])
@@ -243,8 +308,9 @@ export function withDefaults(raw: unknown): Research {
   const confidence = typeof answer.confidence === 'number' && Number.isFinite(answer.confidence)
     ? clamp01(answer.confidence)
     : null
+  const deep = r.variant === 'deep'
 
-  return {
+  const out: Research = {
     id: clip(r.id, 80),
     question: clip(r.question, 400),
     status: pick(r.status, STATUSES, 'running'),
@@ -257,7 +323,7 @@ export function withDefaults(raw: unknown): Research {
     rank: cleanRank(r.rank),
     // Always the four, in pipeline order, whatever order or subset arrived;
     // a stage the face does not know is dropped.
-    stages: STAGES.map(([key, fallback]) => {
+    stages: (deep ? DEEP_STAGES : STAGES).map(([key, fallback]) => {
       const s = stages.find((x) => x.key === key) ?? {}
       return {
         key,
@@ -267,8 +333,10 @@ export function withDefaults(raw: unknown): Research {
         ms: typeof s.ms === 'number' && Number.isFinite(s.ms) && s.ms >= 0 ? s.ms : undefined,
       }
     }),
-    parts: list(r.parts).slice(0, 6).map((x, k) => {
+    parts: list(r.parts).slice(0, deep ? DEEP_PARTS : 6).map((x, k) => {
       const p = rec(x)
+      // A lane always knows its platform; an ordinary part has none.
+      const platform = platformOf(p.platform) ?? (deep ? 'web' : undefined)
       return {
         i: sourceN(p.i) ?? k + 1,
         title: clip(p.title, 60),
@@ -278,6 +346,7 @@ export function withDefaults(raw: unknown): Research {
         read: count(p.read),
         findings: count(p.findings),
         error: optClip(p.error, 120),
+        ...(platform ? { platform } : {}),
       }
     }),
     review: r.review && typeof r.review === 'object'
@@ -306,6 +375,8 @@ export function withDefaults(raw: unknown): Research {
     sources: list(r.sources).slice(0, 40).map((x) => {
       const s = rec(x)
       const url = clip(s.url, 2000)
+      const platform = platformOf(s.platform)
+      const score = scoreOf(s.score)
       return {
         n: count(s.n),
         title: clip(s.title, 200),
@@ -314,6 +385,8 @@ export function withDefaults(raw: unknown): Research {
         kind: pick(s.kind, KINDS, 'web'),
         trust: clamp01(num(s.trust)),
         used: s.used === true,
+        ...(platform ? { platform } : {}),
+        ...(score !== undefined ? { score } : {}),
       }
     }),
     facts: list(r.facts).slice(0, 20).map((x, i) => {
@@ -331,6 +404,16 @@ export function withDefaults(raw: unknown): Research {
     }),
     gaps: list(r.gaps).map((g) => clip(g, 200)).filter(Boolean).slice(0, 8),
   }
+  // Researcher mode's own fields, only on its runs: an ordinary state keeps
+  // exactly the shape it always had.
+  if (deep) {
+    out.variant = 'deep'
+    out.reasoning = cleanReasoning(r.reasoning)
+    out.ranked = cleanRanked(r.ranked)
+    const spoken = optClip(r.spoken, 400)
+    if (spoken) out.spoken = spoken
+  }
+  return out
 }
 
 function cleanRank(raw: unknown): ResearchRank | null {
@@ -339,9 +422,75 @@ function cleanRank(raw: unknown): ResearchRank | null {
   return {
     score: Math.min(10, count(k.score)),
     level: k.level as ResearchLevel,
-    parts: Math.min(6, count(k.parts)),
+    // Researcher mode counts its platforms here: up to eight.
+    parts: Math.min(DEEP_PARTS, count(k.parts)),
     reasons: list(k.reasons).map((s) => clip(s, 40)).filter(Boolean).slice(0, 6),
   }
+}
+
+const PLATFORM_KEYS: ReadonlySet<string> = new Set([
+  'reddit', 'quora', 'github', 'stackoverflow', 'hackernews', 'arxiv', 'web',
+])
+
+/**
+ * A platform key, or nothing when none was sent. A name the face does not know
+ * yet is 'web' — still a place she looked, just not one with its own colour.
+ */
+export function platformOf(x: unknown): Platform | undefined {
+  if (typeof x !== 'string' || !x.trim()) return undefined
+  const k = x.trim().toLowerCase()
+  return PLATFORM_KEYS.has(k) ? (k as Platform) : 'web'
+}
+
+/** A rank score: a whole number 0..100, or nothing when none was sent. */
+export function scoreOf(x: unknown): number | undefined {
+  if (typeof x !== 'number' || !Number.isFinite(x)) return undefined
+  return Math.round(Math.min(100, Math.max(0, x)))
+}
+
+/** What researcher mode made of the question, or null when it sent nothing usable. */
+function cleanReasoning(raw: unknown): ResearchReasoning | null {
+  if (!raw || typeof raw !== 'object') return null
+  const v = rec(raw)
+  const intent = clip(v.intent, 240)
+  const kind = clip(v.kind, 40)
+  const criteria = list(v.criteria).map((c) => clip(c, 80)).filter(Boolean).slice(0, 6)
+  if (!intent && !kind && !criteria.length) return null
+  return { intent, kind, criteria }
+}
+
+/**
+ * Researcher mode's results, safe to render: in the order sent (the bridge
+ * ranked them — the face does not second-guess it), repeats dropped, at most
+ * twelve. A result with neither a title nor an address is no result.
+ */
+export function cleanRanked(raw: unknown): RankedResult[] {
+  const out: RankedResult[] = []
+  const seen = new Set<string>()
+  for (const x of list(raw)) {
+    const v = rec(x)
+    const url = clip(v.url, 2000)
+    const title = clip(v.title, 200)
+    if (!url && !title) continue
+    if (url) {
+      if (seen.has(url)) continue
+      seen.add(url)
+    }
+    const relevance = num(v.relevance)
+    out.push({
+      n: sourceN(v.n) ?? out.length + 1,
+      title,
+      url,
+      domain: clip(v.domain, 120) || domainOf(url),
+      platform: platformOf(v.platform) ?? 'web',
+      score: scoreOf(v.score) ?? 0,
+      relevance: Math.round(Math.min(10, Math.max(0, relevance)) * 10) / 10,
+      signal: clip(v.signal, 80),
+      summary: clip(v.summary, 240),
+    })
+    if (out.length >= RANKED_MAX) break
+  }
+  return out
 }
 
 /**
@@ -401,7 +550,15 @@ export function cleanLinks(raw: unknown, max = 5): BladeLink[] {
       if (seen.has(url)) continue
       seen.add(url)
     }
-    out.push(strip({ n: sourceN(l.n), title, url, domain: clip(l.domain, 80) || domainOf(url) }))
+    out.push(strip({
+      n: sourceN(l.n),
+      title,
+      url,
+      domain: clip(l.domain, 80) || domainOf(url),
+      // Researcher mode's sources card: where each was found, and its score.
+      platform: platformOf(l.platform),
+      score: scoreOf(l.score),
+    }))
     if (out.length >= max) break
   }
   return out
@@ -514,14 +671,19 @@ const DOING: Record<ResearchStageKey, string> = {
   split: 'Splitting the question',
   agents: 'Agents at work',
   review: 'Reviewing the findings',
+  reason: 'Reasoning over the question',
+  platforms: 'Searching the platforms',
+  final: 'Writing the answer',
 }
 
 /** What the run is doing right now, in words — '' once it has stopped. */
-export function activityLine(r: Pick<Research, 'status' | 'stages'>): string {
+export function activityLine(r: Pick<Research, 'status' | 'stages' | 'variant'>): string {
   if (r.status !== 'running') return ''
   const stage = r.stages.find((s) => s.state === 'run') ?? r.stages.find((s) => s.state === 'wait')
   if (!stage) return 'Working…'
-  return stage.note || `${DOING[stage.key] ?? 'Working'}…`
+  // Researcher mode's rank stage ranks what came back, not the question.
+  const doing = r.variant === 'deep' && stage.key === 'rank' ? 'Ranking the results' : DOING[stage.key]
+  return stage.note || `${doing ?? 'Working'}…`
 }
 
 /**
@@ -591,4 +753,113 @@ export function changeTone(change: string | undefined): 'up' | 'down' | '' {
   if (/^[+▲↑]/.test(s)) return 'up'
   if (/^[-−–▼↓]/.test(s)) return 'down'
   return ''
+}
+
+/* ---------------------------------------------------------- researcher mode */
+
+export type PlatformInfo = { key: Platform; label: string; short: string; colour: string }
+
+/**
+ * Each platform's name and colour on the RESEARCHER board. The colours are
+ * picked to be told apart on the dark board at a glance — near each site's own
+ * where that does not clash with another — and the name is always written
+ * beside them, so colour is never the only cue.
+ */
+const PLATFORM_INFO: Record<Platform, Omit<PlatformInfo, 'key'>> = {
+  reddit: { label: 'Reddit', short: 'Reddit', colour: '#ff5c33' },
+  quora: { label: 'Quora', short: 'Quora', colour: '#e8577a' },
+  github: { label: 'GitHub', short: 'GitHub', colour: '#c9d4df' },
+  stackoverflow: { label: 'Stack Overflow', short: 'SO', colour: '#f5a623' },
+  hackernews: { label: 'Hacker News', short: 'HN', colour: '#ffd166' },
+  arxiv: { label: 'arXiv', short: 'arXiv', colour: '#b48cff' },
+  web: { label: 'Web', short: 'Web', colour: '#5cd8ff' },
+}
+
+/** A platform's name, short name and colour; anything unknown is the web's. */
+export function platformInfo(p: unknown): PlatformInfo {
+  const key = platformOf(p) ?? 'web'
+  return { key, ...PLATFORM_INFO[key] }
+}
+
+/** A score bar's width in percent, 0..100 — nonsense is an empty bar. */
+export function scoreWidth(score: unknown): number {
+  return scoreOf(score) ?? 0
+}
+
+/** A score's colour: strong, middling, weak. */
+export function scoreTone(score: unknown): Tone {
+  const s = scoreOf(score) ?? 0
+  if (s >= 70) return 'green'
+  if (s >= 40) return 'amber'
+  return 'dim'
+}
+
+/** Ranked results a docked board shows; full screen (E) shows them all. */
+export const RANKED_DOCKED = 5
+
+/** The ranked rows to draw, and how many more wait behind "full report". */
+export function rankedView<T>(ranked: readonly T[] | undefined, expanded: boolean): { rows: T[]; more: number } {
+  const all = Array.isArray(ranked) ? ranked : []
+  const rows = expanded ? all.slice() : all.slice(0, RANKED_DOCKED)
+  return { rows, more: all.length - rows.length }
+}
+
+/** A platform lane's counts: '14 found' while searching, '14 found · 5 read · 6 findings' after. */
+export function laneCounts(p: Pick<ResearchPart, 'state' | 'found' | 'read' | 'findings'>): string {
+  if (p.state === 'wait') return ''
+  if (p.state === 'search') return p.found ? `${p.found} found` : ''
+  return `${p.found} found · ${p.read} read · ${plural(p.findings, 'finding')}`
+}
+
+/** Under a stage's name: its note, else how long it took, else what it is doing. */
+export function stageSub(s: Pick<ResearchStage, 'state' | 'note' | 'ms'>): string {
+  if (s.note) return s.note
+  if (s.state === 'done' || s.state === 'fail') {
+    if (typeof s.ms === 'number' && Number.isFinite(s.ms)) return elapsed(s.ms)
+    return s.state === 'done' ? 'done' : 'failed'
+  }
+  if (s.state === 'run') return 'working…'
+  if (s.state === 'skip') return 'skipped'
+  return ''
+}
+
+/** 'Confidence High · 82%', 'Confidence 82%', or '' when the answer carries none. */
+export function confidenceLine(a: Pick<Research['answer'], 'label' | 'confidence'>): string {
+  const bits = [a.label, typeof a.confidence === 'number' ? pct(a.confidence) : ''].filter(Boolean)
+  return bits.length ? `Confidence ${bits.join(' · ')}` : ''
+}
+
+/** The confidence's colour. */
+export function confidenceTone(label: Research['answer']['label']): Tone {
+  if (label === 'High') return 'green'
+  if (label === 'Medium') return 'amber'
+  if (label === 'Low') return 'red'
+  return 'dim'
+}
+
+/**
+ * An answer's text cut at its citations: 'Use pnpm [2][5].' → ['Use pnpm ',
+ * 2, 5, '.'], and '[2, 5]' is two citations too. Anything else in brackets
+ * stays text — '[sic]', '[2024]', '[0]', a markdown link's '[docs]'.
+ */
+export function splitCites(text: unknown): Array<string | number> {
+  const s = str(text)
+  const out: Array<string | number> = []
+  let at = 0
+  for (const m of s.matchAll(/\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\]/g)) {
+    const ns = m[1].split(',').map((x) => Number(x.trim()))
+    if (!ns.every((n) => n >= 1)) continue
+    const from = m.index ?? 0
+    if (from > at) out.push(s.slice(at, from))
+    out.push(...ns)
+    at = from + m[0].length
+  }
+  if (at < s.length) out.push(s.slice(at))
+  return out
+}
+
+/** Where citation n points: its source's web address, or '' when it has none worth linking. */
+export function citeUrl(r: Pick<Research, 'sources' | 'ranked'>, n: number): string {
+  const url = r.sources.find((s) => s.n === n)?.url ?? r.ranked?.find((x) => x.n === n)?.url ?? ''
+  return isWebUrl(url) ? url : ''
 }

@@ -1,4 +1,4 @@
-import { bladeIsCurrent, type Approval, type Blade } from '../store'
+import { askFrame, bladeIsCurrent, type Approval, type Blade, type Mode } from '../store'
 import { BRIDGE_WS_URL } from '../config'
 import { withHonorific } from '../identity'
 
@@ -304,9 +304,15 @@ const QUIET_TOOLS: ReadonlySet<string> = new Set(['mcp__ayra__display', 'mcp__ay
 /** The turn in flight, so a barge-in can settle it locally. */
 let pending: { finish: (fallback?: string) => void } | null = null
 
+/**
+ * One question. `mode` 'research' (the R key) sends it to the researcher
+ * (bridge/deep.mjs) instead of her usual brain; the frame names the mode only
+ * then, so a normal question goes out exactly as it always did (askFrame).
+ */
 export async function ask(
   prompt: string,
   handlers: AskHandlers,
+  mode: Mode = 'normal',
 ): Promise<{ text: string; tools: string[] }> {
   /**
    * A new question supersedes the one in flight.
@@ -462,7 +468,7 @@ export async function ask(
     arm()
 
     try {
-      ws.send(JSON.stringify({ type: 'ask', text: prompt, id }))
+      ws.send(JSON.stringify(askFrame(prompt, id, mode)))
     } catch (err) {
       // The socket can go into CLOSING between connect() resolving and here.
       fail(err instanceof Error ? err : new Error(String(err)))

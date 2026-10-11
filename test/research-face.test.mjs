@@ -3,23 +3,38 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  DEEP_STAGES,
+  RANKED_DOCKED,
   STAGES,
   activityLine,
   changeTone,
+  citeUrl,
   cleanData,
   cleanLinks,
+  cleanRanked,
+  confidenceLine,
+  confidenceTone,
   dataFoot,
   domainOf,
   elapsed,
   isWebUrl,
+  laneCounts,
   liveElapsed,
   partActive,
   partCounts,
   partStateLabel,
   pct,
+  platformInfo,
+  platformOf,
   rankLabel,
+  rankedView,
   reviewLine,
   savedAgo,
+  scoreOf,
+  scoreTone,
+  scoreWidth,
+  splitCites,
+  stageSub,
   statusPill,
   withDefaults,
 } from '../src/lib/research.ts'
@@ -347,4 +362,219 @@ test('changeTone', () => {
   assert.equal(changeTone('-1.2%'), 'down')
   assert.equal(changeTone('flat'), '')
   assert.equal(changeTone(undefined), '')
+})
+
+/* ------------------------------------------------------- researcher mode */
+
+/** A researcher-mode state the way bridge/deep.mjs sends it, finished. */
+const deepDone = () => ({
+  id: 'rs-deep-1',
+  variant: 'deep',
+  question: 'best way to self-host a git server for a small team',
+  status: 'done',
+  mode: 'live',
+  startedAt: 1_000,
+  ms: 64_200,
+  rank: { score: 10, level: 'complex', parts: 7, reasons: ['researcher mode'] },
+  reasoning: { intent: 'Pick a self-hosted git server', kind: 'comparison', criteria: ['easy upkeep', 'CI built in', ''] },
+  stages: [
+    { key: 'reason', label: 'Reason', state: 'done', ms: 2100 },
+    { key: 'platforms', label: 'Platforms', state: 'done', ms: 41_000, note: '7 platforms' },
+    { key: 'rank', label: 'Rank', state: 'done', ms: 9000 },
+    { key: 'final', label: 'Final', state: 'done', ms: 12_000 },
+  ],
+  parts: [
+    { i: 1, title: 'Reddit', platform: 'reddit', question: 'gitea vs gitlab · self-host git', state: 'done', found: 14, read: 5, findings: 6 },
+    { i: 2, title: 'Quora', platform: 'quora', question: 'self-host git', state: 'fail', found: 0, read: 0, findings: 0, error: 'nothing readable' },
+    { i: 3, title: 'GitHub', platform: 'GitHub', question: 'gitea', state: 'done', found: 9, read: 4, findings: 5 },
+    { i: 4, title: 'Stack Overflow', platform: 'stackoverflow', state: 'done', found: 6, read: 2, findings: 1 },
+    { i: 5, title: 'Hacker News', platform: 'hackernews', state: 'done', found: 7, read: 3, findings: 2 },
+    { i: 6, title: 'arXiv', platform: 'arxiv', state: 'done', found: 0, read: 0, findings: 0 },
+    { i: 7, title: 'Web', platform: 'web', state: 'done', found: 10, read: 4, findings: 3 },
+  ],
+  ranked: [
+    { n: 1, title: 'Gitea vs GitLab for 5 people', url: 'https://www.reddit.com/r/selfhosted/x', domain: 'reddit.com', platform: 'reddit', score: 91.6, relevance: 9.24, signal: '412 upvotes · Mar 2025', summary: 'Gitea is lighter; GitLab brings CI.' },
+    { n: 2, title: 'go-gitea/gitea', url: 'https://github.com/go-gitea/gitea', platform: 'github', score: 88, relevance: 9, signal: '46k stars · Oct 2026', summary: 'Painless self-hosted git.' },
+    { n: 3, title: 'dup', url: 'https://github.com/go-gitea/gitea', platform: 'github', score: 50 },
+    { n: 4, title: 'Not a page', url: 'javascript:alert(1)', platform: 'myspace', score: 140, relevance: -2 },
+    { title: '', url: '' },
+  ],
+  sources: [
+    { n: 1, title: 'Gitea vs GitLab', url: 'https://www.reddit.com/r/selfhosted/x', kind: 'forum', trust: 0.6, used: true, platform: 'reddit', score: 92 },
+    { n: 2, title: 'gitea', url: 'https://github.com/go-gitea/gitea', kind: 'company', trust: 0.7, used: true, platform: 'github', score: 88 },
+  ],
+  answer: { text: 'Gitea for a small team [1][2]; GitLab if you want CI built in [1, 2].', confidence: 0.82, label: 'High' },
+  spoken: 'Gitea, unless you need CI built in.',
+  review: null,
+  stats: { calls: 11, found: 46, read: 18, findings: 17, quotes: 0, dropped: 0, injections: 0 },
+  data: null,
+  facts: [],
+  gaps: ['pricing of GitLab tiers'],
+})
+
+test('withDefaults: researcher mode comes through with its own stages, lanes and ranking', () => {
+  const r = withDefaults(deepDone())
+  assert.equal(r.variant, 'deep')
+  assert.deepEqual(r.stages.map((s) => s.key), DEEP_STAGES.map(([k]) => k))
+  assert.deepEqual(r.stages.map((s) => s.label), ['Reason', 'Platforms', 'Rank', 'Final'])
+  assert.equal(r.stages[1].note, '7 platforms')
+  assert.equal(r.rank.parts, 7)
+  assert.deepEqual(r.reasoning, { intent: 'Pick a self-hosted git server', kind: 'comparison', criteria: ['easy upkeep', 'CI built in'] })
+  // All seven lanes — an ordinary run stops at six parts.
+  assert.equal(r.parts.length, 7)
+  assert.deepEqual(r.parts.map((p) => p.platform), ['reddit', 'quora', 'github', 'stackoverflow', 'hackernews', 'arxiv', 'web'])
+  assert.equal(r.parts[1].error, 'nothing readable')
+  // Repeats and empties dropped; an unknown platform is the web; scores clamped.
+  assert.equal(r.ranked.length, 3)
+  assert.deepEqual(r.ranked[0], {
+    n: 1,
+    title: 'Gitea vs GitLab for 5 people',
+    url: 'https://www.reddit.com/r/selfhosted/x',
+    domain: 'reddit.com',
+    platform: 'reddit',
+    score: 92,
+    relevance: 9.2,
+    signal: '412 upvotes · Mar 2025',
+    summary: 'Gitea is lighter; GitLab brings CI.',
+  })
+  assert.equal(r.ranked[1].domain, 'github.com')
+  assert.equal(r.ranked[2].platform, 'web')
+  assert.equal(r.ranked[2].score, 100)
+  assert.equal(r.ranked[2].relevance, 0)
+  assert.equal(r.ranked[2].signal, '')
+  assert.equal(r.sources[0].platform, 'reddit')
+  assert.equal(r.sources[0].score, 92)
+  assert.equal(r.spoken, 'Gitea, unless you need CI built in.')
+})
+
+test('withDefaults: an ordinary run keeps exactly its old shape', () => {
+  const r = withDefaults(running())
+  for (const k of ['variant', 'reasoning', 'ranked', 'spoken']) assert.equal(k in r, false, k)
+  assert.equal('platform' in r.parts[0], false)
+  assert.deepEqual(r.stages.map((s) => s.key), ['rank', 'split', 'agents', 'review'])
+  // Researcher-mode stage keys mean nothing on an ordinary run.
+  const mixed = withDefaults({ stages: [{ key: 'reason', state: 'run' }, { key: 'rank', state: 'done' }] })
+  assert.deepEqual(mixed.stages.map((s) => [s.key, s.state]), [['rank', 'done'], ['split', 'wait'], ['agents', 'wait'], ['review', 'wait']])
+  // A hostile deep state still renders.
+  const odd = withDefaults({ variant: 'deep', reasoning: 'think', ranked: 'lots', parts: Array.from({ length: 20 }, () => ({})) })
+  assert.equal(odd.reasoning, null)
+  assert.deepEqual(odd.ranked, [])
+  assert.equal(odd.parts.length, 8)
+  assert.ok(odd.parts.every((p) => p.platform === 'web'))
+  assert.ok(odd.stages.every((s) => s.state === 'wait'))
+  assert.equal(withDefaults({ variant: 'deep', reasoning: { intent: '', criteria: [] } }).reasoning, null)
+})
+
+test('cleanRanked: twelve at most, in the order the ranker sent them', () => {
+  const many = Array.from({ length: 20 }, (_, i) => ({ title: `r${i}`, url: `https://x.example/${i}`, score: i }))
+  const out = cleanRanked(many)
+  assert.equal(out.length, 12)
+  assert.deepEqual(out.map((x) => x.title).slice(0, 3), ['r0', 'r1', 'r2'])
+  // A missing number is the position.
+  assert.equal(out[4].n, 5)
+  assert.deepEqual(cleanRanked(null), [])
+  assert.ok(cleanRanked([{ title: 't'.repeat(900), summary: 's'.repeat(900), url: 'https://a.example' }])[0].summary.length <= 240)
+})
+
+test('platformOf, platformInfo and scores', () => {
+  assert.equal(platformOf('Reddit'), 'reddit')
+  assert.equal(platformOf(' stackoverflow '), 'stackoverflow')
+  assert.equal(platformOf('medium'), 'web')
+  assert.equal(platformOf(''), undefined)
+  assert.equal(platformOf(7), undefined)
+  assert.deepEqual(platformInfo('github'), { key: 'github', label: 'GitHub', short: 'GitHub', colour: '#c9d4df' })
+  assert.equal(platformInfo('hackernews').short, 'HN')
+  assert.equal(platformInfo(null).label, 'Web')
+  // Every platform has its own colour.
+  const colours = ['reddit', 'quora', 'github', 'stackoverflow', 'hackernews', 'arxiv', 'web'].map((p) => platformInfo(p).colour)
+  assert.equal(new Set(colours).size, 7)
+
+  assert.equal(scoreOf(87.4), 87)
+  assert.equal(scoreOf(-5), 0)
+  assert.equal(scoreOf(250), 100)
+  assert.equal(scoreOf('90'), undefined)
+  assert.equal(scoreOf(Number.NaN), undefined)
+  assert.equal(scoreWidth(64), 64)
+  assert.equal(scoreWidth('x'), 0)
+  assert.equal(scoreWidth(1e9), 100)
+  assert.deepEqual([90, 70, 69, 40, 39, undefined].map(scoreTone), ['green', 'green', 'amber', 'amber', 'dim', 'dim'])
+})
+
+test('rankedView: five docked, all of them full screen', () => {
+  const twelve = Array.from({ length: 12 }, (_, i) => i)
+  assert.equal(RANKED_DOCKED, 5)
+  assert.deepEqual(rankedView(twelve, false), { rows: [0, 1, 2, 3, 4], more: 7 })
+  assert.deepEqual(rankedView(twelve, true), { rows: twelve, more: 0 })
+  assert.deepEqual(rankedView([1, 2], false), { rows: [1, 2], more: 0 })
+  assert.deepEqual(rankedView(undefined, false), { rows: [], more: 0 })
+})
+
+test('laneCounts and stageSub', () => {
+  const [reddit, quora] = withDefaults(deepDone()).parts
+  assert.equal(laneCounts(reddit), '14 found · 5 read · 6 findings')
+  assert.equal(laneCounts(quora), '0 found · 0 read · 0 findings')
+  assert.equal(laneCounts({ state: 'search', found: 12, read: 0, findings: 0 }), '12 found')
+  assert.equal(laneCounts({ state: 'search', found: 0, read: 0, findings: 0 }), '')
+  assert.equal(laneCounts({ state: 'wait', found: 3, read: 0, findings: 0 }), '')
+  assert.equal(laneCounts({ state: 'report', found: 4, read: 1, findings: 1 }), '4 found · 1 read · 1 finding')
+
+  assert.equal(stageSub({ state: 'done', note: '7 platforms', ms: 41_000 }), '7 platforms')
+  assert.equal(stageSub({ state: 'done', ms: 2100 }), '2.1 s')
+  assert.equal(stageSub({ state: 'done' }), 'done')
+  assert.equal(stageSub({ state: 'fail' }), 'failed')
+  assert.equal(stageSub({ state: 'run' }), 'working…')
+  assert.equal(stageSub({ state: 'skip' }), 'skipped')
+  assert.equal(stageSub({ state: 'wait' }), '')
+})
+
+test('activityLine in researcher mode', () => {
+  const at = (stages) => activityLine(withDefaults({ variant: 'deep', status: 'running', stages }))
+  assert.equal(at([]), 'Reasoning over the question…')
+  assert.equal(at([{ key: 'reason', state: 'done' }, { key: 'platforms', state: 'run' }]), 'Searching the platforms…')
+  assert.equal(at([{ key: 'reason', state: 'done' }, { key: 'platforms', state: 'done' }, { key: 'rank', state: 'run' }]), 'Ranking the results…')
+  assert.equal(at([{ key: 'reason', state: 'done' }, { key: 'platforms', state: 'done' }, { key: 'rank', state: 'done' }, { key: 'final', state: 'run' }]), 'Writing the answer…')
+  // The ordinary run's rank stage still ranks the question.
+  assert.equal(activityLine(withDefaults({ status: 'running' })), 'Ranking the question…')
+})
+
+test('confidenceLine and confidenceTone', () => {
+  assert.equal(confidenceLine({ label: 'High', confidence: 0.82 }), 'Confidence High · 82%')
+  assert.equal(confidenceLine({ label: null, confidence: 0.4 }), 'Confidence 40%')
+  assert.equal(confidenceLine({ label: 'Low', confidence: null }), 'Confidence Low')
+  assert.equal(confidenceLine({ label: null, confidence: null }), '')
+  assert.deepEqual(['High', 'Medium', 'Low', null].map(confidenceTone), ['green', 'amber', 'red', 'dim'])
+})
+
+test('splitCites: citations become numbers, every other bracket stays text', () => {
+  assert.deepEqual(splitCites('Gitea for a small team [1][2]; GitLab for CI [1, 2].'), ['Gitea for a small team ', 1, 2, '; GitLab for CI ', 1, 2, '.'])
+  assert.deepEqual(splitCites('In [2024] the [docs] said [sic] [0] and [7]'), ['In [2024] the [docs] said [sic] [0] and ', 7])
+  assert.deepEqual(splitCites('[3] first'), [3, ' first'])
+  assert.deepEqual(splitCites('no citations'), ['no citations'])
+  assert.deepEqual(splitCites(''), [])
+  assert.deepEqual(splitCites(null), [])
+  assert.deepEqual(splitCites({ evil: true }).every((x) => typeof x === 'string'), true)
+})
+
+test('citeUrl: a citation links to its source, and only to a web page', () => {
+  const r = withDefaults(deepDone())
+  assert.equal(citeUrl(r, 1), 'https://www.reddit.com/r/selfhosted/x')
+  assert.equal(citeUrl(r, 2), 'https://github.com/go-gitea/gitea')
+  // Not among the sources: the ranked list is asked; a javascript: address is no link.
+  assert.equal(citeUrl(r, 4), '')
+  assert.equal(citeUrl(r, 9), '')
+  assert.equal(citeUrl({ sources: [], ranked: [{ n: 5, url: 'https://five.example' }] }, 5), 'https://five.example')
+})
+
+test('cleanLinks: researcher mode adds a platform and a score; an ordinary link is unchanged', () => {
+  const [a, b, c] = cleanLinks([
+    { n: 1, title: 'Gitea vs GitLab', url: 'https://www.reddit.com/r/x', domain: 'reddit.com', platform: 'reddit', score: 91.6 },
+    { n: 2, title: 'gitea', url: 'https://github.com/go-gitea/gitea', platform: 'Kickstarter', score: 'high' },
+    { n: 3, title: 'plain', url: 'https://plain.example' },
+  ], 8)
+  assert.deepEqual(a, { n: 1, title: 'Gitea vs GitLab', url: 'https://www.reddit.com/r/x', domain: 'reddit.com', platform: 'reddit', score: 92 })
+  assert.equal(b.platform, 'web')
+  assert.equal('score' in b, false)
+  assert.deepEqual(c, { n: 3, title: 'plain', url: 'https://plain.example', domain: 'plain.example' })
+  const eight = cleanLinks(Array.from({ length: 12 }, (_, i) => ({ url: `https://s${i}.example` })), 8)
+  assert.equal(eight.length, 8)
 })

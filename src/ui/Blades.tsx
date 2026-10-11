@@ -4,7 +4,7 @@ import { useStore, bladeLife, dockOrder, TURN_MS, type Blade } from '../store'
 import { BRIDGE_HTTP_URL } from '../config'
 import { sanitisePanelHtml } from './sanitise'
 import { ResearchProgress } from './Research'
-import { changeTone, cleanData, cleanLinks, dataFoot, isWebUrl } from '../lib/research'
+import { changeTone, cleanData, cleanLinks, dataFoot, isWebUrl, platformInfo, scoreTone } from '../lib/research'
 
 /**
  * The blades.
@@ -175,7 +175,9 @@ const Body = memo(function Body({ blade, expanded, onMore }: BodyProps) {
 
   // The words on these three came off the open web, so they render as React
   // text — never through the markup path above.
-  if (blade.kind === 'research' && blade.research) return <ResearchProgress research={blade.research} />
+  if (blade.kind === 'research' && blade.research) {
+    return <ResearchProgress research={blade.research} expanded={expanded} onMore={onMore} />
+  }
   if (blade.kind === 'data') return <DataBody blade={blade} expanded={expanded} onMore={onMore} />
   if (blade.kind === 'sources') return <SourcesBody blade={blade} />
 
@@ -256,22 +258,40 @@ function Cite({ n }: { n: number }) {
 }
 
 /**
+ * Links a sources card shows. The bridge sends five for an ordinary answer and
+ * up to eight in researcher mode; this only stops a runaway list.
+ */
+const SOURCE_LINKS = 8
+
+/**
  * The sources the answer used, each a real link: one line each — its number,
- * its title, its site. In a narrow window they fold into a row of site chips.
- * Only http(s) addresses become links; anything else is shown as words.
+ * its title, its site. In researcher mode each also says where it was found and
+ * its rank score. In a narrow window they fold into a row of site chips. Only
+ * http(s) addresses become links; anything else is shown as words.
  */
 function SourcesBody({ blade }: { blade: Blade }) {
-  const links = useMemo(() => cleanLinks(blade.links), [blade.links])
+  const links = useMemo(() => cleanLinks(blade.links, SOURCE_LINKS), [blade.links])
   if (!links.length) return <p className="bl-note">No sources to show.</p>
 
   return (
     <div className="bl-sources">
       <ol className="bl-src-list">
         {links.map((l, i) => {
+          const info = l.platform ? platformInfo(l.platform) : null
           const inner = (
             <>
               <span className="bl-src-n">{l.n ?? '·'}</span>
               <span className="bl-src-t">{l.title || l.domain || l.url}</span>
+              {info && (
+                <span className="bl-src-pf" style={{ ['--plat' as string]: info.colour }} title={info.label}>
+                  {info.short}
+                </span>
+              )}
+              {l.score !== undefined && (
+                <span className={`bl-src-sc rs-t-${scoreTone(l.score)}`} title="Relevance score">
+                  {l.score}
+                </span>
+              )}
               <span className="bl-src-d">{l.domain}</span>
             </>
           )
@@ -300,7 +320,7 @@ function SourcesBody({ blade }: { blade: Blade }) {
               title={l.title ? `${l.title}\n${l.url}` : l.url}
             >
               {l.n !== undefined && <b>{l.n}</b>}
-              {l.domain || l.title}
+              {l.platform && l.platform !== 'web' ? platformInfo(l.platform).short : l.domain || l.title}
             </a>
           ) : (
             <span key={`${i}-${l.url}`} className="bl-chip bl-src-off">

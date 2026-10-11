@@ -4,11 +4,11 @@ import { Hud } from './ui/Hud'
 import { Boot } from './ui/Boot'
 import { Ignition } from './ui/Ignition'
 import { Diagnostics } from './ui/Diagnostics'
-import { useStore, type Hearing, type Phase } from './store'
+import { useStore, MODE_KEY, modeLine, parseMode, type Hearing, type Mode, type Phase } from './store'
 import { startVoice, type Voice, type VoiceMode } from './lib/voice'
-import { createSpeaker, cycleVoice, currentVoiceName } from './lib/tts'
+import { createSpeaker, cycleVoice, currentVoiceName, prefetchLines } from './lib/tts'
 import * as sfx from './lib/sfx'
-import { forTool, attention } from './lib/fillers'
+import { forTool, attention, COMMON_LINES } from './lib/fillers'
 import {
   ask,
   warmBridge,
@@ -87,6 +87,15 @@ const savedHearing = (): Hearing => {
     return localStorage.getItem(HEARING_KEY) === 'hands-free' ? 'hands-free' : 'push'
   } catch {
     return 'push'
+  }
+}
+
+/** Normal or researcher mode (R), remembered per browser the same way. */
+const savedMode = (): Mode => {
+  try {
+    return parseMode(localStorage.getItem(MODE_KEY))
+  } catch {
+    return 'normal'
   }
 }
 
@@ -218,6 +227,9 @@ export default function App() {
     s.setCaption('')
     s.setPhase('listening')
     pauseMedia()
+    // Wake a napping brain now, not when speech is first heard: its ~3.7 s
+    // start-up then overlaps the whole question (free when it is awake).
+    warmBrain()
     if (from === 'name') {
       voice.current?.wake()
     } else {
@@ -268,6 +280,8 @@ export default function App() {
     let filled = false
 
     try {
+      // Researcher mode is read as the question goes out: R pressed mid-answer
+      // changes the next question, never the one in flight.
       await ask(said, {
         onText: (delta) => {
           if (stale()) return
@@ -299,7 +313,7 @@ export default function App() {
             spk.say(forTool(name))
           }
         },
-      })
+      }, store.getState().mode)
 
       if (stale()) return
 
@@ -529,6 +543,26 @@ export default function App() {
     void line.end()
   }
 
+  /**
+   * Normal or researcher mode (R). Only which agent answers the next question
+   * changes — how she listens, the keys and the Approve rules stay as they are.
+   */
+  const setMode = (want: Mode, say = true) => {
+    const st = store.getState()
+    st.setMode(want)
+    try {
+      localStorage.setItem(MODE_KEY, want)
+    } catch {
+      /* not remembered this time */
+    }
+    // Before power-on the browser will not play a sound; the HUD shows it anyway.
+    if (!say || st.phase === 'offline' || st.phase === 'boot') return
+    // modeLine never says her name: the spotter would hear her say it.
+    const line = createSpeaker()
+    line.say(withHonorific(modeLine(want)))
+    void line.end()
+  }
+
   const onPartial = (text: string) => {
     store.getState().setCaption(text)
   }
@@ -643,6 +677,9 @@ export default function App() {
     })
 
     store.getState().setPhase('dormant')
+    // Her everyday lines ready to play at once — from the browser's cache when
+    // an earlier visit kept them (tts.ts), in the background either way.
+    void prefetchLines(COMMON_LINES)
     // How she listened last time, without announcing it.
     watchHearing((mode) => void setHearing(mode))
     watchTalk(() => press.current())
@@ -654,6 +691,8 @@ export default function App() {
 
   useEffect(() => {
     let raf = 0
+    // Researcher mode as it was left, without announcing it.
+    setMode(savedMode(), false)
 
     /**
      * The voice level, for her mouth and the SIGNAL meter.
@@ -679,8 +718,9 @@ export default function App() {
     pump()
 
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return
 
       // V auditions the next British voice installed on this machine. Which
       // ones exist varies per Mac, so hearing them beats trusting a ranking.
@@ -737,6 +777,16 @@ export default function App() {
       if (e.key === 'l' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault()
         setStill(!still())
+        return
+      }
+
+      // R: researcher mode on or off — every question then goes to the
+      // researcher (sub-agents over Reddit, Quora, GitHub and the rest), or back
+      // to her as she always is. Bare R only (Caps Lock or not): Ctrl+R is the
+      // browser's reload.
+      if (e.key.toLowerCase() === 'r' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault()
+        setMode(store.getState().mode === 'research' ? 'normal' : 'research')
         return
       }
 

@@ -126,6 +126,32 @@ body::after {
   50% { opacity: 0.35; transform: scale(0.75); }
 }
 
+/* Researcher mode (R): a gold tag beside the status line, a hue no phase uses,
+   so it reads at a glance whatever colour she is. Chrome, not part of the
+   display design system below — the sanitiser does not allow it. */
+.hud-mode {
+  --mode: #ffd166;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  padding: 3px 9px 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--mode) 70%, transparent);
+  background: color-mix(in srgb, var(--mode) 13%, transparent);
+  color: var(--mode);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-shadow: 0 0 12px color-mix(in srgb, var(--mode) 55%, transparent);
+  box-shadow: 0 0 18px -6px var(--mode);
+}
+.hud-mode i {
+  width: 6px;
+  height: 6px;
+  background: var(--mode);
+  transform: rotate(45deg);
+  box-shadow: 0 0 8px var(--mode);
+}
+
 /* Side rails */
 
 .rail {
@@ -1132,6 +1158,9 @@ kbd {
   height: auto;
   max-height: 92vh;
 }
+/* The RESEARCHER board is a report — answer, ranked results, platform lanes —
+   and gets the room for it. */
+.bl-expanded.bl-k-research.bl-wide { width: min(94vw, 1080px) }
 
 /* Docked: the width of the dock, and as tall as what it holds (at most the
    dock). Pages, videos and images keep a height to fill. */
@@ -1632,6 +1661,24 @@ a.bl-chip:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px 
   text-overflow: ellipsis;
 }
 .bl-src-off { opacity: 0.6; cursor: default }
+/* Researcher mode: where each source was found, and its rank score. */
+.bl-src-pf {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--plat) 55%, transparent);
+  color: var(--plat);
+  font: 400 9.5px/1.5 'JetBrains Mono', monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.bl-src-sc {
+  flex: 0 0 auto;
+  font: 400 11px/1.3 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--tone);
+}
 
 .bl-src-chips { flex-wrap: wrap; gap: 6px; padding: 2px }
 .bl-chip {
@@ -1827,6 +1874,249 @@ a.bl-chip:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px 
 .bl-expanded .rs-progress { padding: 18px 24px; gap: 9px; font-size: 15px }
 .bl-expanded .rs-q { font-size: 18px; white-space: normal }
 .bl-expanded .rs-part { padding: 8px 12px }
+
+/* ---- the RESEARCHER board (researcher mode, src/ui/Research.tsx) */
+
+.rs-deep { --plat: var(--accent) }
+.rs-timer {
+  margin-left: auto;
+  font: 400 11px/1.3 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-dim);
+}
+
+/* What the question is after, and what a good answer needs. */
+.rs-intent { display: flex; flex-direction: column; gap: 4px; margin-top: -2px }
+.rs-intent-line { margin: 0; font-size: 12px; line-height: 1.4; color: var(--c-dim) }
+.rs-intent-line b {
+  margin-right: 7px;
+  font: 400 10px/1.3 'JetBrains Mono', monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 80%, white);
+}
+.rs-crit { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none }
+.rs-crit li {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--c-line);
+  font: 400 10.5px/1.4 'JetBrains Mono', monospace;
+  color: var(--c-dim);
+}
+
+/* The four stages, side by side. */
+.rs-stages {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rs-stage {
+  --tone: var(--c-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 4px 7px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
+  background: color-mix(in srgb, var(--tone) 8%, transparent);
+}
+.rs-ss-run { --tone: var(--accent) }
+.rs-ss-done { --tone: var(--c-green) }
+.rs-ss-fail { --tone: var(--c-red) }
+.rs-ss-skip { opacity: 0.55 }
+.rs-sl {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font: 400 10px/1.4 'JetBrains Mono', monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--tone);
+}
+.rs-sn {
+  min-height: 1.35em;
+  font: 400 10.5px/1.35 'JetBrains Mono', monospace;
+  color: var(--c-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Section headings: the answer, the ranked results. */
+.rs-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 5px;
+  font: 400 10px/1.3 'JetBrains Mono', monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 75%, white);
+}
+.rs-conf { margin-left: auto; letter-spacing: 0.06em; color: var(--tone) }
+
+.rs-answer {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, rgba(2, 10, 16, 0.5));
+}
+.rs-atext {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* Ten lines docked; the whole of it full screen (E). */
+  display: -webkit-box;
+  -webkit-line-clamp: 10;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.rs-atext .bl-cite a { color: inherit; text-decoration: none }
+.rs-atext .bl-cite a:hover { text-decoration: underline }
+
+/* The ranked results: platform, title as a link, score and its bar, why, what. */
+.rs-hits { display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0; list-style: none }
+.rs-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--c-line);
+  background: var(--c-glass);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--plat) 80%, transparent);
+}
+.rs-hit-top { display: flex; align-items: baseline; gap: 7px; min-width: 0 }
+.rs-n {
+  flex: 0 0 auto;
+  min-width: 1.3em;
+  text-align: right;
+  font: 400 11px/1.3 'JetBrains Mono', monospace;
+  color: color-mix(in srgb, var(--accent) 80%, white);
+}
+.rs-badge {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--plat) 55%, transparent);
+  background: color-mix(in srgb, var(--plat) 13%, transparent);
+  color: var(--plat);
+  font: 400 9.5px/1.6 'JetBrains Mono', monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.rs-ht {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--c-ink);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+a.rs-ht:hover { text-decoration: underline }
+a.rs-ht:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px }
+.rs-off { opacity: 0.6 }
+.rs-score {
+  flex: 0 0 auto;
+  font: 400 12px/1.3 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--tone);
+}
+.rs-bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  overflow: hidden;
+}
+.rs-bar i {
+  display: block;
+  height: 100%;
+  background: var(--tone);
+  box-shadow: 0 0 8px var(--tone);
+}
+.rs-signal {
+  font: 400 10.5px/1.35 'JetBrains Mono', monospace;
+  color: var(--c-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rs-sum {
+  font-size: 12px;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--c-ink) 86%, transparent);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* One lane per platform searched. */
+.rs-lanes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* Dim until searching; :where() keeps this below the .rs-ps-* state tones
+   above, which this rule would otherwise beat by coming later. */
+:where(.rs-lane) { --tone: var(--c-dim) }
+.rs-lane {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'p c chip' 'q q q';
+  align-items: center;
+  column-gap: 8px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--c-line);
+  background: var(--c-glass);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--plat) 80%, transparent);
+}
+.rs-plat {
+  grid-area: p;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--plat);
+  white-space: nowrap;
+}
+.rs-lq {
+  grid-area: q;
+  min-width: 0;
+  font: 400 10.5px/1.35 'JetBrains Mono', monospace;
+  color: color-mix(in srgb, var(--c-dim) 80%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rs-gaps { margin: 0; font-size: 11.5px; line-height: 1.4; color: var(--c-dim) }
+.rs-gaps b {
+  margin-right: 7px;
+  font: 400 10px/1.3 'JetBrains Mono', monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--c-amber);
+}
+
+/* Full screen: the answer whole, larger, and the lanes side by side. */
+.rs-wide .rs-atext { display: block; font-size: 15.5px; line-height: 1.6 }
+.rs-wide .rs-ht { font-size: 15px }
+.rs-wide .rs-sum { font-size: 13.5px; -webkit-line-clamp: 3 }
+.rs-wide .rs-lanes { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)) }
+.rs-wide .rs-sn { font-size: 11.5px }
 
 @keyframes rsPulse {
   0%, 100% { opacity: 1; transform: scale(1) }

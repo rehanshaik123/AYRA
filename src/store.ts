@@ -28,7 +28,7 @@ export type Blade = {
   html?: string
   /** research — the research agent's live state (bridge/research.mjs). */
   research?: Research
-  /** sources — the links the answer used, at most five. */
+  /** sources — the links the answer used: at most five, eight in researcher mode. */
   links?: BladeLink[]
   /** data — the figures that answer the question. */
   data?: DataCard
@@ -74,9 +74,51 @@ export type Turn = {
 /** How she listens: Space each time, or her name from anywhere (hands-free). */
 export type Hearing = 'push' | 'hands-free'
 
+/**
+ * Who answers (the owner, 2026-10-12: "keep AYRA as it is and add this research
+ * agent module as an option, so when I press R she goes into researcher mode").
+ * 'normal' is AYRA as she always was; 'research' sends every question to the
+ * researcher (bridge/deep.mjs) — sub-agents over Reddit, Quora, GitHub and the
+ * rest, their results ranked, one answer.
+ */
+export type Mode = 'normal' | 'research'
+
+/** Remembered per browser, like how she listens ('ayra.hearing'). */
+export const MODE_KEY = 'ayra.mode'
+
+/** A remembered mode, whatever was stored there: only 'research' turns it on. */
+export function parseMode(saved: unknown): Mode {
+  return saved === 'research' ? 'research' : 'normal'
+}
+
+/**
+ * What she says as the mode changes. Never her own name: in hands-free the
+ * spotter would hear her say it and wake on her own voice.
+ */
+export function modeLine(mode: Mode): string {
+  return mode === 'research'
+    ? "Researcher mode. Ask me anything and I'll dig through Reddit, Quora, GitHub and the rest."
+    : 'Back to normal mode.'
+}
+
+/**
+ * The ask frame the face sends (src/lib/bridge.ts). Researcher mode names
+ * itself; a normal question's frame is exactly what it always was, so a bridge
+ * that knows nothing of modes reads it as before.
+ */
+export function askFrame(
+  text: string,
+  id: string,
+  mode: Mode = 'normal',
+): { type: 'ask'; text: string; id: string; mode?: 'research' } {
+  return mode === 'research' ? { type: 'ask', text, id, mode: 'research' } : { type: 'ask', text, id }
+}
+
 type State = {
   phase: Phase
   hearing: Hearing
+  /** Normal, or researcher mode (R). */
+  mode: Mode
   /** 0..1 loudness — the mic, or AYRA's own voice while she speaks. */
   level: number
   /** What JARVIS is currently reading aloud or has just said. */
@@ -115,6 +157,7 @@ type State = {
   clearApprovals: () => void
   setPhase: (p: Phase) => void
   setHearing: (h: Hearing) => void
+  setMode: (m: Mode) => void
   setLevel: (l: number) => void
   setCaption: (c: string) => void
   setActiveTool: (t: string | null) => void
@@ -204,14 +247,16 @@ export const RESEARCH_DONE_MS = 3_000
 /**
  * How long a card stays before closing by itself, or null for never. A page, a
  * video or a player is something to read or watch, not glance at, so those
- * never close on their own; nor does a research run that is still going.
+ * never close on their own; nor does a research run that is still going. A
+ * finished researcher-mode board is the report itself, not a progress card:
+ * the bridge sends it once more with `life: 'long'`, and it stays.
  */
 export function bladeLife(blade: Blade): number | null {
   if (blade.kind === 'article' || blade.kind === 'video' || blade.kind === 'embed') return null
   if (blade.kind === 'research') {
     const status = blade.research?.status
     if (status === 'running') return null
-    if (status === 'done') return RESEARCH_DONE_MS
+    if (status === 'done') return blade.life === 'long' ? LONG_MS : RESEARCH_DONE_MS
   }
   if (blade.life === 'long' || blade.hold === 'sticky') return LONG_MS
   return TURN_MS
@@ -220,6 +265,7 @@ export function bladeLife(blade: Blade): number | null {
 export const useStore = create<State>((set) => ({
   phase: 'offline',
   hearing: 'push',
+  mode: 'normal',
   level: 0,
   caption: '',
   turns: [],
@@ -296,6 +342,7 @@ export const useStore = create<State>((set) => ({
   clearApprovals: () => set({ approvals: [] }),
   setPhase: (phase) => set({ phase }),
   setHearing: (hearing) => set({ hearing }),
+  setMode: (mode) => set({ mode: parseMode(mode) }),
   setLevel: (level) => set({ level }),
   setCaption: (caption) => set({ caption }),
   setActiveTool: (activeTool) => set({ activeTool }),
