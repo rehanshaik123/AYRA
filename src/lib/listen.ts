@@ -9,6 +9,11 @@ import { BRIDGE_WS_URL } from '../config'
  * it to ElevenLabs Scribe Realtime (bridge/listen.mjs). Words come back while
  * the owner is still talking; the finished text about a third of a second
  * after they stop.
+ *
+ * Hands-free (2026-10-11) adds a second, local path: while it is on, the
+ * worklet streams the whole room to the bridge's `/wake` socket, where an
+ * offline spotter listens for her name (bridge/wake.mjs). That audio never
+ * leaves the laptop; only after the name does a turn go to ElevenLabs.
  */
 
 export type ListenHandlers = {
@@ -26,6 +31,10 @@ export type ListenHandlers = {
   /** Live hearing cannot work: `code` is ElevenLabs' (quota_exceeded, auth_error…)
    *  or 'unavailable' / 'no_key' / 'capture'. */
   onError: (code: string, message: string) => void
+  /** Hands-free: the spotter heard her name. */
+  onWake?: () => void
+  /** Hands-free cannot work: 'no_model' (run `npm run models`), 'no_engine', 'unavailable'. */
+  onWakeError?: (code: string, message: string) => void
 }
 
 export type Listener = {
@@ -38,6 +47,10 @@ export type Listener = {
   arm: (on: boolean) => void
   /** End the segment now — the owner pressed Space to send. */
   finish: () => void
+  /** Hands-free: stream the room to the offline spotter (true) or stop (false). */
+  stream: (on: boolean) => void
+  /** Her name was heard: start a segment from the last `ms` of audio. */
+  armFrom: (ms: number) => void
   live: () => boolean
   meter: () => { energy: number; floor: number; threshold: number; speaking: boolean }
 }
@@ -115,8 +128,58 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
   }
   dial()
 
+  // Hands-free: the spotter's socket, open only while the room is streamed.
+  let streaming = false
+  let wakeSocket: WebSocket | null = null
+  let wakeAttempt = 0
+  const dialWake = () => {
+    if (stopped || !streaming) return
+    const ws = new WebSocket(`${BRIDGE_WS_URL}/wake`)
+    ws.binaryType = 'arraybuffer'
+    wakeSocket = ws
+    let refused = false
+    ws.onopen = () => {
+      wakeAttempt = 0
+    }
+    ws.onmessage = (e) => {
+      let m: { type?: string; code?: string; message?: string }
+      try {
+        m = JSON.parse(String(e.data))
+      } catch {
+        return
+      }
+      if (m.type === 'wake') h.onWake?.()
+      else if (m.type === 'error') {
+        // A missing model or engine won't fix itself by re-dialling.
+        refused = true
+        h.onWakeError?.(m.code ?? 'error', m.message ?? '')
+      }
+    }
+    ws.onclose = () => {
+      if (wakeSocket !== ws) return
+      wakeSocket = null
+      if (refused || stopped || !streaming) return
+      if (wakeAttempt >= RECONNECT_MS.length) {
+        h.onWakeError?.('unavailable', 'cannot reach the bridge for hands-free')
+        return
+      }
+      setTimeout(dialWake, RECONNECT_MS[wakeAttempt++])
+    }
+  }
+  const closeWake = () => {
+    const ws = wakeSocket
+    wakeSocket = null
+    ws?.close()
+  }
+
   node.port.onmessage = (e: MessageEvent) => {
     const ev = e.data as { type: string; pcm?: Int16Array; v?: number } & typeof meter
+    if (ev.type === 'stream' && ev.pcm) {
+      // The room, for the spotter only. Dropped while the socket is down: a
+      // name said during a reconnect is lost, but nothing piles up.
+      if (wakeSocket?.readyState === WebSocket.OPEN) wakeSocket.send(ev.pcm.buffer as ArrayBuffer)
+      return
+    }
     if (ev.type === 'audio' && ev.pcm) send(ev.pcm.buffer as ArrayBuffer)
     else if (ev.type === 'start') {
       meter.speaking = true
@@ -140,6 +203,7 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
       level = 0
       socket?.close()
       socket = null
+      closeWake()
       try {
         source.disconnect()
         node.disconnect()
@@ -152,6 +216,16 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
     warm: () => send(JSON.stringify({ type: 'warm' })),
     arm: (on) => node.port.postMessage({ armed: on }),
     finish: () => node.port.postMessage({ finish: true }),
+    stream: (on) => {
+      if (on === streaming) return
+      streaming = on
+      node.port.postMessage({ stream: on })
+      if (on) {
+        wakeAttempt = 0
+        dialWake()
+      } else closeWake()
+    },
+    armFrom: (ms) => node.port.postMessage({ armFrom: ms }),
     live: () => !stopped && ctx.state !== 'closed',
     meter: () => meter,
   }

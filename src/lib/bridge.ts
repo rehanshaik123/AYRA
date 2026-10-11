@@ -37,6 +37,8 @@ type Frame = {
   always?: string
   ok?: boolean
   by?: string
+  /** `hearing` frames: how she listens — 'push' or 'hands-free'. */
+  mode?: string
   servers?: Array<string | { name?: string }>
 }
 
@@ -189,6 +191,8 @@ function dispatch(ws: WebSocket) {
       onApproval?.({ type: 'approved', id: msg.id, ok: msg.ok === true, by: msg.by ?? '' })
     } else if (msg.type === 'halt') {
       onApproval?.({ type: 'halt', by: msg.by ?? '' })
+    } else if (msg.type === 'hearing' && (msg.mode === 'push' || msg.mode === 'hands-free')) {
+      onHearing?.(msg.mode)
     }
   })
 }
@@ -484,6 +488,18 @@ export function cancel(): void {
  * overlaps the question instead of following it. At most every few seconds.
  */
 let lastWarm = 0
+/**
+ * Hands-free on or off from the tray (AYRA.exe → the bridge → here), and the
+ * face telling the bridge how it listens now, so the tray's tick is right.
+ */
+let onHearing: ((mode: 'push' | 'hands-free') => void) | null = null
+export function watchHearing(fn: (mode: 'push' | 'hands-free') => void) {
+  onHearing = fn
+}
+export function reportHearing(mode: 'push' | 'hands-free'): void {
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'hearing', mode }))
+}
+
 export function warmBrain(): void {
   if (Date.now() - lastWarm < 5000) return
   lastWarm = Date.now()

@@ -6,6 +6,9 @@ import { Suggestions } from './Suggestions'
 import { BladeSweep, Blades } from './Blades'
 import { IDENTITY } from '../identity'
 
+/** Standby in hands-free: she is waiting for her name, not for Space. */
+const HANDS_FREE_STANDBY = `HANDS-FREE — SAY "${IDENTITY.name.toUpperCase()}" OR PRESS SPACE`
+
 const statusText: Record<Phase, string> = {
   offline: 'OFFLINE',
   boot: 'INITIALISING',
@@ -219,6 +222,7 @@ function ApproveCard() {
 
 export function Hud() {
   const phase = useStore((s) => s.phase)
+  const hearing = useStore((s) => s.hearing)
   const caption = useStore((s) => s.caption)
   const turns = useStore((s) => s.turns)
   const activeTool = useStore((s) => s.activeTool)
@@ -249,7 +253,9 @@ export function Hud() {
 
         <div className="status">
           <span className="dot" />
-          <span className="status-text">{statusText[phase]}</span>
+          <span className="status-text">
+            {phase === 'dormant' && hearing === 'hands-free' ? HANDS_FREE_STANDBY : statusText[phase]}
+          </span>
         </div>
       </header>
 
@@ -348,7 +354,8 @@ export function Hud() {
 
       <footer className="hud-bottom">
         <span className="hint">
-          <kbd>Space</kbd> talk · <kbd>Space</kbd> again send · <kbd>Space</kbd><kbd>Space</kbd> stop · <kbd>L</kbd> still
+          <kbd>Space</kbd> talk · <kbd>Space</kbd> again send · <kbd>Space</kbd><kbd>Space</kbd> stop ·{' '}
+          <kbd>W</kbd> hands-free {hearing === 'hands-free' ? 'on' : 'off'} · <kbd>L</kbd> still
           {voice && (
             <>
               {' · '}

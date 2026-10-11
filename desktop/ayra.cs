@@ -87,7 +87,7 @@ namespace Ayra
   // ayra.ini, written by scripts/shortcuts.mjs: key=value, one per line.
   class Config
   {
-    public string Exe, Icon, Root, Node, Chrome, FaceUrl, HealthUrl, Title, Hotkey;
+    public string Exe, Icon, Root, Node, Chrome, FaceUrl, HealthUrl, HearingUrl, Title, Hotkey, HandsFreeHotkey;
     public List<string> ChromeArgs = new List<string>();
 
     public static Config Load()
@@ -100,6 +100,7 @@ namespace Ayra
       c.Exe = exe;
       c.Icon = Path.Combine(dir, "ayra.ico");
       c.Hotkey = "ctrl+alt+a";
+      c.HandsFreeHotkey = "ctrl+alt+w";
       foreach (var raw in File.ReadAllLines(path, Encoding.UTF8))
       {
         var line = raw.Trim();
@@ -117,10 +118,13 @@ namespace Ayra
           case "health": c.HealthUrl = value; break;
           case "title": c.Title = value; break;
           case "hotkey": if (value.Length > 0) c.Hotkey = value; break;
+          case "handsfree": if (value.Length > 0) c.HandsFreeHotkey = value; break;
         }
       }
       if (c.Root == null || c.Node == null || c.FaceUrl == null || c.HealthUrl == null || c.Title == null)
         throw new Exception("ayra.ini is incomplete. Run `npm run shortcuts` in the AYRA folder again.");
+      // Push-to-talk or hands-free (bridge/server.mjs /hearing), beside /health.
+      c.HearingUrl = c.HealthUrl.Substring(0, c.HealthUrl.LastIndexOf('/')) + "/hearing";
       return c;
     }
   }
@@ -132,6 +136,10 @@ namespace Ayra
     readonly Bridge bridge;
     readonly Window window;
     readonly HotkeyWindow hotkey;
+    // Hands-free (say her name) on or off, from any app.
+    readonly HotkeyWindow handsFreeKey;
+    readonly ToolStripMenuItem handsFreeItem;
+    int switching;
     readonly SynchronizationContext ui;
     readonly System.Threading.Timer watch;
     readonly EventWaitHandle quitSignal, openSignal;
@@ -151,6 +159,8 @@ namespace Ayra
 
       menu.Items.Add("Open AYRA", null, delegate { Open(false); });
       menu.Items.Add("Talk to AYRA   " + Pretty(config.Hotkey), null, delegate { Open(true); });
+      handsFreeItem = new ToolStripMenuItem("Hands-free: say AYRA   " + Pretty(config.HandsFreeHotkey), null, delegate { SwitchHearing(); });
+      menu.Items.Add(handsFreeItem);
       if (config.Chrome != null) menu.Items.Add("Open Chrome (AYRA)", null, delegate { window.OpenChrome(); });
       menu.Items.Add(new ToolStripSeparator());
       menu.Items.Add("Restart AYRA", null, delegate { ThreadPool.QueueUserWorkItem(delegate { bridge.Restart(); }); });
@@ -170,6 +180,9 @@ namespace Ayra
         Notify("AYRA_HOTKEY \"" + config.Hotkey + "\" isn't a key combination AYRA knows (try ctrl+alt+a), so the hotkey is off.");
       else if (!hotkey.Registered)
         Notify(Pretty(config.Hotkey) + " is already used by another app, so AYRA's hotkey is off. Set AYRA_HOTKEY and run npm run shortcuts again.");
+      handsFreeKey = new HotkeyWindow(config.HandsFreeHotkey, delegate { SwitchHearing(); });
+      if (handsFreeKey.Valid && !handsFreeKey.Registered)
+        Notify(Pretty(config.HandsFreeHotkey) + " is already used by another app, so the hands-free hotkey is off. Set AYRA_HANDSFREE_HOTKEY and run npm run shortcuts again.");
 
       // Only once the session is really ending: a cancelled shutdown leaves her running.
       Microsoft.Win32.SystemEvents.SessionEnded += delegate { bridge.Stop(); };
@@ -195,6 +208,31 @@ namespace Ayra
       });
     }
 
+    // Hands-free on or off, without coming back to her window. The face does the
+    // switching (and says so); her window must be open, so it is opened first
+    // when it isn't, and the switch waits for it to connect.
+    void SwitchHearing()
+    {
+      ThreadPool.QueueUserWorkItem(delegate
+      {
+        if (Interlocked.Exchange(ref switching, 1) == 1) return;
+        try
+        {
+          int faces;
+          if (Hearing.Get(config, out faces) == null) { Notify("AYRA isn't running yet."); return; }
+          if (faces == 0)
+          {
+            Open(false);
+            for (int i = 0; i < 40 && faces == 0; i++) { Thread.Sleep(500); Hearing.Get(config, out faces); }
+            if (faces == 0) { Notify("Hands-free needs her window open. Open AYRA and try again."); return; }
+          }
+          var mode = Hearing.Post(config, "toggle");
+          if (mode != null) ui.Post(delegate { handsFreeItem.Checked = mode == "hands-free"; }, null);
+        }
+        finally { Interlocked.Exchange(ref switching, 0); }
+      });
+    }
+
     // Every few seconds: is she answering? Start her if nobody is running her.
     void Check()
     {
@@ -206,7 +244,13 @@ namespace Ayra
         var text = healthy ? "AYRA - ready"
           : bridge.GaveUp ? "AYRA - stopped, see the log"
           : bridge.Running ? "AYRA - starting" : "AYRA - not running";
-        ui.Post(delegate { if (icon.Visible) icon.Text = text; }, null);
+        int faces;
+        var hearing = healthy ? Hearing.Get(config, out faces) : null;
+        ui.Post(delegate
+        {
+          if (icon.Visible) icon.Text = hearing == "hands-free" ? "AYRA - hands-free, say AYRA" : text;
+          handsFreeItem.Checked = hearing == "hands-free";
+        }, null);
       }
       finally { Interlocked.Exchange(ref busy, 0); }
     }
@@ -220,6 +264,7 @@ namespace Ayra
     {
       watch.Dispose();
       hotkey.Dispose();
+      handsFreeKey.Dispose();
       icon.Visible = false;
       bridge.Stop();
       icon.Dispose();
@@ -584,6 +629,56 @@ namespace Ayra
       }
       catch { }
       finally { if (store != null) Marshal.ReleaseComObject(store); }
+    }
+  }
+
+  // The bridge's /hearing: which way the face listens, and the switch. AYRA.exe
+  // is the only caller: it sends x-ayra and no Origin (see server.mjs).
+  static class Hearing
+  {
+    public static string Get(Config c, out int faces)
+    {
+      faces = 0;
+      try
+      {
+        var req = (HttpWebRequest)WebRequest.Create(c.HearingUrl);
+        req.Timeout = 2000;
+        req.Proxy = null;
+        req.Headers["x-ayra"] = "tray";
+        using (var res = (HttpWebResponse)req.GetResponse())
+        using (var r = new StreamReader(res.GetResponseStream()))
+        {
+          var body = r.ReadToEnd();
+          var f = Regex.Match(body, "\"faces\":(\\d+)");
+          if (f.Success) faces = int.Parse(f.Groups[1].Value);
+          return Mode(body);
+        }
+      }
+      catch { return null; }
+    }
+
+    public static string Post(Config c, string mode)
+    {
+      try
+      {
+        var req = (HttpWebRequest)WebRequest.Create(c.HearingUrl);
+        req.Method = "POST";
+        req.Timeout = 3000;
+        req.Proxy = null;
+        req.ContentType = "application/json";
+        req.Headers["x-ayra"] = "tray";
+        var bytes = Encoding.UTF8.GetBytes("{\"mode\":\"" + mode + "\"}");
+        using (var w = req.GetRequestStream()) w.Write(bytes, 0, bytes.Length);
+        using (var res = (HttpWebResponse)req.GetResponse())
+        using (var r = new StreamReader(res.GetResponseStream())) return Mode(r.ReadToEnd());
+      }
+      catch { return null; }
+    }
+
+    static string Mode(string body)
+    {
+      var m = Regex.Match(body, "\"mode\":\"([a-z-]+)\"");
+      return m.Success ? m.Groups[1].Value : null;
     }
   }
 

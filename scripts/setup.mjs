@@ -125,13 +125,22 @@ if (elSource) {
   line(info, '  Optional: add ELEVENLABS_API_KEY to .env.local for a better voice and Scribe transcription.');
 }
 
+// --- Hands-free wake word (offline model) -------------------------------
+try {
+  const { modelReady } = await import('../bridge/wake.mjs');
+  if (modelReady()) line(tick, `Hands-free ready — the offline wake-word model is downloaded.`);
+  else line(info, `Hands-free (say "${identity.name}" from any app) needs its model: run npm run models (17.6 MB, once).`);
+} catch {
+  line(info, 'Hands-free: could not check the wake-word model.');
+}
+
 // --- How to run ----------------------------------------------------------
 console.log('');
 console.log(`To run ${identity.name}:`);
 console.log('  npm start             # brain + face together; open http://localhost:5173 in Chrome or Edge');
 console.log('  npm run smoke         # with the bridge running: one end-to-end test turn');
 console.log('');
-console.log(`Then click INITIALISE and say "Hey ${identity.name}".`);
+console.log(`Then click INITIALISE and press Space to talk — or W for hands-free, then just say "${identity.name}".`);
 console.log(`${identity.name} can search the web and read pages; nothing on the laptop yet.`);
 console.log('');
 

@@ -52,6 +52,10 @@ export type VoiceHandlers = {
   onUtterance: (text: string) => void
   /** The recogniser is unusable. Distinct from the user saying nothing. */
   onError: (message: string) => void
+  /** Hands-free: the offline spotter heard her name (bridge/wake.mjs). */
+  onWakeWord?: () => void
+  /** Hands-free stopped working (no model, no engine, bridge gone). */
+  onHandsFreeError?: (message: string) => void
 }
 
 export type Voice = {
@@ -68,6 +72,14 @@ export type Voice = {
   send: () => void
   /** Stop listening; the microphone itself is handed back after RELEASE_MS. */
   close: () => void
+  /**
+   * Hands-free (the owner, 2026-10-11: "make AYRA listen if I say her name from
+   * anywhere"): keep the microphone and let the offline spotter listen for her
+   * name. False when it can't run here (the browser fallback has no spotter).
+   */
+  handsFree: (on: boolean) => Promise<boolean>
+  /** Her name was heard: listen for one turn, starting just before the name. */
+  wake: () => void
 }
 
 /**
@@ -79,6 +91,13 @@ const RELEASE_MS = 30000
 const SEND_WAIT_MS = 3000
 /** The browser recogniser's last words trail the speaker by about this much. */
 const BROWSER_SEND_MS = 700
+/**
+ * How much audio from before the wake goes to the transcriber. The spotter
+ * reports the name a moment after it is said, and the command may already be
+ * under way ("AYRA, open Notepad" in one breath); the words that come back must
+ * contain the name, which is the second check against look-alikes.
+ */
+const WAKE_PREROLL_MS = 2000
 
 // ---------------------------------------------------------------------------
 // Endpointing
@@ -399,7 +418,7 @@ export async function startVoice(h: VoiceHandlers): Promise<Voice> {
         ? 'Microphone access denied — voice input is unavailable.'
         : 'No microphone available.',
     )
-    return { stop: () => {}, live: () => false, open: () => {}, send: () => {}, close: () => {} }
+    return { stop: () => {}, live: () => false, open: () => {}, send: () => {}, close: () => {}, handsFree: async () => false, wake: () => {} }
   }
   diag.engine = caps().stt ? 'elevenlabs-live' : 'browser'
   const v = caps().stt ? await startLiveVoice(h) : startBrowserVoice(h)
@@ -435,6 +454,8 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
   let awaiting = 0
   /** Segments cut off by closing: their words come back first (in order) and are thrown away. */
   let discard = 0
+  /** Hands-free: the microphone stays, streaming to the offline spotter. */
+  let hands = false
 
   /**
    * Transcripts become turns here rather than one-per-segment.
@@ -585,6 +606,23 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
         if (h.mode() !== 'command' || worded || assemble.held()) return
         h.onPartial(v > 0.04 ? '…' : '')
       },
+      // Her own voice saying her name ("I'm AYRA") must not wake her.
+      onWake: () => {
+        if (speakingNow()) return
+        diag.wakes++
+        h.onWakeWord?.()
+      },
+      onWakeError: (code, message) => {
+        diag.lastError = `wake ${code}: ${message}`
+        hands = false
+        listener?.stream(false)
+        if (!armed && !releaseTimer) releaseTimer = setTimeout(release, RELEASE_MS)
+        h.onHandsFreeError?.(
+          code === 'no_model'
+            ? 'Hands-free needs its wake-word model: run "npm run models" in the AYRA folder, then switch it on again.'
+            : `Hands-free stopped: ${message || code}.`,
+        )
+      },
       onError: (code, message) => {
         diag.restarts++
         diag.lastError = `${code}: ${message}`
@@ -621,7 +659,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
 
   const release = () => {
     releaseTimer = null
-    if (armed) return
+    if (armed || hands) return
     listener?.stop()
     listener = null
     releaseMic()
@@ -671,7 +709,34 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
       if (fallback) return fallback.close()
       listener?.arm(false)
       if (releaseTimer) clearTimeout(releaseTimer)
-      releaseTimer = setTimeout(release, RELEASE_MS)
+      // Hands-free keeps the microphone: the spotter is still listening.
+      releaseTimer = hands ? null : setTimeout(release, RELEASE_MS)
+    },
+    handsFree: async (on) => {
+      if (fallback) return !on
+      hands = on
+      if (on) {
+        if (releaseTimer) clearTimeout(releaseTimer)
+        releaseTimer = null
+        const l = await ensure()
+        if (!l || !hands) return false
+        l.stream(true)
+        return true
+      }
+      listener?.stream(false)
+      if (!armed) {
+        if (releaseTimer) clearTimeout(releaseTimer)
+        releaseTimer = setTimeout(release, RELEASE_MS)
+      }
+      return true
+    },
+    wake: () => {
+      if (fallback || !listener) return
+      armed = true
+      if (releaseTimer) clearTimeout(releaseTimer)
+      releaseTimer = null
+      listener.warm()
+      listener.armFrom(WAKE_PREROLL_MS)
     },
   }
 }
@@ -695,7 +760,7 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
   if (!Ctor) {
     h.onError('This browser has no speech recognition — use Chrome or Edge, or add an ElevenLabs key.')
-    return { stop: () => {}, live: () => false, open: () => {}, send: () => {}, close: () => {} }
+    return { stop: () => {}, live: () => false, open: () => {}, send: () => {}, close: () => {}, handsFree: async (on) => !on, wake: () => {} }
   }
 
   let stopped = false
@@ -922,6 +987,10 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
       releaseMic()
     },
     live: () => running,
+    // The browser's recogniser has no offline spotter, and listening all day
+    // through it is what hands-free exists to avoid: push-to-talk only.
+    handsFree: async (on) => !on,
+    wake: () => {},
     open: () => {
       armed = true
       if (releaseTimer) clearTimeout(releaseTimer)

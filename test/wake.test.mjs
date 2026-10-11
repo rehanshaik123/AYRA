@@ -41,3 +41,27 @@ test('a bare name is not a question; a leading name is stripped', () => {
   assert.equal(BARE_NAME.test('ayra what time'), false)
   assert.equal('Ayra, what time is it'.replace(LEADING_NAME, ''), 'what time is it')
 })
+
+test('hands-free: spoken TO her counts, a sentence ABOUT someone with her name does not', async () => {
+  const { addressed } = await import('../src/lib/wake.ts')
+  for (const said of [
+    'AYRA.',
+    'Hey AYRA, what time is it?',
+    'AYRA, open Notepad for me.',
+    'AYRA open notepad',
+    'AYRA what is the weather',
+    'AYRA is it going to rain today',
+    'okay so, AYRA, check the gold price',
+    'hey aira went to the market?',
+  ]) {
+    assert.equal(addressed(said), true, said)
+  }
+  for (const said of [
+    'AYRA went to the market yesterday.',
+    'Ayra said she would call back',
+    'aira was at the party',
+    'the weather is nice',
+  ]) {
+    assert.equal(addressed(said), false, said)
+  }
+})

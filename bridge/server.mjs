@@ -25,6 +25,7 @@ import { displayServer } from './panels.mjs'
 import { createTurnCards } from './sources.mjs'
 import { rankQuery } from './triage.mjs'
 import { relayListening } from './listen.mjs'
+import { createSpotter, relayWake, WAKE_THRESHOLD } from './wake.mjs'
 import { serveFace } from './face.mjs'
 import { createApprovals } from './approvals.mjs'
 import { createAllowances } from './allowances.mjs'
@@ -335,6 +336,39 @@ const handleRequest = async (req, res) => {
     return res.end()
   }
 
+  // Push-to-talk or hands-free, switched from the tray (AYRA.exe) in any app.
+  // Only AYRA.exe: it sends this header and no Origin. A web page always sends
+  // an Origin, and could not add the header without a preflight the bridge
+  // never grants — so no page can turn the microphone on.
+  if (req.url === '/hearing' && (req.method === 'GET' || req.method === 'POST')) {
+    if (origin || req.headers['x-ayra'] !== 'tray') {
+      res.writeHead(403)
+      return res.end('forbidden')
+    }
+    const reply = (status, body) => {
+      res.writeHead(status, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(body))
+    }
+    if (req.method === 'GET') return reply(200, { mode: HEARING.mode, faces: HEARING.faces.size })
+    let body = ''
+    for await (const chunk of req) {
+      body += chunk
+      if (body.length > 200) return reply(413, { error: 'too long' })
+    }
+    let want
+    try {
+      want = JSON.parse(body || '{}').mode
+    } catch {
+      return reply(400, { error: 'bad json' })
+    }
+    const mode = want === 'toggle' ? (HEARING.mode === 'hands-free' ? 'push' : 'hands-free') : want
+    if (!HEARING_MODES.has(mode)) return reply(400, { error: 'mode is push, hands-free or toggle' })
+    if (!HEARING.faces.size) return reply(409, { error: "her window isn't open", mode: HEARING.mode })
+    for (const send of HEARING.faces) send({ type: 'hearing', mode, by: 'tray' })
+    HEARING.mode = mode
+    return reply(200, { mode })
+  }
+
   if (req.method === 'GET' && req.url === '/health') {
     // The browser reads this once at boot to decide which voice engine to use.
     // Both premium paths ride the same ElevenLabs key, so both flags track it:
@@ -603,7 +637,7 @@ const wss = new WebSocketServer({
   // 403 would look like the bridge simply isn't running.
   verifyClient: ({ origin, req }, done) => {
     const path = (req.url ?? '/').split('?')[0]
-    if (path !== '/' && path !== '/ws' && path !== '/listen') {
+    if (path !== '/' && path !== '/ws' && path !== '/listen' && path !== '/wake') {
       console.warn(`[ayra] rejected websocket on path ${path}`)
       return done(false, 403, 'Forbidden')
     }
@@ -863,9 +897,34 @@ function listen(socket) {
   })
 }
 
+/**
+ * Hands-free: while it is on, the face streams its microphone on `/wake` and an
+ * offline spotter listens for her name (wake.mjs). Nothing sent on this socket
+ * ever leaves the laptop. Loaded on first use; a missing model is reported to
+ * the face (and retried next time, so `npm run models` needs no restart).
+ */
+let SPOTTER = null
+const spotter = () =>
+  (SPOTTER ??= createSpotter({
+    spellings: IDENTITY.wake.spotter ?? [],
+    label: IDENTITY.name,
+    threshold: Number(env('WAKE_THRESHOLD', WAKE_THRESHOLD)) || WAKE_THRESHOLD,
+    log: (msg) => console.warn(msg),
+  }))
+
+/**
+ * How the face is listening — 'push' (Space) or 'hands-free' (her name) — as it
+ * last reported, and every open face, so AYRA.exe (tray menu, Ctrl+Alt+W) can
+ * switch it from any app through POST /hearing.
+ */
+const HEARING = { mode: 'push', faces: new Set() }
+const HEARING_MODES = new Set(['push', 'hands-free'])
+
 // The HUD channel: one WebSocket, one conversation.
 wss.on('connection', (socket, req) => {
-  if ((req.url ?? '/').split('?')[0] === '/listen') return listen(socket)
+  const path = (req.url ?? '/').split('?')[0]
+  if (path === '/listen') return listen(socket)
+  if (path === '/wake') return relayWake(socket, { spotter, log: (msg) => console.warn(msg) })
   console.log('[ayra] client connected')
 
   const send = (msg) => {
@@ -999,10 +1058,15 @@ wss.on('connection', (socket, req) => {
       APPROVALS.answer(msg.id, msg.ok === true, 'hud', msg.always === true)
     }
     if (msg.type === 'halt') halt('hud')
+
+    // The face says how it is listening now (on connect and on every switch).
+    if (msg.type === 'hearing' && HEARING_MODES.has(msg.mode)) HEARING.mode = msg.mode
   })
+  HEARING.faces.add(send)
 
   socket.on('close', () => {
     console.log('[ayra] client disconnected')
+    HEARING.faces.delete(send)
     unsubscribe()
     CONVERSATIONS.delete(conversation)
     conversation.close()

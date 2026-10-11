@@ -96,6 +96,7 @@ const ini = [
   `health=http://127.0.0.1:${env('BRIDGE_PORT', '8787')}/health`,
   `title=${identity.wordmark}`,
   `hotkey=${env('HOTKEY', 'ctrl+alt+a')}`,
+  `handsfree=${env('HANDSFREE_HOTKEY', 'ctrl+alt+w')}`,
 ]
 writeFileSync(join(HOME, 'ayra.ini'), `${ini.join('\r\n')}\r\n`)
 

@@ -13,6 +13,8 @@
   },
   "wake": {
     "names": ["ayra", "ayrah", "aira", "airah", "eyra", "eira", "aiyra", "ayira", "ayera", "heyra", "haira", "hera"],
-    "prefixedOnly": ["ira", "irah", "era", "aria", "arya", "hira", "heera", "air", "ayr"]
+    "prefixedOnly": ["ira", "irah", "era", "aria", "arya", "hira", "heera", "air", "ayr"],
+    "_spotter": "How the name SOUNDS, in the offline wake-word model's own word pieces (bridge/wake.mjs). Tuned on test clips 2026-10-11 — 'AYRA' is said 'eye-ra'. Change only with a re-test.",
+    "spotter": ["▁A Y RA", "▁A I RA", "▁I RA", "▁E Y RA", "▁HE Y ▁A Y RA", "▁HE Y ▁I RA"]
   }
 }

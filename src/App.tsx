@@ -4,7 +4,7 @@ import { Hud } from './ui/Hud'
 import { Boot } from './ui/Boot'
 import { Ignition } from './ui/Ignition'
 import { Diagnostics } from './ui/Diagnostics'
-import { useStore, type Phase } from './store'
+import { useStore, type Hearing, type Phase } from './store'
 import { startVoice, type Voice, type VoiceMode } from './lib/voice'
 import { createSpeaker, cycleVoice, currentVoiceName } from './lib/tts'
 import * as sfx from './lib/sfx'
@@ -20,11 +20,13 @@ import {
   answerApproval,
   haltAll,
   watchConnection,
+  watchHearing,
+  reportHearing,
   bridgeServers,
 } from './lib/bridge'
 import { inputLevel } from './lib/listen'
 import { probeCapabilities } from './lib/capabilities'
-import { BARE_NAME, LEADING_NAME } from './lib/wake'
+import { BARE_NAME, LEADING_NAME, addressed, afterWake } from './lib/wake'
 import { withHonorific } from './identity'
 
 /**
@@ -61,6 +63,30 @@ const LONGEST_TURN_MS = 60000
  * meaning "send" a moment late — not an interruption of what they just asked.
  */
 const SEND_GRACE_MS = 1500
+
+/**
+ * Hands-free (the owner, 2026-10-11: "build another feature where she listens
+ * and waits for me to command again when I'm actively working… design it so
+ * she starts listening if I say AYRA from anywhere"). Space stays as it is; W
+ * (or Ctrl+Alt+W / the tray from any app) switches hands-free on: an offline
+ * spotter listens for her name (bridge/wake.mjs), she answers, and then keeps
+ * listening this long for a follow-up without her name before going back to
+ * waiting for it. Short on purpose: a video playing nearby can't hold her.
+ */
+const FOLLOW_UP_MS = 15000
+
+/** A follow-up that only ends the conversation — no question for the model. */
+const DISMISS = /^(that'?s (all|it)|thanks?|thank you|nothing|no thanks|never ?mind|stop|bye|okay,? thanks?)[\s.!]*$/i
+
+/** Push-to-talk or hands-free, remembered per browser. */
+const HEARING_KEY = 'ayra.hearing'
+const savedHearing = (): Hearing => {
+  try {
+    return localStorage.getItem(HEARING_KEY) === 'hands-free' ? 'hands-free' : 'push'
+  } catch {
+    return 'push'
+  }
+}
 
 /** How long the boot sequence (Boot.tsx) stays up. It only has to cover the
  *  bridge connecting and the voice probe; the old nine seconds were pure wait. */
@@ -121,6 +147,10 @@ export default function App() {
   const sentAt = useRef(0)
   /** Speech has begun in this listening window (the ceiling is set once). */
   const heard = useRef(false)
+  /** This listening window was opened by the spotter hearing her name. */
+  const wokeByName = useRef(false)
+  /** This listening window is the hands-free follow-up after an answer. */
+  const followUp = useRef(false)
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // -- helpers --------------------------------------------------------------
@@ -139,6 +169,8 @@ export default function App() {
     clearIdle()
     silence()
     resumeTo.current = null
+    wokeByName.current = false
+    followUp.current = false
     voice.current?.close()
     turn.current++
     const s = store.getState()
@@ -148,18 +180,24 @@ export default function App() {
     s.setPhase('dormant')
   }
 
-  /** Open the mic and wait. `window` is how long before she gives up. */
-  const listen = (window: number) => {
+  /** Open the mic and wait. `window` is how long before she gives up.
+   *  `from: 'name'` — the spotter heard her name: listening starts from just
+   *  before it (the microphone is already open), with no cue to wait for. */
+  const listen = (window: number, from: 'press' | 'name' = 'press') => {
     clearIdle()
     heard.current = false
     const s = store.getState()
     s.setCaption('')
     s.setPhase('listening')
-    // The cue once the microphone is really open: a cold start takes a moment,
-    // and words said before the cue would be lost.
-    void Promise.resolve(voice.current?.open()).then(() => {
-      if (store.getState().phase === 'listening') sfx.play('listen')
-    })
+    if (from === 'name') {
+      voice.current?.wake()
+    } else {
+      // The cue once the microphone is really open: a cold start takes a moment,
+      // and words said before the cue would be lost.
+      void Promise.resolve(voice.current?.open()).then(() => {
+        if (store.getState().phase === 'listening') sfx.play('listen')
+      })
+    }
     idleTimer.current = setTimeout(stopListening, window)
   }
 
@@ -251,8 +289,13 @@ export default function App() {
         speaker.current = null
         sfx.duck(false)
         store.getState().setActiveTool(null)
-        // Done: the microphone stays closed until Space (push-to-talk).
         goDormant()
+        // Hands-free: she stays for a follow-up without her name, then goes
+        // back to waiting for it. Push-to-talk: closed until Space.
+        if (store.getState().hearing === 'hands-free') {
+          followUp.current = true
+          listen(FOLLOW_UP_MS)
+        }
       }
     }
   }
@@ -350,6 +393,18 @@ export default function App() {
     if (phase === 'offline' || phase === 'boot' || phase === 'dormant') return
     // One press, one turn: the microphone closes as soon as the words are in.
     voice.current?.close()
+    const woke = wokeByName.current
+    const following = followUp.current
+    wokeByName.current = false
+    followUp.current = false
+
+    // Woken by the offline spotter: the words must be spoken TO her — her name
+    // as a greeting or followed by a request — the second check, which throws
+    // out look-alikes and sentences about someone else ("Ira went to the market").
+    if (woke && !addressed(text)) {
+      stopListening()
+      return
+    }
 
     // A spoken answer to the oldest Approve card. Anything else is ignored
     // while one is waiting — it must be a clear yes or no.
@@ -368,7 +423,14 @@ export default function App() {
       listen(AWAIT_SPEECH_MS)
       return
     }
-    const said = text.replace(LEADING_NAME, '').trim()
+    // Woken mid-sentence ("okay so, AYRA, check the gold price"): the command
+    // is what follows her name.
+    const said = (woke ? afterWake(text) : text.replace(LEADING_NAME, '')).trim()
+    // "That's all" after an answer: she goes back to waiting for her name.
+    if (following && DISMISS.test(said)) {
+      goDormant()
+      return
+    }
     if (!said) {
       listen(AWAIT_SPEECH_MS)
       return
@@ -384,6 +446,57 @@ export default function App() {
     heard.current = true
     clearIdle()
     idleTimer.current = setTimeout(stopListening, LONGEST_TURN_MS)
+  }
+
+  /**
+   * Hands-free: the offline spotter heard her name — from any app, her window
+   * needn't be in front. She listens from just before the name, so "AYRA, open
+   * Notepad" in one breath is one turn.
+   */
+  const onWakeWord = () => {
+    const st = store.getState()
+    if (st.hearing !== 'hands-free') return
+    const phase = st.phase
+    // Already listening — or speaking, when it may be her own voice saying her
+    // name: then only Space or Esc interrupt her.
+    if (phase === 'offline' || phase === 'boot' || phase === 'listening' || phase === 'waking' || phase === 'speaking') return
+    st.setError(null)
+    const busy = phase === 'thinking' || phase === 'tooling'
+    if (busy && st.approvals.length) resumeTo.current = phase
+    else if (busy) onSpeechStart()
+    wokeByName.current = true
+    sfx.play('wake')
+    listen(AWAIT_SPEECH_MS, 'name')
+  }
+
+  /** Push-to-talk or hands-free (W, the tray, Ctrl+Alt+W). */
+  const setHearing = async (want: Hearing, say = true) => {
+    const v = voice.current
+    if (!v) return
+    const ok = await v.handsFree(want === 'hands-free')
+    const st = store.getState()
+    const mode: Hearing = want === 'hands-free' && ok ? 'hands-free' : 'push'
+    if (want === 'hands-free' && !ok) {
+      st.setError('Hands-free needs live hearing (an ElevenLabs key); push-to-talk stays on.')
+    }
+    st.setHearing(mode)
+    reportHearing(mode)
+    try {
+      localStorage.setItem(HEARING_KEY, mode)
+    } catch {
+      /* not remembered this time */
+    }
+    if (!say || mode !== want) return
+    // Never her name in these lines: the spotter would hear her say it.
+    const line = createSpeaker()
+    line.say(
+      withHonorific(
+        mode === 'hands-free'
+          ? 'Hands-free. Just say my name when you need me.'
+          : 'Push to talk. Press Space when you need me.',
+      ),
+    )
+    void line.end()
   }
 
   const onPartial = (text: string) => {
@@ -457,6 +570,8 @@ export default function App() {
     // to the socket — so a drop silently wipes his memory while the transcript
     // on screen still shows it. Better to say so than to let him quietly forget.
     watchConnection((state) => {
+      // A restarted bridge has forgotten how she listens; the tray asks it.
+      if (state !== 'lost') reportHearing(store.getState().hearing)
       if (state === 'lost') {
         store.getState().setError('Bridge connection lost — reconnecting.')
       } else if (state === 'reconnected') {
@@ -490,9 +605,18 @@ export default function App() {
       onPartial,
       onUtterance,
       onError: onVoiceError,
+      onWakeWord,
+      onHandsFreeError: (message) => {
+        store.getState().setError(message)
+        void setHearing('push', false)
+      },
     })
 
     store.getState().setPhase('dormant')
+    // How she listened last time, without announcing it.
+    watchHearing((mode) => void setHearing(mode))
+    if (savedHearing() === 'hands-free') void setHearing('hands-free', false)
+    else reportHearing('push')
   }
 
   // -- level pump + keys ----------------------------------------------------
@@ -567,6 +691,13 @@ export default function App() {
             )
           }
         })
+        return
+      }
+
+      // W: hands-free on or off — her name from anywhere, or Space each time.
+      if (e.key === 'w' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        void setHearing(store.getState().hearing === 'hands-free' ? 'push' : 'hands-free')
         return
       }
 

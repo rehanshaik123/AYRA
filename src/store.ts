@@ -71,8 +71,12 @@ export type Turn = {
   tools?: string[]
 }
 
+/** How she listens: Space each time, or her name from anywhere (hands-free). */
+export type Hearing = 'push' | 'hands-free'
+
 type State = {
   phase: Phase
+  hearing: Hearing
   /** 0..1 loudness — the mic, or AYRA's own voice while she speaks. */
   level: number
   /** What JARVIS is currently reading aloud or has just said. */
@@ -110,6 +114,7 @@ type State = {
   removeApproval: (id: string) => void
   clearApprovals: () => void
   setPhase: (p: Phase) => void
+  setHearing: (h: Hearing) => void
   setLevel: (l: number) => void
   setCaption: (c: string) => void
   setActiveTool: (t: string | null) => void
@@ -214,6 +219,7 @@ export function bladeLife(blade: Blade): number | null {
 
 export const useStore = create<State>((set) => ({
   phase: 'offline',
+  hearing: 'push',
   level: 0,
   caption: '',
   turns: [],
@@ -289,6 +295,7 @@ export const useStore = create<State>((set) => ({
   removeApproval: (id) => set((s) => ({ approvals: s.approvals.filter((a) => a.id !== id) })),
   clearApprovals: () => set({ approvals: [] }),
   setPhase: (phase) => set({ phase }),
+  setHearing: (hearing) => set({ hearing }),
   setLevel: (level) => set({ level }),
   setCaption: (caption) => set({ caption }),
   setActiveTool: (activeTool) => set({ activeTool }),

@@ -29,7 +29,7 @@ if (existsSync(envFile) && typeof process.loadEnvFile === 'function') {
 
 /** @type {{ name: string, wordmark: string, tagline: string, honorific: string, language: string,
  *           timezone: string, voice: { gender: 'female' | 'male', prefer: string[], elevenLabsId?: string },
- *           wake: { names: string[], prefixedOnly: string[] } }} */
+ *           wake: { names: string[], prefixedOnly: string[], spotter?: string[] } }} */
 export const IDENTITY = JSON.parse(readFileSync(root('config/identity.json'), 'utf8'))
 
 /**

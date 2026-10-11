@@ -68,6 +68,12 @@ export const chromeArgs = (extra = []) => [
   `--remote-debugging-port=${DEBUG_PORT}`,
   '--no-first-run',
   '--no-default-browser-check',
+  // Her face lives in this Chrome and must keep its timing while the owner works
+  // in another app (hands-free, 2026-10-11): Chrome otherwise slows the timers of
+  // a hidden or covered window to once a second, then once a minute.
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-renderer-backgrounding',
   ...extra,
 ]
 

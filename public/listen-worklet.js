@@ -20,10 +20,16 @@
  *   { type: 'audio', pcm }         Int16Array, 16 kHz mono
  *   { type: 'end', ms }            quiet for SILENCE_MS — the segment is over
  *   { type: 'level', v, energy, floor, threshold, speaking }  ~25 times a second
+ *   { type: 'stream', pcm }        hands-free only: every SEND_MS of the room, for
+ *                                  the offline wake-word spotter (bridge/wake.mjs)
  * Messages from the page: { guard: boolean } · { armed: boolean } — push-to-talk:
  * unarmed, nothing is ever sent (the owner, 2026-10-06: listen only when I press
  * Space) · { finish: true } — the owner pressed Space again: end the segment now,
- * however loud the room (a video playing next door never goes quiet).
+ * however loud the room (a video playing next door never goes quiet) ·
+ * { stream: boolean } — hands-free (2026-10-11): send the room to the spotter,
+ * which never leaves the laptop · { armFrom: ms } — the spotter heard her name:
+ * start a segment now from the last `ms` of audio, so "AYRA, open Notepad" said
+ * in one breath reaches the transcriber whole.
  *
  * ListenCore holds all of it and knows nothing about Web Audio, so it is tested
  * in Node (test/listen-worklet.test.mjs).
@@ -52,6 +58,8 @@ const PRE_ROLL_MS = 400
 const SEND_MS = 100
 /** How often the level goes to the page. */
 const LEVEL_MS = 40
+/** Hands-free: audio kept for `armFrom` — the name is spotted a moment after it is said. */
+const HISTORY_MS = 3000
 /** The floor adapts slowly upward (a fan spinning up) and quickly downward (a door closing). */
 const FLOOR_UP = 0.0008
 const FLOOR_DOWN = 0.02
@@ -80,6 +88,10 @@ export class ListenCore {
     this.preRoll = []
     this.pending = []
     this.events = []
+    /** Hands-free: the room streams to the spotter, and the last HISTORY_MS is kept. */
+    this.stream = false
+    this.history = []
+    this.streamed = []
   }
 
   /** Feed one block of microphone samples; returns what happened. */
@@ -118,6 +130,16 @@ export class ListenCore {
     this.smooth += (energy - this.smooth) * 0.5
     this.t += STEP_MS
     const t = this.t
+
+    if (this.stream) {
+      this.history.push(pcm)
+      if (this.history.length > HISTORY_MS / STEP_MS) this.history.shift()
+      this.streamed.push(pcm)
+      if (this.streamed.length * STEP_MS >= SEND_MS) {
+        this.events.push({ type: 'stream', pcm: join(this.streamed) })
+        this.streamed = []
+      }
+    }
 
     // Adapt the floor only when this is certainly not speech.
     if (!this.speaking && this.armedAt < 0) {
@@ -197,6 +219,37 @@ export class ListenCore {
     return this.events
   }
 
+  /** Hands-free on or off: stream the room to the spotter, keeping the last few seconds. */
+  setStream(on) {
+    this.stream = Boolean(on)
+    if (!this.stream) {
+      this.history = []
+      this.streamed = []
+    }
+  }
+
+  /**
+   * The spotter heard her name: arm, and start a segment at once from the last
+   * `ms` of audio rather than waiting for speech to be confirmed — the name was
+   * said before the spotter knew, and the command may already be under way.
+   */
+  armFrom(ms) {
+    this.events = []
+    this.armed = true
+    if (!this.speaking) {
+      const n = Math.max(0, Math.min(this.history.length, Math.round(ms / STEP_MS)))
+      this.pending = n ? this.history.slice(-n) : []
+      this.preRoll = []
+      this.speaking = true
+      this.startedAt = this.t
+      this.lastLoud = this.t
+      this.armedAt = -1
+      this.events.push({ type: 'start', woken: true })
+      this.flush()
+    }
+    return this.events
+  }
+
   /** End the segment now, as if the room had gone quiet — and hear nothing more until re-armed. */
   finish() {
     this.events = []
@@ -214,11 +267,17 @@ export class ListenCore {
 
   flush() {
     if (!this.pending.length) return
-    const pcm = new Int16Array(this.pending.length * WINDOW)
-    this.pending.forEach((w, i) => pcm.set(w, i * WINDOW))
+    const pcm = join(this.pending)
     this.pending = []
     this.events.push({ type: 'audio', pcm })
   }
+}
+
+/** Detector windows end to end, as one buffer (its own copy, so it can be transferred). */
+function join(windows) {
+  const pcm = new Int16Array(windows.length * WINDOW)
+  windows.forEach((w, i) => pcm.set(w, i * WINDOW))
+  return pcm
 }
 
 // In the AudioWorklet only — in Node (tests) neither global exists.
@@ -242,6 +301,13 @@ if (typeof registerProcessor === 'function' && typeof AudioWorkletProcessor === 
             else this.port.postMessage(ev)
           }
         }
+        if (e.data && 'stream' in e.data) this.core.setStream(e.data.stream)
+        if (e.data && typeof e.data.armFrom === 'number') {
+          for (const ev of this.core.armFrom(e.data.armFrom)) {
+            if (ev.type === 'audio') this.port.postMessage(ev, [ev.pcm.buffer])
+            else this.port.postMessage(ev)
+          }
+        }
       }
     }
 
@@ -249,7 +315,7 @@ if (typeof registerProcessor === 'function' && typeof AudioWorkletProcessor === 
       const channel = inputs[0]?.[0]
       if (channel) {
         for (const ev of this.core.push(channel)) {
-          if (ev.type === 'audio') this.port.postMessage(ev, [ev.pcm.buffer])
+          if (ev.type === 'audio' || ev.type === 'stream') this.port.postMessage(ev, [ev.pcm.buffer])
           else this.port.postMessage(ev)
         }
       }

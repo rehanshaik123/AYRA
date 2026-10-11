@@ -44,6 +44,31 @@ export const BARE_NAME = new RegExp(`^${NAME}[\\s,.!?]*$`, 'i')
 /** The name in front of a real command: "Ayra, what's the weather". */
 export const LEADING_NAME = new RegExp(`^${NAME}\\b[\\s,.:!?-]*`, 'i')
 
+/**
+ * A sentence ABOUT someone with a name like hers, not TO her: "Ira went to the
+ * market yesterday", "AYRA said she'd call". Measured 2026-10-11: the offline
+ * spotter woke on that "Ira", and the transcriber — told to spell her name
+ * AYRA — wrote "AYRA went to the market yesterday", so a name check alone let
+ * it through and she answered a stranger's sentence.
+ */
+const NARRATIVE =
+  /^(?:went|came|said|says|told|tells|was|were|had|has been|lives|lived|works|worked|got|gets|and|or|but|who|whose|whom|which|herself|himself)\b/i
+
+/**
+ * Hands-free: the words that came back after the spotter fired are spoken TO
+ * her — the bare name, a greeting before it ("hey AYRA"), a pause after it
+ * ("AYRA, …"), or a command or question after it — rather than a sentence
+ * about someone of that name.
+ */
+export function addressed(text: string): boolean {
+  const m = WAKE.exec(text)
+  if (!m) return false
+  if (BARE_NAME.test(text.slice(m.index))) return true
+  if (/^\s*(?:hey|hi|ok|okay|yo)\b/i.test(m[0])) return true
+  if (/^\s*[,.:;!?-]/.test(text.slice(m.index + m[0].length))) return true
+  return !NARRATIVE.test(afterWake(text))
+}
+
 /** Everything after the wake phrase, which is usually the actual command. */
 export function afterWake(text: string): string {
   const m = WAKE.exec(text)
