@@ -375,8 +375,10 @@ const VETO_EXEMPT = new Set([
  *                   our own screen: without it AYRA has no display at all.
  *                   `probe_url` only reads, through net.mjs; `show_data` draws
  *                   the answer's card, its figures checked against the results.
- *   ayra_research — the research agent (research.mjs). It searches and reads
- *                   the web, every page through net.mjs, and changes nothing.
+ *   ayra_research — the research agent (research.mjs) and researcher mode's
+ *                   deep_research (deep.mjs). They search and read the web —
+ *                   every page through net.mjs, GitHub / Stack Exchange / Hacker
+ *                   News / arXiv through their public APIs — and change nothing.
  *                   The agents that read page text have no tools at all, so an
  *                   injection in a page cannot act.
  *
@@ -385,7 +387,7 @@ const VETO_EXEMPT = new Set([
  */
 const NAMED_TOOLS = new Map([
   ['ayra', new Set(['display', 'blade', 'probe_url', 'show_data'])],
-  ['ayra_research', new Set(['research', 'recent_research'])],
+  ['ayra_research', new Set(['research', 'recent_research', 'deep_research'])],
 ])
 
 /**

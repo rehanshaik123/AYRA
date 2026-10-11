@@ -19,6 +19,7 @@ import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { lookup as dnsLookup } from 'node:dns'
 import { isIP } from 'node:net'
+import { brotliDecompressSync, gunzipSync, inflateRawSync, inflateSync } from 'node:zlib'
 
 /** A redirect chain longer than this is a loop or a game, not a CDN. */
 export const MAX_REDIRECTS = 4
@@ -238,25 +239,55 @@ export async function openRemote(startUrl, headers, timeoutMs) {
 }
 
 /**
+ * `extra` laid over `defaults`, names lower-cased.
+ *
+ * Header names are case-insensitive, so 'User-Agent' from a caller must
+ * replace our 'user-agent' rather than go out beside it. A null or undefined
+ * value means "no opinion" and keeps the default.
+ */
+export function mergeHeaders(defaults, extra) {
+  const out = { ...defaults }
+  for (const [name, value] of Object.entries(extra ?? {})) {
+    if (value === undefined || value === null) continue
+    out[String(name).toLowerCase()] = String(value)
+  }
+  return out
+}
+
+/**
+ * The headers fetchText sends. A caller's `headers` win over the defaults —
+ * except accept-encoding, which stays identity: fetchText decodes bytes as
+ * text and has no decompressor, so letting a caller ask for gzip would hand
+ * them garbage.
+ */
+export function textRequestHeaders({ accept, headers } = {}) {
+  return {
+    ...mergeHeaders(
+      {
+        'user-agent': PROXY_UA,
+        accept: accept ?? 'text/html,application/xhtml+xml,*/*;q=0.8',
+        'accept-language': 'en-GB,en;q=0.9',
+      },
+      headers,
+    ),
+    'accept-encoding': 'identity',
+  }
+}
+
+/**
  * Read a whole response as text, with a hard cap.
  *
  * Separate from the streaming proxy because a document is not media: we need
  * all of it in hand before we can rewrite it, and a page that will not fit in
  * the cap is one we should decline rather than truncate — half an HTML document
  * parses into something arbitrary.
+ *
+ * `headers` (optional) are merged over the defaults — the official APIs the
+ * research agent reads want their own Accept and an honest User-Agent.
  */
-export async function fetchText(url, { maxBytes, timeoutMs, accept }) {
+export async function fetchText(url, { maxBytes, timeoutMs, accept, headers }) {
   const target = vetTarget(url)
-  const { res, url: finalUrl } = await openRemote(
-    target,
-    {
-      'user-agent': PROXY_UA,
-      accept: accept ?? 'text/html,application/xhtml+xml,*/*;q=0.8',
-      'accept-language': 'en-GB,en;q=0.9',
-      'accept-encoding': 'identity',
-    },
-    timeoutMs,
-  )
+  const { res, url: finalUrl } = await openRemote(target, textRequestHeaders({ accept, headers }), timeoutMs)
 
   const status = res.statusCode ?? 0
   const type = String(res.headers['content-type'] ?? '')
@@ -321,4 +352,178 @@ export async function peek(url, { timeoutMs }) {
   }
   res.destroy()
   return out
+}
+
+// ---------------------------------------------------------------------------
+// JSON from official APIs (researcher mode's platform retrievers)
+// ---------------------------------------------------------------------------
+
+/** No API reply the research agent reads needs more than this, compressed or not. */
+export const MAX_JSON_BYTES = 4_000_000
+
+/** An error body is read only far enough to learn why. */
+const MAX_ERROR_BYTES = 64_000
+
+const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' })
+
+/**
+ * Bytes as the server meant them. Stack Exchange compresses every reply
+ * whatever the request says, so a JSON reader has to cope with gzip. The
+ * output cap is enforced by zlib itself, so a small bomb cannot inflate into
+ * memory before we notice.
+ */
+export function decodeBody(raw, encoding, maxBytes = MAX_JSON_BYTES) {
+  const enc = String(encoding ?? '').trim().toLowerCase()
+  if (!enc || enc === 'identity') {
+    if (raw.length > maxBytes) throw proxyError(413, 'reply too large')
+    return raw
+  }
+  const opts = { maxOutputLength: maxBytes }
+  try {
+    if (enc === 'gzip' || enc === 'x-gzip') return gunzipSync(raw, opts)
+    if (enc === 'br') return brotliDecompressSync(raw, opts)
+    if (enc === 'deflate') {
+      // "deflate" is meant to be zlib-wrapped, but some servers send it raw.
+      try {
+        return inflateSync(raw, opts)
+      } catch (err) {
+        if (err?.code === 'ERR_BUFFER_TOO_LARGE') throw err
+        return inflateRawSync(raw, opts)
+      }
+    }
+  } catch (err) {
+    if (err?.code === 'ERR_BUFFER_TOO_LARGE') throw proxyError(413, 'reply too large')
+    throw proxyError(502, 'bad compressed reply')
+  }
+  throw proxyError(502, `unsupported encoding ${enc}`)
+}
+
+/**
+ * How long an API asked us to wait, in ms, or null if it did not say.
+ * Retry-After is the standard; x-ratelimit-* is GitHub's own.
+ */
+function retryAfterMs(headers, now = Date.now()) {
+  const after = String(headers?.['retry-after'] ?? '').trim()
+  if (/^\d+$/.test(after)) return Number(after) * 1000
+  if (after) {
+    const at = Date.parse(after)
+    if (Number.isFinite(at)) return Math.max(0, at - now)
+  }
+  if (String(headers?.['x-ratelimit-remaining'] ?? '') === '0') {
+    const reset = Number(headers?.['x-ratelimit-reset'])
+    if (Number.isFinite(reset) && reset > 0) return Math.max(0, reset * 1000 - now)
+  }
+  return null
+}
+
+/**
+ * A response (anything with statusCode, headers and async-iterable body
+ * chunks) read and parsed as JSON. Split out of fetchJson so the parsing,
+ * caps and error shapes can be tested without a network.
+ *
+ * A non-2xx reply throws a proxyError carrying `upstream` (the real status),
+ * `retryAfterMs` (when the API said how long to wait) and `body` (its JSON
+ * error, if any) — the callers need to tell "slow down" from "no such thing".
+ */
+export async function readJsonResponse(res, { maxBytes = MAX_JSON_BYTES } = {}) {
+  const status = res.statusCode ?? 0
+  const ok = status >= 200 && status < 300
+  const cap = ok ? maxBytes : Math.min(maxBytes, MAX_ERROR_BYTES)
+  const chunks = []
+  let size = 0
+  let cut = false
+  for await (const chunk of res) {
+    size += chunk.length
+    if (size > cap) {
+      cut = true
+      res.destroy?.()
+      break
+    }
+    chunks.push(chunk)
+  }
+  const parse = () => {
+    const raw = decodeBody(Buffer.concat(chunks), res.headers?.['content-encoding'], cap)
+    const text = raw.toString('utf8').replace(/^\uFEFF/, '')
+    return text.trim() ? JSON.parse(text) : null
+  }
+
+  if (!ok) {
+    const err = proxyError(status === 404 ? 404 : 502, `upstream said ${status}`)
+    err.upstream = status
+    err.retryAfterMs = retryAfterMs(res.headers)
+    err.body = null
+    if (!cut) {
+      try {
+        err.body = parse()
+      } catch {
+        // An HTML error page or a broken body: the status alone will have to do.
+      }
+    }
+    throw err
+  }
+  if (cut) throw proxyError(413, 'reply too large')
+  try {
+    return parse()
+  } catch (err) {
+    if (err?.status) throw err
+    throw proxyError(502, 'not JSON')
+  }
+}
+
+/**
+ * GET a URL and parse the JSON — through the same SSRF gate, redirect
+ * vetting and DNS hook as everything else in this file.
+ *
+ * Unlike fetchText it accepts compression (JSON shrinks well, and Stack
+ * Exchange sends gzip regardless), any 2xx, and an AbortSignal. Two clocks:
+ * `timeoutMs` for the headers (openRemote's) and the same again for the body.
+ */
+export async function fetchJson(url, { timeoutMs = 8000, signal, headers, maxBytes = MAX_JSON_BYTES } = {}) {
+  if (signal?.aborted) throw abortError()
+  const target = vetTarget(url)
+  const sent = {
+    ...mergeHeaders(
+      { 'user-agent': PROXY_UA, accept: 'application/json', 'accept-language': 'en-GB,en;q=0.9' },
+      headers,
+    ),
+    // Pinned: readJsonResponse decodes exactly these.
+    'accept-encoding': 'gzip, deflate, br',
+  }
+
+  let res = null
+  let onAbort = null
+  const stopped = signal
+    ? new Promise((_, reject) => {
+        onAbort = () => {
+          res?.destroy()
+          reject(abortError())
+        }
+        signal.addEventListener('abort', onAbort, { once: true })
+      })
+    : null
+
+  const work = (async () => {
+    ;({ res } = await openRemote(target, sent, timeoutMs))
+    if (signal?.aborted) {
+      res.destroy()
+      throw abortError()
+    }
+    // A server that sends headers and then trickles the body must not hold a
+    // research run open for ever.
+    const deadline = setTimeout(() => res.destroy(proxyError(504, 'upstream too slow')), timeoutMs)
+    try {
+      return await readJsonResponse(res, { maxBytes })
+    } finally {
+      clearTimeout(deadline)
+    }
+  })()
+
+  if (!stopped) return work
+  // Whichever loses the race must not surface later as an unhandled rejection.
+  work.catch(() => {})
+  try {
+    return await Promise.race([work, stopped])
+  } finally {
+    signal.removeEventListener('abort', onAbort)
+  }
 }

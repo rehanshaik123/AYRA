@@ -112,6 +112,16 @@ test('the research agent only reads, so it is allowed with writes off', () => {
   assert.equal(readOnly.decide('mcp__ayra_researcher__delete_report'), false)
 })
 
+test('researcher mode (deep_research) only searches and reads, so it is allowed with writes off', () => {
+  for (const gate of [readOnly, writes]) {
+    assert.equal(gate.decide('mcp__ayra_research__deep_research'), true)
+    assert.deepEqual(gate.review('mcp__ayra_research__deep_research', { question: 'Best local LLM for coding?' }), { verdict: 'allow' })
+  }
+  // Only on its own server, and only by its exact name.
+  assert.equal(readOnly.decide('mcp__ayra__deep_research'), false)
+  assert.equal(readOnly.decide('mcp__ayra_research__deep_research_delete'), false)
+})
+
 test('other MCP servers: read verbs pass, effectful verbs need writes', () => {
   assert.equal(readOnly.decide('mcp__android__list_devices'), true)
   assert.equal(readOnly.decide('mcp__android__install_apk'), false)

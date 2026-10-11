@@ -62,6 +62,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { clip } from './audit.mjs'
 import { stamp } from './context.mjs'
+// A cycle (deep.mjs reuses this file's helpers): safe because deepTools is only called at run time.
+import { deepTools } from './deep.mjs'
 import { IDENTITY } from './identity.mjs'
 import { fetchText, proxyError } from './net.mjs'
 import { readArticle } from './page.mjs'
@@ -99,7 +101,7 @@ const HEARTBEAT_MS = 5000
 const PAGES_PER_PART = 3
 const MIN_TEXT = 300
 /** The page a site serves to anything it takes for a bot. Labelled, never worked around. */
-const BOT_WALL = /client challenge|just a moment|attention required|access denied|are you a robot|verify you are (a )?human|captcha|security check/i
+export const BOT_WALL = /client challenge|just a moment|attention required|access denied|are you a robot|verify you are (a )?human|captcha|security check/i
 const MAX_PAGE_BYTES = 4 * 1024 * 1024
 const MAX_FINDINGS = 8
 const MAX_FACTS = 10
@@ -119,10 +121,10 @@ class Stopped extends Error {
 /** A page that was fetched but cannot be used; the message is shown as is. */
 class ReadError extends Error {}
 
-const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' })
+export const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' })
 
 /** Settle with `promise`, or reject the moment `signal` aborts — whether or not the work honours it. */
-function guard(promise, signal) {
+export function guard(promise, signal) {
   if (!signal) return promise
   if (signal.aborted) return Promise.reject(abortError())
   return new Promise((resolve, reject) => {
@@ -142,7 +144,7 @@ function guard(promise, signal) {
 }
 
 /** One line of model or web text: no control characters, no runs of space, capped. */
-const cleanLine = (value, max) => {
+export const cleanLine = (value, max) => {
   const s = String(value ?? '')
     .replace(/\p{Cc}+/gu, ' ')
     .replace(/\s+/g, ' ')
@@ -192,7 +194,7 @@ export function canonical(raw) {
 }
 
 /** Same page, however it was linked: host without www, path, query. */
-const dedupeKey = (url) => {
+export const dedupeKey = (url) => {
   const u = new URL(url)
   return `${u.hostname.toLowerCase().replace(/^www\./, '')}${u.pathname}${u.search}`
 }
@@ -286,7 +288,7 @@ export function tidyAnswer(text, valid, findings = new Map()) {
 }
 
 /** Remove injection sentences line by line, keeping the layout of a report. */
-function scrub(text) {
+export function scrub(text) {
   return String(text ?? '')
     .split('\n')
     .map((line) => {
@@ -297,7 +299,7 @@ function scrub(text) {
 }
 
 /** The source numbers an answer cites. */
-const citedIn = (text) => {
+export const citedIn = (text) => {
   const out = new Set()
   for (const m of String(text ?? '').matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g)) {
     for (const x of m[1].split(',')) out.add(Number(x))
@@ -306,7 +308,7 @@ const citedIn = (text) => {
 }
 
 /** The answer's first sentence, without its citations: the data card's note when there are no figures. */
-function firstSentence(text) {
+export function firstSentence(text) {
   const plain = String(text ?? '').replace(/\[[\d,\s]+\]/g, '').replace(/[ \t]+([.,;:!?])/g, '$1')
   // "What the sources establish:" heads a list; the first item says something.
   const first = plain.split(/\n/).map((l) => l.trim().replace(/^-\s+/, '')).find((l) => l && !l.endsWith(':')) ?? ''
@@ -501,6 +503,15 @@ const REVIEW_SCHEMA = {
  */
 const MAX_IDLE = 10
 
+/** A tool result's text as the model saw it, capped: what a search really showed. */
+const resultText = (content) =>
+  (typeof content === 'string'
+    ? content
+    : Array.isArray(content)
+      ? content.map((b) => (typeof b?.text === 'string' ? b.text : '')).join('\n')
+      : ''
+  ).slice(0, 30_000)
+
 /** What makes two agents interchangeable: everything but the question and the callbacks. */
 export const specKey = ({ system, tools = [], schema, model, effort, maxTurns, stream, onText }) =>
   JSON.stringify([system, tools, schema ?? null, model, effort ?? null, maxTurns ?? null, Boolean(stream ?? onText)])
@@ -600,7 +611,8 @@ export function coolAgents(drop = () => true) {
  * `expectSearches`: a searcher is done the moment that many searches have come
  * back — waiting for it to say "done" cost ~5 s a search stage (measured).
  *
- * @returns {Promise<{ text: string, data: unknown, searches: { query: string, links: { title: string, url: string }[] }[], costUsd: number }>}
+ * @returns {Promise<{ text: string, data: unknown, searches: { query: string, links: { title: string, url: string }[], text: string }[], costUsd: number }>}
+ *   searches[].text — what the search showed the model (capped), for checking a searcher's snippets
  */
 export async function defaultRunAgent(args) {
   const { stage, prompt, signal, onText, onSearch, expectSearches } = args
@@ -642,7 +654,10 @@ export async function defaultRunAgent(args) {
           if (names.get(block.tool_use_id) !== 'WebSearch' || block.is_error) continue
           // The structured result belongs to the message; with several results in one
           // message, each block's own "Links:" line is the reliable source.
-          const found = searchSources(results.length === 1 ? msg.tool_use_result : undefined, block.content)
+          const parsed = searchSources(results.length === 1 ? msg.tool_use_result : undefined, block.content)
+          // The text the searcher was shown, too: researcher mode (deep.mjs) checks a
+          // searcher's snippets against it, as a reporter's quotes are checked against its page.
+          const found = parsed && { ...parsed, text: resultText(block.content) }
           if (found) {
             searches.push(found)
             onSearch?.(found)
@@ -1928,10 +1943,10 @@ export function createResearch({
 }
 
 /** A web string in a text report: no [ ] ( ) * _ ` — nothing a chat app could take for a link or formatting. */
-const plain = (s) => cleanLine(String(s ?? '').replace(/[[\]()*_`]/g, ''), 300)
+export const plain = (s) => cleanLine(String(s ?? '').replace(/[[\]()*_`]/g, ''), 300)
 
 /** 'Gold, 24 carat: ₹1,23,450 per 10 g, +1.2% (as of 7 Oct 2026) [2]' */
-const dataLine = (x) =>
+export const dataLine = (x) =>
   `${plain(x.label)}: ${plain(x.value)}${x.unit ? ` ${plain(x.unit)}` : ''}${x.change ? `, ${plain(x.change)}` : ''}` +
   `${x.asOf ? ` (as of ${plain(x.asOf)})` : ''}${x.note ? ` — ${plain(x.note)}` : ''}${x.n ? ` [${x.n}]` : ''}`
 
@@ -2111,11 +2126,17 @@ export function researchTools({ research, emitBlade, channel = 'hud', turn }) {
   ]
 }
 
-export const researchServer = (options) =>
+/**
+ * The research tools, plus researcher mode's deep_research when `deep` (a
+ * createDeepResearch engine, deep.mjs) is passed — same channel, same cards.
+ */
+export const researchServer = ({ deep, ...options } = {}) =>
   createSdkMcpServer({
     name: 'ayra_research',
     version: '2.0.0',
-    instructions: 'The research agent: a complex question split into parts, each researched by its own agent, reviewed, cited and scored.',
+    instructions:
+      'The research agent: a complex question split into parts, each researched by its own agent, reviewed, cited and scored.' +
+      (deep ? ' Researcher mode (deep_research): platform sub-agents, relevance-ranked results, a final cited answer.' : ''),
     alwaysLoad: true,
-    tools: researchTools(options),
+    tools: [...researchTools(options), ...(deep ? deepTools({ ...options, deep }) : [])],
   })
