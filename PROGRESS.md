@@ -11,7 +11,7 @@
 - **Next:** the owner's review of the overnight work (data/overnight.md "Report") → merge Phase 5 after their OK → 6.5, the owner's phone demo of Phase 6 (6.1–6.4 done on `phase-6-autonomy`) → merge Phase 6
 - **Waiting on owner:** the 5.8 setup — pin "AYRA" and "Chrome (AYRA)" to the taskbar, allow the microphone once in her window, sign in to Google in "Chrome (AYRA)", Windows mic access, power settings for lid-closed use, optional trusted sites (`AYRA_TRUSTED_SITES`)
 - **Blockers:** none. The Claude Code safety check blocked running the gate tests once (they contain example dangerous commands); the owner allowed the test commands for this project
-- **Health (2026-10-12):** build ✓ · lint 0 · `npm test` 400/400 · AYRA runs from the tray on branch `researcher-mode` · ElevenLabs credits: check before the month ends (resets 1 Nov)
+- **Health (2026-10-12):** build ✓ · lint 0 · `npm test` 401/401 · AYRA runs from the tray on branch `researcher-mode` · ElevenLabs credits: check before the month ends (resets 1 Nov)
 
 ## Log — one line per task (what changed — why)
 
