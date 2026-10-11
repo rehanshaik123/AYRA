@@ -109,12 +109,21 @@ const NOT_A_NAME =
 /** A domain said as such: "youtube.com", "news.ycombinator.com". */
 const DOMAIN = /^(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,})(\/\S*)?$/i
 
+/**
+ * Only with a music word: "next one", "continue" or "stop" alone mean
+ * something else in a conversation (the next headline, carry on, stop
+ * talking) — the review found Spotify skipping on "next one" (2026-10-12).
+ * "Pause" alone is the one exception: it is not said to her otherwise.
+ */
 const MEDIA = [
-  [/^(?:pause|stop)(?: the| my)?(?: music| song| track| spotify| playback| audio| video)?$/i, 'pause', 'Paused.'],
-  [/^(?:play|resume|unpause|continue)(?: the| my)?(?: music| song| track| spotify| playback)?$/i, 'play', 'Playing.'],
-  [/^(?:next|skip)(?: the| this)?(?: song| track| one)?$/i, 'next', 'Next track.'],
-  [/^(?:previous|go back a|last)(?: song| track)$|^previous$/i, 'prev', 'Previous track.'],
+  [/^pause$|^(?:pause|stop)(?: the| my)? (?:music|song|track|spotify|playback|audio)$/i, 'pause', 'Paused.'],
+  [/^(?:play|resume|unpause|continue)(?: the| my)? (?:music|song|track|spotify|playback)$/i, 'play', 'Playing.'],
+  [/^(?:next|skip)(?: the| this)? (?:song|track)$/i, 'next', 'Next track.'],
+  [/^(?:previous|go back a|last) (?:song|track)$/i, 'prev', 'Previous track.'],
 ]
+
+/** "open report.pdf" is a file, not a website called report.pdf. */
+const FILE_EXT = /\.(?:pdf|txt|md|js|ts|mjs|py|java|c|cpp|cs|docx?|xlsx?|pptx?|csv|json|xml|html?|png|jpe?g|gif|svg|exe|msi|zip|rar|7z|mp3|mp4|mkv|wav|log|ini|bat|ps1)$/i
 
 /** The command as said, without her name, politeness or end punctuation. */
 export function bare(text) {
@@ -147,14 +156,21 @@ export function parseFast(text) {
   const target = m[1].trim().replace(/\s+(?:app|application|website|site|for me)$/i, '').trim()
   const key = target.toLowerCase()
 
+  // A folder only when "opened" or gone to — "start the video" is not the
+  // Videos folder — and music or videos only when called a folder.
   const folder = FOLDER.exec(key)
   if (folder) {
     const f = FOLDERS[folder[1].toLowerCase()]
+    const opened = /^(?:open|go to|take me to)\b/i.test(said)
+    if (!opened || ((f === 'Music' || f === 'Videos') && !/\bfolder$/.test(key))) return null
     return { kind: 'folder', name: f === 'home' ? 'your home folder' : `your ${f}`, folder: f }
   }
   if (SITES[key]) return { kind: 'site', name: SITES[key][0], url: SITES[key][1] }
   const d = DOMAIN.exec(target)
-  if (d && !/\s/.test(target)) return { kind: 'site', name: d[1].replace(/^www\./i, ''), url: `https://${d[1]}${d[2] ?? '/'}` }
+  if (d && !/\s/.test(target)) {
+    if (!d[2] && FILE_EXT.test(d[1])) return null
+    return { kind: 'site', name: d[1].replace(/^www\./i, ''), url: `https://${d[1]}${d[2] ?? '/'}` }
+  }
   if (APP_OR_SITE[key]) {
     const [name, url] = APP_OR_SITE[key]
     return { kind: 'app', name, site: { name, url } }

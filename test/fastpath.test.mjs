@@ -39,6 +39,16 @@ test('anything that needs thinking goes to the brain', () => {
   ]) assert.equal(parseFast(text), null, text)
 })
 
+test('what the review caught: conversation words, files and folders that are not folders', () => {
+  for (const text of ['next one', 'next', 'continue', 'stop', 'skip this', 'start the video', 'launch my music', 'open music',
+    'open report.pdf', 'open node.js', 'open readme.md', 'open budget.xlsx']) {
+    assert.equal(parseFast(text), null, text)
+  }
+  assert.equal(parseFast('open my music folder').folder, 'Music')
+  assert.equal(parseFast('pause').action, 'pause')
+  assert.equal(parseFast('open github.com/rehanshaik123').url, 'https://github.com/rehanshaik123')
+})
+
 test('music commands', () => {
   assert.equal(parseFast('pause the music').action, 'pause')
   assert.equal(parseFast('Hey AYRA, play music').action, 'play')

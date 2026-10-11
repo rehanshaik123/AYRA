@@ -499,7 +499,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
     if (mode === 'deaf') return
     if (!said) {
       drop('nothing intelligible in the segment')
-      assemble.settle()
+      settleIfIdle()
       return
     }
     // Her own voice, come back through the microphone. The raised guard
@@ -537,6 +537,16 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
     // Not a turn yet — a piece of one. The assembler decides when the thought
     // is finished, reading the words and whether the user is still talking.
     assemble.feed(said, listener?.meter().speaking ?? false)
+  }
+
+  /**
+   * An empty segment: let held words go if nothing else is coming — no words
+   * still on their way, no send in progress, nobody talking now. Otherwise a
+   * punctuated first half could leave alone while its second half was still
+   * being transcribed (review, 2026-10-12).
+   */
+  const settleIfIdle = () => {
+    if (!sending && awaiting === 0 && !listener?.meter().speaking) assemble.settle()
   }
 
   const finishSend = () => {
@@ -603,7 +613,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
         if (dropped) discard++
         else if (!empty) awaiting++
         else if (sending && awaiting === 0) finishSend()
-        else assemble.settle()
+        else settleIfIdle()
       },
       onPartial: (text) => {
         if (h.mode() !== 'command' || !text.trim()) return
@@ -659,7 +669,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
           if (discard > 0) discard--
           else awaiting = Math.max(0, awaiting - 1)
           if (sending && awaiting === 0) finishSend()
-          else assemble.settle()
+          else settleIfIdle()
           return
         }
         fallBack(code)

@@ -543,6 +543,9 @@ const handleRequest = async (req, res) => {
       for await (const chunk of upstream) res.write(chunk)
       return res.end()
     } catch (err) {
+      // Cut off mid-stream: break the response, so the face's fetch fails and a
+      // half sentence is neither played as whole nor kept in its line cache.
+      if (res.headersSent) return res.destroy(err)
       res.writeHead(502, cors)
       return res.end(String(err?.message ?? err))
     }
@@ -1119,6 +1122,8 @@ wss.on('connection', (socket, req) => {
 
   /** What the fast path did since the brain last heard from this screen (told on its next question). */
   const done = []
+  /** The newest question from this screen — cleared by an interrupt — so a slow fast path knows it was overtaken. */
+  let latest = null
 
   /**
    * A question for the brain. Ranked on the owner's own words (triage.mjs,
@@ -1143,6 +1148,13 @@ wss.on('connection', (socket, req) => {
   const quick = async (intent, text, id) => {
     const t0 = Date.now()
     const did = await runFast(intent, HANDS)
+    // The owner moved on while it ran (a new question, Esc): never hand the
+    // old one to the brain now — its ask would relabel the newer turn's frames
+    // and the face would drop them (review, 2026-10-12). What was done is told.
+    if (latest !== id) {
+      if (did) done.push(did.note)
+      return
+    }
     if (!did) return askBrain(text, id)
     done.push(did.note)
     send({ type: 'text', delta: did.said, ask: id ?? undefined })
@@ -1161,6 +1173,7 @@ wss.on('connection', (socket, req) => {
 
     if (msg.type === 'ask' && typeof msg.text === 'string') {
       const id = typeof msg.id === 'string' ? msg.id : null
+      latest = id
       // Researcher mode (the R key): every question goes to deep_research.
       // The planner starts while the brain reads the question.
       if (msg.mode === 'research') {
@@ -1182,7 +1195,10 @@ wss.on('connection', (socket, req) => {
       askBrain(msg.text, id)
     }
 
-    if (msg.type === 'interrupt') conversation.interrupt()
+    if (msg.type === 'interrupt') {
+      latest = null
+      conversation.interrupt()
+    }
 
     // The owner has started speaking: wake a sleeping brain while they talk.
     if (msg.type === 'warm') {

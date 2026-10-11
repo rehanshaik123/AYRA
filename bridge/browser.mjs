@@ -240,23 +240,27 @@ const SETTLE_MIN_MS = 250
  * 150 ms after the click goes on at once, and a navigation (seen by its main-
  * frame request) is still waited for.
  */
-async function settle(page) {
+function watch(page) {
+  // Watching starts BEFORE the click or key: a link's navigation request goes
+  // out within the 80 ms press() waits, and a watcher attached afterwards
+  // missed it and read the page being left (review, 2026-10-12).
   let navigating = false
   const onRequest = (req) => {
     if (req.isNavigationRequest() && req.frame() === page.mainFrame()) navigating = true
   }
   page.on('request', onRequest)
-  try {
-    const nav = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 4000 }).then(() => 'nav', () => null)
-    const quiet = Promise.all([page.evaluate(domQuiet, 150, 900), wait(SETTLE_MIN_MS)]).then(() => 'quiet', () => 'gone')
-    const first = await Promise.race([nav, quiet])
-    // The document went away under the probe, or a navigation began: wait for the new page.
-    if (first !== 'nav' && (first === 'gone' || navigating)) await nav
-  } finally {
-    page.off('request', onRequest)
+  const nav = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 4000 }).then(() => 'nav', () => null)
+  return async () => {
+    try {
+      const quiet = Promise.all([page.evaluate(domQuiet, 150, 900), wait(SETTLE_MIN_MS)]).then(() => 'quiet', () => 'gone')
+      const first = await Promise.race([nav, quiet])
+      // The document went away under the probe, or a navigation began: wait for the new page.
+      if (first !== 'nav' && (first === 'gone' || navigating)) await nav
+    } finally {
+      page.off('request', onRequest)
+    }
   }
 }
-
 // ---------------------------------------------------------------------------
 // Reading a page
 // ---------------------------------------------------------------------------
@@ -576,13 +580,16 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
         const before = new Set(b.targets())
         const isChild = (t) => t.opener() === page.target() && !before.has(t)
         const opened = b.waitForTarget(isChild, { timeout: 1500 }).catch(() => null)
+        const settled = watch(page)
         await press(el)
-        await settle(page)
+        await settled()
         const target = (await Promise.race([opened, wait(100).then(() => null)])) ?? b.targets().find(isChild)
         const tab = target ? await target.page().catch(() => null) : null
         if (tab) {
           me.current = tab
-          await settle(tab)
+          // A new tab starts on about:blank: wait for its own address before reading it.
+          await tab.waitForFunction(() => location.href !== 'about:blank', { timeout: 4000 }).catch(() => {})
+          await tab.waitForFunction(() => document.readyState !== 'loading', { timeout: 4000 }).catch(() => {})
           return text(`Clicked "${label}"; it opened a new tab: ${await tab.title()} — ${tab.url()}. Working there now.${await now(tab, me.attr)}`)
         }
         return text(`Clicked "${label}".${await now(page, me.attr)}`)
@@ -619,8 +626,9 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
           if (!(await allowed({ action: 'enter', field, label }, page, 'browser_type', `Send ${shown} from "${label}"`))) {
             return fail('Typed it, but the owner did not approve sending it — it is left unsent in the box.')
           }
+          const settled = watch(page)
           await page.keyboard.press('Enter')
-          await settle(page)
+          await settled()
           return text(`Typed into "${label}" and pressed Enter.${await now(page, me.attr)}`)
         }
         return text(`Typed into "${label}". Now on: ${await page.title()}.`)
@@ -639,8 +647,9 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
             return fail('The owner did not approve pressing Enter there. Leave it.')
           }
         }
+        const settled = watch(page)
         await page.keyboard.press(key)
-        await settle(page)
+        await settled()
         // Enter usually changes the page; Tab or an arrow key usually doesn't need a read.
         return text(`Pressed ${key}.${/^enter$/i.test(key) ? await now(page, me.attr) : ''}`)
       }),
