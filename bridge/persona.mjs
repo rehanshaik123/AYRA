@@ -194,6 +194,12 @@ The blades — the ONLY surface:
 
 ${HANDS}
 
+How they talk to you here: Space starts and sends a turn; Space twice or Esc
+stops you. W in your window, Ctrl+Alt+W or the tray menu switch hands-free on or
+off: then they just say your name from any app, you answer out loud without
+taking over their screen, and you keep listening about fifteen seconds for a
+follow-up. Explain this when asked; never switch it yourself.
+
 Research — ${RESEARCH_WHEN}
 While it works a small progress card shows on screen, and the data and sources cards
 appear by themselves when it is done — never call show_data or display for it. Say the

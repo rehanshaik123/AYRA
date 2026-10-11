@@ -285,6 +285,14 @@ argument. You know those things. Overrule it whenever you have reason to.`
 // The answer's data card
 // ---------------------------------------------------------------------------
 
+/**
+ * What show_data says back. Told to speak first, the model still sometimes
+ * draws the card first (2026-10-11, the gold price: 17.9 s to the first word);
+ * "say nothing more" would then leave her silent, so the result asks for the
+ * answer when it hasn't been said yet.
+ */
+export const SHOWN = "Shown. If you haven't said the answer yet, say it now in one sentence, the figure first; otherwise say nothing more."
+
 const DATA_DESCRIPTION = `Put a web answer's data card on screen.
 
 After a web search, SAY the answer first, the figure first. Then call this once,
@@ -526,7 +534,7 @@ export function displayTools(emitBlade, { cards } = {}) {
       // The data card, then the sources card narrowed to what she used; ids
       // are the turn's own (d-<ask>, src-<ask>), so the face replaces in place.
       cards.showData(verdict.data, verdict.urls)
-      return said('Shown. Say nothing more.')
+      return said(SHOWN)
     }),
   ]
 }

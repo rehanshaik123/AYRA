@@ -183,3 +183,10 @@ test('resultText: strings and blocks, clipped to 20 000 characters', () => {
   assert.equal(RESULT_TEXT_MAX, 20_000)
   assert.equal(resultText('x'.repeat(25_000)).length, 20_000)
 })
+
+test('a used-up Claude limit is said plainly, with when it resets', async () => {
+  const { usageLimit } = await import('../bridge/brain.mjs')
+  assert.match(usageLimit("You've hit your session limit · resets 2:40pm (Asia/Kolkata)"), /usage limit is reached.*resets at 2:40pm\.$/)
+  assert.match(usageLimit("You've hit your weekly limit"), /usage limit is reached/)
+  assert.equal(usageLimit('API Error: 400 model not found'), null)
+})

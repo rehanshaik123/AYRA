@@ -1,7 +1,7 @@
 // Unit tests for bridge/panels.mjs — the HUD's tools, show_data above all. `npm test`
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DATA_LIMITS, checkData, displayTools } from '../bridge/panels.mjs'
+import { DATA_LIMITS, checkData, displayTools, SHOWN } from '../bridge/panels.mjs'
 import { createTurnCards } from '../bridge/sources.mjs'
 import { cleanData, cleanLinks } from '../src/lib/research.ts'
 
@@ -52,7 +52,7 @@ test('show_data: the data card, then the sources card narrowed to the URLs used'
   const { sent, call } = hud()
   const result = await call('show_data', GOLD_DATA)
   assert.equal(result.isError, undefined)
-  assert.equal(text(result), 'Shown. Say nothing more.')
+  assert.equal(text(result), SHOWN)
   assert.equal(sent.length, 2)
   assert.deepEqual(sent[0], {
     id: 'd-a1',
@@ -80,7 +80,7 @@ test('a name, a score or a yes/no has no figure to check', async () => {
   const result = await call('show_data', {
     title: 'MATCH', headline: { label: 'Winner', value: 'India' }, sources: [GOLD[0].url],
   })
-  assert.equal(text(result), 'Shown. Say nothing more.')
+  assert.equal(text(result), SHOWN)
   assert.deepEqual(sent[0].data, { title: 'MATCH', headline: { label: 'Winner', value: 'India' }, rows: [] })
 })
 
@@ -128,7 +128,7 @@ test('a figure she calculated or converted is shown when the note says so', asyn
       title: 'GOLD IN USD', headline: { label: '24K gold', value: '$1,478', unit: 'per 10 g' }, note,
       sources: [GOLD[0].url],
     })
-    assert.equal(text(r), 'Shown. Say nothing more.', note)
+    assert.equal(text(r), SHOWN, note)
     assert.equal(sent[0].data.note, note)
   }
   // Any other note is no licence for a figure the results never gave.
@@ -145,7 +145,7 @@ test('a page read counts: its text is checked and its URL can be named', async (
   const r = await call('show_data', {
     title: 'USD · INR', headline: { label: 'RBI reference rate', value: '₹83.52' }, sources: ['https://rbi.org.in/rates/'],
   })
-  assert.equal(text(r), 'Shown. Say nothing more.')
+  assert.equal(text(r), SHOWN)
   assert.deepEqual(sent[1].links.map((l) => l.url), ['https://www.rbi.org.in/rates'])
 })
 

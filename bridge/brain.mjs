@@ -104,12 +104,25 @@ export function webResultEvent({ name, input, block, structured = null }) {
  * What to tell the channel when a turn ends badly. Plain sentences, because
  * whatever reaches the client is liable to be spoken.
  */
+/**
+ * The owner's Claude limit, said plainly. AYRA runs on the owner's own Pro
+ * login, so a long working session elsewhere can use it up; "the model could not
+ * be reached" (2026-10-11) sent them looking for a fault that wasn't there.
+ */
+export function usageLimit(result) {
+  const text = String(result ?? '')
+  if (!/(?:session|weekly|usage|rate) limit/i.test(text)) return null
+  const when = /resets +([^(\n]+?) *(?:\(|$|\n)/i.exec(text)?.[1]?.trim()
+  return when ? `${RESULT_FAILURES.limit} It resets at ${when}.` : RESULT_FAILURES.limit
+}
+
 const RESULT_FAILURES = {
   error_during_execution: 'The turn failed part way through.',
   error_max_turns: 'The turn ran too long and was stopped.',
   error_max_budget_usd: 'The budget for this turn ran out.',
   error_max_structured_output_retries: 'The answer could not be assembled.',
   api_error: 'The model could not be reached. The details are in the bridge log.',
+  limit: 'My Claude usage limit is reached, so I can hear you but not think right now.',
   resume_failed: 'The previous conversation could not be restored. Ask me again.',
   interrupted: 'Stopped.',
   default: 'The turn ended without an answer.',
@@ -592,7 +605,8 @@ export function createBrain({
                   message: resumeFailed
                     ? RESULT_FAILURES.resume_failed
                     : apiError
-                      ? RESULT_FAILURES.api_error
+                      ? usageLimit(msg.result)
+                      ?? RESULT_FAILURES.api_error
                       : (RESULT_FAILURES[msg.subtype] ?? RESULT_FAILURES.default),
                 })
               }
