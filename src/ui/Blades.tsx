@@ -1,9 +1,10 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useStore, type Blade } from '../store'
+import { useStore, bladeLife, dockOrder, TURN_MS, type Blade } from '../store'
 import { BRIDGE_HTTP_URL } from '../config'
 import { sanitisePanelHtml } from './sanitise'
-import { ResearchBoard } from './Research'
+import { ResearchProgress } from './Research'
+import { changeTone, cleanData, cleanLinks, dataFoot, isWebUrl } from '../lib/research'
 
 /**
  * The blades.
@@ -13,13 +14,11 @@ import { ResearchBoard } from './Research'
  * here, at the bottom, because it is still the right answer to "something is
  * happening". But the name now belongs to the surface it was decorating.
  *
- * A panel is a card you glance at while listening: a figure, three headlines, a
- * status line. A blade is the thing you actually look at. The distinction is
- * not styling, it is geometry — an article you are meant to READ needs a column
- * of a particular width and a height you can scroll, and no amount of care
- * makes that work inside a 320px card stacked beside the reactor. So blades own
- * their size, they stack instead of replacing one another, and the user can
- * pull an older one forward or throw one to full screen.
+ * A blade is the thing you actually look at: an answer's figures and the
+ * sources behind them, an article, a picture. Docked they stand in a column
+ * beside her, every one readable at once — an answer's data card and its
+ * sources card side by side is the point (the owner, 2026-10-08). Any one can
+ * be thrown full screen.
  *
  * The hard problem a blade solves is that most of the web refuses to be shown.
  * X-Frame-Options and frame-ancestors stop an article being framed, CORS stops
@@ -85,6 +84,13 @@ function embedUrl(raw: string): string | null {
 
 /* --------------------------------------------------------------------- body */
 
+type BodyProps = {
+  blade: Blade
+  expanded: boolean
+  /** Full screen — what "+3 more" on a data card asks for. */
+  onMore: () => void
+}
+
 /**
  * What goes inside a blade.
  *
@@ -94,12 +100,12 @@ function embedUrl(raw: string): string | null {
  * same-origin would let a page JARVIS found on the web reach that socket. It
  * does not need it. It is being read, not run.
  */
-const Body = memo(function Body({ blade }: { blade: Blade }) {
+const Body = memo(function Body({ blade, expanded, onMore }: BodyProps) {
   if (blade.kind === 'article' && blade.url) {
     return (
       <iframe
         className="bl-frame"
-        src={pageUrl(blade.url, blade.mode ?? 'reader')}
+        src={pageUrl(blade.url, blade.mode === 'live' ? 'live' : 'reader')}
         // allow-scripts WITHOUT allow-same-origin. That combination is the
         // point: the page runs in an opaque origin, so the one script the
         // bridge injects can move the document's own scroll position and can
@@ -107,7 +113,7 @@ const Body = memo(function Body({ blade }: { blade: Blade }) {
         // allow-same-origin would hand a page found on the web the keys.
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
-        title={blade.title}
+        title={String(blade.title ?? '')}
       />
     )
   }
@@ -125,7 +131,7 @@ const Body = memo(function Body({ blade }: { blade: Blade }) {
         allow="accelerometer; encrypted-media; picture-in-picture; fullscreen"
         referrerPolicy="no-referrer"
         allowFullScreen
-        title={blade.title}
+        title={String(blade.title ?? '')}
       />
     )
   }
@@ -143,13 +149,13 @@ const Body = memo(function Body({ blade }: { blade: Blade }) {
   }
 
   if (blade.kind === 'image' && blade.url) {
-    return <img className="bl-image" src={viaBridge(blade.url, 'img')} alt={blade.title} />
+    return <img className="bl-image" src={viaBridge(blade.url, 'img')} alt={String(blade.title ?? '')} />
   }
 
   if (blade.kind === 'gallery') {
     return (
       <div className="bl-gallery">
-        {(blade.images ?? []).map((src, i) => (
+        {(Array.isArray(blade.images) ? blade.images : []).map((src, i) => (
           <img key={`${src}-${i}`} className="bl-thumb" src={viaBridge(src, 'img')} alt="" />
         ))}
       </div>
@@ -167,24 +173,188 @@ const Body = memo(function Body({ blade }: { blade: Blade }) {
     )
   }
 
-  // The research agent's live board. Its words come off the open web, so the
-  // board renders them as text — never through the markup path above.
-  if (blade.kind === 'research' && blade.research) {
-    return <ResearchBoard research={blade.research} />
-  }
+  // The words on these three came off the open web, so they render as React
+  // text — never through the markup path above.
+  if (blade.kind === 'research' && blade.research) return <ResearchProgress research={blade.research} />
+  if (blade.kind === 'data') return <DataBody blade={blade} expanded={expanded} onMore={onMore} />
+  if (blade.kind === 'sources') return <SourcesBody blade={blade} />
 
   return <p className="bl-note">Nothing to show.</p>
 })
 
+/** Rows a docked data card shows; the rest are a "+N more" away (E). */
+const DATA_ROWS = 4
+
+/**
+ * The figures that answer the question: the key one big, with its unit, what
+ * it is and when it is from, then a few supporting rows. A `[n]` is the source
+ * it came from on the sources card beside it.
+ */
+function DataBody({ blade, expanded, onMore }: BodyProps) {
+  const d = useMemo(() => cleanData(blade.data), [blade.data])
+  const foot = dataFoot(blade, Date.now())
+  if (!d) return <p className="bl-note">No figures to show.</p>
+  const h = d.headline
+  const rows = expanded ? d.rows : d.rows.slice(0, DATA_ROWS)
+  const more = d.rows.length - rows.length
+  const tone = changeTone(h?.change)
+
+  return (
+    <div className="bl-data">
+      {h && (
+        <div className="bl-hl">
+          {h.label && (
+            <span className="bl-hl-label">
+              {h.label}
+              {h.n !== undefined && <Cite n={h.n} />}
+            </span>
+          )}
+          <span className="bl-hl-fig">
+            <b className="hud-metric bl-hl-value">{h.value}</b>
+            {h.unit && <span className="hud-unit bl-hl-unit">{h.unit}</span>}
+            {!h.label && h.n !== undefined && <Cite n={h.n} />}
+          </span>
+          {(h.change || h.asOf) && (
+            <span className="bl-hl-meta">
+              {h.change && <span className={`bl-chg${tone ? ` bl-chg-${tone}` : ''}`}>{h.change}</span>}
+              {h.asOf && <span>as of {h.asOf}</span>}
+            </span>
+          )}
+        </div>
+      )}
+      {rows.length > 0 && (
+        <dl className="bl-rows">
+          {rows.map((r, i) => (
+            <div key={`${i}-${r.label}`} className="bl-row">
+              <dt title={r.note ? `${r.label} — ${r.note}` : r.label}>{r.label}</dt>
+              <dd>
+                {r.value}
+                {r.unit && <span className="bl-row-unit"> {r.unit}</span>}
+                {r.n !== undefined && <Cite n={r.n} />}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {more > 0 && (
+        <button type="button" className="bl-more-rows" onClick={onMore} title="Show them all (E)">
+          +{more} more
+        </button>
+      )}
+      {d.note && <p className="bl-data-note">{d.note}</p>}
+      {foot && <p className="bl-data-foot">{foot}</p>}
+    </div>
+  )
+}
+
+function Cite({ n }: { n: number }) {
+  return (
+    <sup className="bl-cite" aria-label={`source ${n}`}>
+      [{n}]
+    </sup>
+  )
+}
+
+/**
+ * The sources the answer used, each a real link: one line each — its number,
+ * its title, its site. In a narrow window they fold into a row of site chips.
+ * Only http(s) addresses become links; anything else is shown as words.
+ */
+function SourcesBody({ blade }: { blade: Blade }) {
+  const links = useMemo(() => cleanLinks(blade.links), [blade.links])
+  if (!links.length) return <p className="bl-note">No sources to show.</p>
+
+  return (
+    <div className="bl-sources">
+      <ol className="bl-src-list">
+        {links.map((l, i) => {
+          const inner = (
+            <>
+              <span className="bl-src-n">{l.n ?? '·'}</span>
+              <span className="bl-src-t">{l.title || l.domain || l.url}</span>
+              <span className="bl-src-d">{l.domain}</span>
+            </>
+          )
+          return (
+            <li key={`${i}-${l.url}`}>
+              {isWebUrl(l.url) ? (
+                <a className="bl-src" href={l.url} target="_blank" rel="noopener noreferrer" title={l.url}>
+                  {inner}
+                </a>
+              ) : (
+                <span className="bl-src bl-src-off">{inner}</span>
+              )}
+            </li>
+          )
+        })}
+      </ol>
+      <div className="bl-src-chips">
+        {links.map((l, i) =>
+          isWebUrl(l.url) ? (
+            <a
+              key={`${i}-${l.url}`}
+              className="bl-chip"
+              href={l.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={l.title ? `${l.title}\n${l.url}` : l.url}
+            >
+              {l.n !== undefined && <b>{l.n}</b>}
+              {l.domain || l.title}
+            </a>
+          ) : (
+            <span key={`${i}-${l.url}`} className="bl-chip bl-src-off">
+              {l.domain || l.title}
+            </span>
+          ),
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------- guard */
+
+/**
+ * A card that cannot draw must not take the interface down with it — in front
+ * of an audience the face going blank is the worst outcome there is. Every
+ * card's body sits inside one. The next update of the card gets a fresh chance.
+ */
+type GuardProps = { stamp: unknown; children: ReactNode }
+type GuardState = { failed: boolean; stamp: unknown }
+
+class Guard extends Component<GuardProps, GuardState> {
+  state: GuardState = { failed: false, stamp: this.props.stamp }
+
+  static getDerivedStateFromProps(props: GuardProps, state: GuardState): Partial<GuardState> | null {
+    return props.stamp === state.stamp ? null : { failed: false, stamp: props.stamp }
+  }
+
+  static getDerivedStateFromError(): Partial<GuardState> {
+    return { failed: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error('[blade]', error)
+  }
+
+  render() {
+    if (this.state.failed) return <p className="bl-note">This card could not draw this update.</p>
+    return this.props.children
+  }
+}
+
 /* -------------------------------------------------------------------- card */
 
 /**
- * Cards close by themselves (the owner, 2026-10-06: "it's not closing itself").
- * Long enough to read a handful of results; a card the model marked sticky
- * stays longer. Hovering a card holds it, and Keep holds it for good.
+ * A research run that has sent nothing for this long has stopped talking (the
+ * engine sends a heartbeat every few seconds): its card stops waiting for it
+ * and closes on the normal clock, rather than saying "running" for ever.
  */
-const TURN_MS = 40000
-const STICKY_MS = 120000
+const STALL_MS = 30_000
+
+/** Kinds that fill a set height; resizing one sets that height, not just its ceiling. */
+const FIXED_HEIGHT: ReadonlySet<Blade['kind']> = new Set(['article', 'embed', 'video', 'image'])
 
 /** What the header says the card is — in words, not the internal kind. */
 const KIND_LABEL: Record<Blade['kind'], string> = {
@@ -194,12 +364,13 @@ const KIND_LABEL: Record<Blade['kind'], string> = {
   video: 'video',
   embed: 'video',
   markup: '',
-  research: 'research',
+  research: 'agents',
+  data: 'answer',
+  sources: 'web',
 }
 
 function Card({
   blade,
-  depth,
   focused,
   expanded,
   onFocus,
@@ -207,35 +378,47 @@ function Card({
   onClose,
 }: {
   blade: Blade
-  /** 0 is front-most. Drives the offset and the dimming behind it. */
-  depth: number
   focused: boolean
   expanded: boolean
   onFocus: () => void
   onExpand: () => void
   onClose: () => void
 }) {
-  /** Size the user has dragged this blade to, overriding the class preset. */
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null)
-  /** Where the user has dragged it, relative to its slot. */
-  const [pos, setPos] = useState({ x: 0, y: 0 })
-  const shell = useRef<HTMLDivElement>(null)
+  /** The height the owner has dragged this card to, or null for its own. */
+  const [maxH, setMaxH] = useState<number | null>(null)
+  const shell = useRef<HTMLElement>(null)
 
-  // Closing by itself: the clock runs only while nobody is looking at it. A
-  // page, a video or a player is something to read or watch, not glance at,
-  // so those never close on their own — nor does a research board, which is
-  // a report the owner is still reading while she speaks the verdict.
-  const life = blade.hold === 'sticky' ? STICKY_MS : TURN_MS
-  const lasting =
-    blade.kind === 'article' || blade.kind === 'video' || blade.kind === 'embed' || blade.kind === 'research'
+  // A running research card waits for its run — unless the run has gone
+  // silent. Stamped with the update it went silent on, so the next update
+  // clears it without an effect having to.
+  const running = blade.kind === 'research' && blade.research?.status === 'running'
+  const [silentOn, setSilentOn] = useState<unknown>(null)
+  useEffect(() => {
+    if (!running) return
+    const stamp = blade.research
+    const timer = setTimeout(() => setSilentOn(stamp), STALL_MS)
+    return () => clearTimeout(timer)
+  }, [running, blade.research])
+  const stalled = running && silentOn === blade.research
+
+  // Closing by itself: the clock runs only while nobody is looking at it.
+  const life = stalled ? TURN_MS : bladeLife(blade)
+  const lasting = life === null
+  const ms = life ?? 0
   const [hover, setHover] = useState(false)
   const kept = blade.kept === true
   const keepBlade = useStore((s) => s.keepBlade)
   const paused = hover || expanded || kept || lasting
-  const left = useRef(life)
+  const left = useRef(ms)
+  const lifeWas = useRef(ms)
   const close = useRef(onClose)
   close.current = onClose
   useEffect(() => {
+    // A new lifetime (a research run finishing) starts its clock afresh.
+    if (lifeWas.current !== ms) {
+      lifeWas.current = ms
+      left.current = ms
+    }
     if (paused) return
     const from = performance.now()
     const timer = setTimeout(() => close.current(), left.current)
@@ -243,25 +426,27 @@ function Card({
       clearTimeout(timer)
       left.current = Math.max(0, left.current - (performance.now() - from))
     }
-  }, [paused])
+  }, [paused, ms])
+
+  // Stable, so the memoised body does not redraw for every hover.
+  const expand = useRef(onExpand)
+  expand.current = onExpand
+  const more = useCallback(() => expand.current(), [])
 
   /**
-   * Drag and resize both listen on `window`, not on the grip or the header:
-   * one pixel into a drag the pointer is no longer over the element that
-   * started it, and an element-bound listener would lose it there.
+   * Resize from the bottom-right grip — the card's height only; docked, its
+   * width is the dock's. Listens on `window`, not on the grip: one pixel into
+   * a drag the pointer is no longer over the element that started it.
    */
-  const grab = (
-    e: React.PointerEvent,
-    onMove: (dx: number, dy: number) => void,
-  ) => {
+  const onGrip = (e: React.PointerEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    const sx = e.clientX
+    const box = shell.current?.getBoundingClientRect()
+    if (!box) return
+    const from = box.height
     const sy = e.clientY
-
-    const move = (ev: PointerEvent) => {
-      onMove(ev.clientX - sx, ev.clientY - sy)
-    }
+    const move = (ev: PointerEvent) =>
+      setMaxH(Math.round(Math.max(120, Math.min(window.innerHeight * 0.94, from + ev.clientY - sy))))
     const done = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', done)
@@ -272,62 +457,25 @@ function Card({
     window.addEventListener('pointercancel', done)
   }
 
-  const onHeadDown = (e: React.PointerEvent) => {
-    // Buttons live in the header too; starting a drag from one would mean the
-    // click never lands.
-    if ((e.target as HTMLElement).closest('button')) return
-    if (!focused) onFocus()
-    if (expanded) return
-    const from = { ...pos }
-    grab(e, (dx, dy) => setPos({ x: from.x + dx, y: from.y + dy }))
-  }
+  const sized = maxH !== null && !expanded
+  const title = typeof blade.title === 'string' ? blade.title : ''
 
-  const onGrip = (e: React.PointerEvent) => {
-    const box = shell.current?.getBoundingClientRect()
-    if (!box) return
-    const from = { w: box.width, h: box.height }
-    grab(e, (dx, dy) =>
-      setSize({
-        w: Math.max(280, Math.min(window.innerWidth * 0.96, from.w + dx)),
-        h: Math.max(180, Math.min(window.innerHeight * 0.94, from.h + dy)),
-      }),
-    )
-  }
-
-  /**
-   * Resize from the bottom-right grip.
-   *
-   * Pointer capture rather than window listeners: the pointer spends most of a
-   * resize over an <iframe>, and an iframe swallows mousemove from the parent
-   * document entirely. Without capture the blade stops resizing the instant the
-   * cursor crosses into the article it is showing, which is precisely where it
-   * always crosses.
-   */
   return (
     /**
-     * Two elements, because two different things want the transform.
-     *
-     * The outer one carries the depth offset — the small lift and scale that
-     * makes the stack read as objects rather than as a list. The inner one is
-     * what the user drags. Framer owns `transform` on anything it animates, so
-     * with both jobs on one element the drag and the stack animation overwrite
-     * each other every frame and the blade jitters back to its slot.
+     * Two elements: the slot is what framer moves (in, out, and up the column
+     * when a card above it closes); the card inside it is what is drawn and
+     * sized. `layout="position"` only — a card whose content grows (the
+     * research card, five times a second) is never stretched by a scale.
      */
     <motion.div
       className="bl-slot"
-      initial={{ opacity: 0, y: 26, scale: 0.96, filter: 'blur(6px)' }}
-      animate={{
-        opacity: expanded || depth === 0 ? 1 : Math.max(0.3, 1 - depth * 0.24),
-        y: expanded ? 0 : depth * -13,
-        x: expanded ? 0 : depth * 15,
-        scale: expanded ? 1 : 1 - depth * 0.035,
-        filter: depth === 0 || expanded ? 'blur(0px)' : `blur(${depth * 0.7}px)`,
-      }}
-      exit={{ opacity: 0, y: 18, filter: 'blur(8px)', transition: { duration: 0.28 } }}
-      transition={{ type: 'spring', stiffness: 260, damping: 30 }}
-      style={{ zIndex: expanded ? 60 : 40 - depth }}
+      layout={expanded ? false : 'position'}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, transition: { duration: 0.15 } }}
+      transition={{ duration: 0.2, ease: 'easeOut' }}
     >
-      <motion.section
+      <section
         ref={shell}
         className={
           `bl bl-${blade.size} bl-k-${blade.kind}` +
@@ -336,13 +484,7 @@ function Card({
         }
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
-        // Position and size are ours rather than framer's — see `grab` above for
-        // why. Applied as a plain transform because the depth animation lives on
-        // the slot wrapper, so nothing is competing for this element's own one.
-        style={{
-          ...(size && !expanded ? { width: size.w, height: size.h } : null),
-          transform: expanded ? undefined : `translate(${pos.x}px, ${pos.y}px)`,
-        }}
+        style={sized ? { maxHeight: maxH, ...(FIXED_HEIGHT.has(blade.kind) ? { height: maxH } : null) } : undefined}
         onPointerDown={() => {
           if (!focused) onFocus()
         }}
@@ -352,8 +494,8 @@ function Card({
         <span className="pk pk-bl" />
         <span className="pk pk-br" />
 
-        <header className="bl-head" onPointerDown={onHeadDown}>
-          <span className="bl-title">{blade.title}</span>
+        <header className="bl-head">
+          <span className="bl-title">{title}</span>
           <span className="bl-kind">{KIND_LABEL[blade.kind] ?? ''}</span>
           <span className="bl-acts">
             <button
@@ -366,15 +508,14 @@ function Card({
             >
               {kept ? 'kept' : 'keep'}
             </button>
-            {(size !== null || pos.x !== 0 || pos.y !== 0) && !expanded && (
+            {sized && (
               <button
                 className="bl-btn"
                 onClick={(e) => {
                   e.stopPropagation()
-                  setSize(null)
-                  setPos({ x: 0, y: 0 })
+                  setMaxH(null)
                 }}
-                title="Back where it started"
+                title="Back to its own size"
               >
                 ⤾
               </button>
@@ -403,16 +544,19 @@ function Card({
         </header>
 
         <div className="bl-body">
-          <Body blade={blade} />
+          <Guard stamp={blade}>
+            <Body blade={blade} expanded={expanded} onMore={more} />
+          </Guard>
         </div>
 
         {/* How long until it closes by itself; stops while hovered or kept.
-            Always mounted, so its run-down stays in step with the clock above. */}
+            Remounted with a new lifetime so its run-down starts over too. */}
         {!lasting && (
           <span
+            key={ms}
             className="bl-timer"
             style={{
-              animationDuration: `${life}ms`,
+              animationDuration: `${ms}ms`,
               animationPlayState: paused ? 'paused' : 'running',
               visibility: kept || expanded ? 'hidden' : 'visible',
             }}
@@ -421,7 +565,7 @@ function Card({
 
         {/* Resize grip. Absent while expanded, where the size is the point. */}
         {!expanded && <span className="bl-grip" onPointerDown={onGrip} title="Drag to resize" />}
-      </motion.section>
+      </section>
     </motion.div>
   )
 }
@@ -437,57 +581,37 @@ export function Blades() {
   const closeBlade = useStore((s) => s.closeBlade)
 
   /**
-   * Newest first, then whichever the user pulled forward lifted to the front.
-   *
-   * Ordered here rather than in the store because it is a view concern, and the
-   * store's array order is the history — which is what makes "the one before
-   * that" a meaningful thing to ask for.
+   * The dock's column, top to bottom (store.ts, dockOrder): research progress,
+   * figures, sources, anything else. Ordered here rather than in the store
+   * because it is a view concern; the store's array order is the history.
    */
-  const ordered = useMemo(() => {
-    const newestFirst = [...blades].reverse()
-    if (!focusedBlade) return newestFirst
-    const hit = newestFirst.findIndex((b) => b.id === focusedBlade)
-    if (hit <= 0) return newestFirst
-    const copy = [...newestFirst]
-    const [lifted] = copy.splice(hit, 1)
-    return [lifted, ...copy]
-  }, [blades, focusedBlade])
-
-  const front = ordered[0]
+  const { visible, hidden } = useMemo(() => dockOrder(blades), [blades])
+  const all = useMemo(() => [...visible, ...hidden], [visible, hidden])
+  const expanded = expandedBlade && blades.some((b) => b.id === expandedBlade) ? expandedBlade : null
 
   /**
-   * A research board opens full screen. Docked it would be a 420px strip, and
-   * the board is the subject while a run is on — the plan, the sources, the
-   * evidence. Once per run: if the owner shrinks it (E), updates leave it
-   * shrunk. A layout effect, so the docked frame never paints first.
+   * What E and X act on: the card full screen; docked, the one the owner
+   * pulled forward (a click, [ or ]), else the top one. Every new card takes
+   * the store's focus as it arrives, so a pick counts only while the focus is
+   * still where the owner put it — the next answer's cards hand E and X back
+   * to the top of the column, which is the figure she is talking about.
    */
-  const boardsSeen = useRef(new Set<string>())
-  useLayoutEffect(() => {
-    for (const b of blades) {
-      if (b.kind !== 'research' || boardsSeen.current.has(b.id)) continue
-      boardsSeen.current.add(b.id)
-      expandBlade(b.id)
-    }
-  }, [blades, expandBlade])
-
-  /**
-   * A source opened from a board is read full screen (Research.tsx gives its
-   * card the id `rd-<research id>-<n>`). Closing that card goes back to the
-   * board rather than to an empty frame; shrinking it (E) does not.
-   */
-  const lastExpanded = useRef<string | null>(null)
-  useEffect(() => {
-    const prev = lastExpanded.current
-    lastExpanded.current = expandedBlade
-    if (expandedBlade || !prev?.startsWith('rd-') || blades.some((b) => b.id === prev)) return
-    const board = blades.find((b) => b.kind === 'research' && prev.startsWith(`rd-${b.id}-`))
-    if (board) expandBlade(board.id)
-  }, [expandedBlade, blades, expandBlade])
+  const [picked, setPicked] = useState<string | null>(null)
+  const pick = useCallback(
+    (id: string) => {
+      setPicked(id)
+      focusBlade(id)
+    },
+    [focusBlade],
+  )
+  const front = expanded
+    ? blades.find((b) => b.id === expanded)
+    : (visible.find((b) => b.id === picked && picked === focusedBlade) ?? visible[0])
 
   // She steps aside while a card is docked beside her (index.css, data-cards).
   useEffect(() => {
-    document.documentElement.dataset.cards = blades.length && !expandedBlade ? '1' : '0'
-  }, [blades.length, expandedBlade])
+    document.documentElement.dataset.cards = blades.length && !expanded ? '1' : '0'
+  }, [blades.length, expanded])
 
   // A click inside a card's page or player hands the keyboard to that frame,
   // and then Space — talk, send, stop — would never reach her. The click still
@@ -505,14 +629,21 @@ export function Blades() {
     return () => window.removeEventListener('blur', onBlur)
   }, [])
 
+  /**
+   * [ and ]: docked, move the focus through the cards on screen; full screen,
+   * put the next card full screen instead.
+   */
   const cycle = useCallback(
     (by: number) => {
-      if (ordered.length < 2) return
-      const at = ordered.findIndex((b) => b.id === front?.id)
-      const next = ordered[(at + by + ordered.length) % ordered.length]
-      if (next) focusBlade(next.id)
+      const ring = expanded ? all : visible
+      if (ring.length < 2) return
+      const at = Math.max(0, ring.findIndex((b) => b.id === front?.id))
+      const next = ring[(at + by + ring.length) % ring.length]
+      if (!next) return
+      pick(next.id)
+      if (expanded) expandBlade(next.id)
     },
-    [ordered, front, focusBlade],
+    [expanded, all, visible, front, pick, expandBlade],
   )
 
   // Bound here rather than in App, and only while something is open, so E and X
@@ -529,14 +660,10 @@ export function Blades() {
 
       if (e.key === 'e') {
         e.preventDefault()
-        expandBlade(expandedBlade ? null : (front?.id ?? null))
+        expandBlade(expanded ? null : (front?.id ?? null))
       } else if (e.key === 'x') {
         e.preventDefault()
-        // The card on screen, which while one is full screen is that one — a
-        // research board updating behind a source it opened keeps taking the
-        // focus, and X must not close the board instead of the page.
-        const target = expandedBlade ?? front?.id
-        if (target) closeBlade(target)
+        if (front) closeBlade(front.id)
       } else if (e.key === ']') {
         e.preventDefault()
         cycle(1)
@@ -547,35 +674,44 @@ export function Blades() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [front, expandedBlade, expandBlade, closeBlade, cycle])
+  }, [front, expanded, expandBlade, closeBlade, cycle])
 
   if (!blades.length) return null
 
-  return (
-    <div className={`blades-stack${expandedBlade ? ' blades-stack-full' : ''}`}>
-      <AnimatePresence>
-        {ordered.map((blade, i) => {
-          const expanded = expandedBlade === blade.id
-          // While one is expanded it is the only thing on screen; the rest are
-          // unmounted rather than hidden so their iframes stop loading.
-          if (expandedBlade && !expanded) return null
-          return (
-            <Card
-              key={blade.id}
-              blade={blade}
-              depth={expanded ? 0 : i}
-              focused={blade.id === front?.id}
-              expanded={expanded}
-              onFocus={() => focusBlade(blade.id)}
-              onExpand={() => expandBlade(expanded ? null : blade.id)}
-              onClose={() => closeBlade(blade.id)}
-            />
-          )
-        })}
-      </AnimatePresence>
+  // While one is full screen it is the only thing on screen; the rest are
+  // unmounted rather than hidden so their iframes stop loading.
+  const shown = expanded ? blades.filter((b) => b.id === expanded) : visible
 
-      {blades.length > 1 && !expandedBlade && (
+  return (
+    <div className={`blades-stack${expanded ? ' blades-stack-full' : ''}`}>
+      {/* layoutScroll: the column scrolls when its cards overflow the dock,
+          and framer has to know to measure the cards inside that scroll. */}
+      <motion.div className="bl-col" layoutScroll>
+        <AnimatePresence>
+          {shown.map((blade) => {
+            const isExpanded = expanded === blade.id
+            return (
+              <Card
+                key={blade.id}
+                blade={blade}
+                focused={blade.id === front?.id}
+                expanded={isExpanded}
+                onFocus={() => pick(blade.id)}
+                onExpand={() => expandBlade(isExpanded ? null : blade.id)}
+                onClose={() => closeBlade(blade.id)}
+              />
+            )
+          })}
+        </AnimatePresence>
+      </motion.div>
+
+      {!expanded && (visible.length > 1 || hidden.length > 0) && (
         <div className="bl-hint">
+          {hidden.length > 0 && (
+            <span className="bl-more" title="More cards: they show here as these close">
+              +{hidden.length}
+            </span>
+          )}
           <kbd>[</kbd> <kbd>]</kbd> cycle · <kbd>E</kbd> full · <kbd>X</kbd> close
         </div>
       )}

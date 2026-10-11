@@ -368,6 +368,27 @@ const VETO_EXEMPT = new Set([
 ])
 
 /**
+ * AYRA's own tools that run without asking, by exact name (CLAUDE.md §7: every
+ * tool is classified here, and no server gets a blanket pass).
+ *
+ *   ayra          — the HUD (panels.mjs). It runs in this process and draws on
+ *                   our own screen: without it AYRA has no display at all.
+ *                   `probe_url` only reads, through net.mjs; `show_data` draws
+ *                   the answer's card, its figures checked against the results.
+ *   ayra_research — the research agent (research.mjs). It searches and reads
+ *                   the web, every page through net.mjs, and changes nothing.
+ *                   The agents that read page text have no tools at all, so an
+ *                   injection in a page cannot act.
+ *
+ * Named because the verb rules below would read `display`, `blade` or
+ * `research` as neither a read nor a write.
+ */
+const NAMED_TOOLS = new Map([
+  ['ayra', new Set(['display', 'blade', 'probe_url', 'show_data'])],
+  ['ayra_research', new Set(['research', 'recent_research'])],
+])
+
+/**
  * The owner's claude.ai connectors — Gmail, Calendar, Drive, Figma and the
  * rest, attached to their Claude account rather than configured here. The
  * bundled Claude Code loads every one into AYRA's sessions, settingSources or
@@ -419,11 +440,10 @@ export function createGate({ allowWrites, laptop = false, connectors = DEFAULT_C
         return CONNECTOR_READ.test(op) && !EFFECTFUL_VERB.test(op)
       }
 
-      // The HUD. It runs in this process and draws on our own screen, so it is
-      // not something to withhold — without it AYRA has no display at all. It
-      // is named here rather than left to the verb rules below, which would
-      // read `display` and `blade` as neither a read nor a write.
-      if (server === 'ayra') return true
+      // AYRA's own in-process servers whose tools only show or read, named tool
+      // by tool (see NAMED_TOOLS). Anything else on those servers — a tool added
+      // later and not classified here — falls to the default rules below.
+      if (NAMED_TOOLS.get(server)?.has(mcpToolOf(name))) return true
 
       // Her Chrome (browser.mjs) and her Windows apps (apps.mjs). Each gates
       // itself, twice over: without writes only the reading tools are built,
@@ -441,13 +461,6 @@ export function createGate({ allowWrites, laptop = false, connectors = DEFAULT_C
       // tools, each call reviewed by this gate as usual; starting one is only
       // offered with writes on.
       if (server === 'ayra_jobs') return true
-
-      // The research agent (research.mjs): it searches and reads the web —
-      // every page through net.mjs — and changes nothing. The agents that read
-      // page text have no tools at all, so an injection in a page cannot act,
-      // and what comes back is framed as data. Named here because `research`
-      // is neither a read nor a write verb to the rules below.
-      if (server === 'ayra_research') return true
 
       const tool = mcpToolOf(name)
       if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {

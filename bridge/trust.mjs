@@ -127,7 +127,7 @@ const ACADEMIC_HOST = /(^|\.)edu(\.[a-z]{2})?$|(^|\.)ac\.[a-z]{2}$/
  *
  * @returns {{ domain: string, kind: 'gov'|'academic'|'reference'|'news'|'org'|'company'|'blog'|'forum'|'social'|'web',
  *             base: number, label: string }}
- *   domain — the hostname minus www. (what the board shows)
+ *   domain — the hostname minus www. (what the sources card shows)
  *   base   — prior trust, 0..1
  *   label  — the reason in a few words ('government site')
  */

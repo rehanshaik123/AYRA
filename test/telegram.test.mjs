@@ -40,11 +40,14 @@ function harness(updates, options = {}) {
   let served = false
   const brain = {
     open({ emit }) {
+      let current = null
       return {
         ask(text, id, meta) {
           asks.push({ text, id, meta })
+          current = { ask: id, rank: meta?.rank ?? null, text: meta?.text ?? text }
           setTimeout(() => emit({ type: 'done', text: `reply ${asks.length}`, ask: id }), 5)
         },
+        turn: () => current,
         close() {},
       }
     },
@@ -65,7 +68,7 @@ function harness(updates, options = {}) {
     audit: { log: (e) => logged.push(e) },
     ...options,
   })
-  return { asks, sent, logged, stop: () => tg.stop() }
+  return { asks, sent, logged, tg, stop: () => tg.stop() }
 }
 
 const msg = (id, text, from = 1300190813, date = Math.floor(Date.now() / 1000)) => ({
@@ -111,6 +114,18 @@ test('a message sent while offline is ranked and remembered in the owner\'s word
   assert.equal(h.asks[0].meta.rank.level, 'complex')
 })
 
+test('turn() names the question being answered in the owner\'s words, for the research tool', async () => {
+  const h = harness([msg(1, 'hey'), msg(2, 'research it')])
+  // Nothing asked yet: no turn, and no throw.
+  assert.equal(h.tg.turn(), null)
+  await new Promise((r) => setTimeout(r, 120))
+  h.stop()
+  const t = h.tg.turn()
+  assert.equal(t.text, 'hey\nresearch it')
+  assert.equal(t.rank.level, 'complex')
+  assert.equal(t.ask, h.asks[0].id)
+})
+
 test('a warm-up that throws never keeps the question from the brain', async () => {
   const h = harness([msg(1, 'research it')], { onComplex: () => { throw new Error('boom') } })
   await new Promise((r) => setTimeout(r, 120))
@@ -144,6 +159,21 @@ test('the text persona is for chat, not the HUD', () => {
   assert.ok(!/\bblade\b/.test(TEXT_PROMPT))
   assert.ok(TEXT_PROMPT.includes('ROASTING AND FLIRTING'))
   assert.ok(TEXT_PROMPT.includes('Always kind and PG'))
+  // No cards on a phone, so no show_data either.
+  assert.ok(!TEXT_PROMPT.includes('show_data'))
+})
+
+test('a web answer on the phone: the figure first, then at most two sources it used', () => {
+  assert.ok(TEXT_PROMPT.includes('WEB ANSWERS.'))
+  assert.ok(TEXT_PROMPT.includes('the key\nfigure with its unit and as-of'))
+  assert.ok(TEXT_PROMPT.includes('one line for each source you actually used, at most 2:\nSource: <domain> — <url>'))
+})
+
+test('research on the phone: only when the ranker says so, and its report sent as it is', () => {
+  assert.ok(TEXT_PROMPT.includes('[Depth'))
+  assert.ok(TEXT_PROMPT.includes('Without that line, never use research'))
+  assert.ok(TEXT_PROMPT.includes('Send its report as it is'))
+  assert.ok(!/\bstandard\b|\bdeep\b/i.test(TEXT_PROMPT))
 })
 
 test('emoji when texting, never when speaking', () => {

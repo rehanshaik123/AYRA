@@ -1,4 +1,4 @@
-import type { Approval, Blade } from '../store'
+import { bladeIsCurrent, type Approval, type Blade } from '../store'
 import { BRIDGE_WS_URL } from '../config'
 import { withHonorific } from '../identity'
 
@@ -88,6 +88,14 @@ export function watchBlades(fn: (blade: Blade) => void) {
 }
 
 /**
+ * The id of the turn this page asked last — the one in flight, or the one just
+ * answered. Not cleared at `done`: a turn's sources card may be sent as it
+ * ends, a moment after its last word. Only a newer question makes it stale:
+ * blade frames stamped with an older turn are dropped (`bladeIsCurrent`).
+ */
+let currentAsk: string | null = null
+
+/**
  * Connection state, for the UI.
  *
  *   'open'        — first connection of the page.
@@ -165,7 +173,7 @@ function dispatch(ws: WebSocket) {
       onServers?.(servers)
       firstReady.resolve()
     } else if (msg.type === 'blade' && msg.blade) {
-      onBlade?.(msg.blade)
+      if (bladeIsCurrent(msg.ask, currentAsk)) onBlade?.(msg.blade)
     } else if (msg.type === 'approve' && msg.id) {
       onApproval?.({
         type: 'approve',
@@ -284,6 +292,9 @@ export async function warmBridge(): Promise<void> {
  */
 const IDLE_TIMEOUT_MS = 120_000
 
+/** Tools that only draw on the HUD — see the 'tool' case below. */
+const QUIET_TOOLS: ReadonlySet<string> = new Set(['mcp__ayra__display', 'mcp__ayra__show_data'])
+
 /** The turn in flight, so a barge-in can settle it locally. */
 let pending: { finish: (fallback?: string) => void } | null = null
 
@@ -339,6 +350,8 @@ export async function ask(
   }
 
   const id = `a${++askSeq}`
+  // From here on, cards stamped with an older turn are stale (bladeIsCurrent).
+  currentAsk = id
   const tools: string[] = []
   let text = ''
 
@@ -409,7 +422,9 @@ export async function ask(
             break
 
           case 'tool':
-            if (!msg.name) break
+            // Putting a card on screen is not work the owner waits on: no
+            // badge, no sound, no "on it" (the bridge skips these too).
+            if (!msg.name || QUIET_TOOLS.has(msg.name)) break
             tools.push(msg.name)
             handlers.onTool(prettyToolName(msg.name))
             break

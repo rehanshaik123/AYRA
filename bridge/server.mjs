@@ -22,7 +22,8 @@ import { createOriginCheck } from './origin.mjs'
 import { createAudit } from './audit.mjs'
 import { startTelegram } from './telegram.mjs'
 import { displayServer } from './panels.mjs'
-import { sourcesCard } from './sources.mjs'
+import { createTurnCards } from './sources.mjs'
+import { rankQuery } from './triage.mjs'
 import { relayListening } from './listen.mjs'
 import { serveFace } from './face.mjs'
 import { createApprovals } from './approvals.mjs'
@@ -89,9 +90,10 @@ const MODEL = env('MODEL', 'claude-opus-5-5')
 const EFFORT = env('EFFORT', 'low')
 
 /**
- * The research agent's workers — planner, searchers, extractors, cross-checker
- * (research.mjs). Narrow, structured jobs, so the lighter model does them well
- * and keeps a run inside the Pro limits; the answer itself is written by MODEL.
+ * The research agent's workers — the planner that splits a question, and each
+ * part's searcher and reporter (research.mjs). Narrow, structured jobs, so the
+ * lighter model does them well and keeps a run inside the Pro limits; the
+ * review and the answer itself are written by MODEL.
  */
 const RESEARCH_MODEL = env('RESEARCH_MODEL', 'claude-sonnet-5-5')
 
@@ -686,8 +688,9 @@ function halt(by) {
 }
 
 /**
- * The research agent (research.mjs): search, read, extract quoted evidence,
- * cross-check, answer with citations. One engine for every channel, so only
+ * The research agent (research.mjs): for a question ranked complex only, three
+ * or four parts searched and read at once, then a review that scores, removes
+ * duplicates and answers with citations. One engine for every channel, so only
  * one run happens at a time and its Claude calls stay capped. It joins the
  * kill switch like a conversation — Esc or /stop ends a run in flight.
  */
@@ -728,8 +731,9 @@ let phone = null
 const early = []
 
 const JOBS = createJobs({
-  open: ({ emit, onEnd }) =>
-    BRAIN.open({
+  open: ({ emit, onEnd }) => {
+    let conversation = null
+    conversation = BRAIN.open({
       channel: 'job',
       systemPrompt: TEXT_PROMPT,
       // The job's own step budget (jobs.mjs) is the limit, not the SDK's default.
@@ -750,12 +754,19 @@ const JOBS = createJobs({
           }),
         }),
         ayra_rules: rulesServer({ allowances: ALLOWANCES }),
-        // No screen in a job: the tool returns the report as text.
-        ayra_research: researchServer({ research: RESEARCH, channel: 'job' }),
+        // No screen in a job: the tool returns the report as text. `turn` is
+        // the job's task in the owner's words, which the research tool ranks.
+        ayra_research: researchServer({
+          research: RESEARCH,
+          channel: 'job',
+          turn: () => conversation?.turn?.() ?? null,
+        }),
       },
       emit,
       onEnd,
-    }),
+    })
+    return conversation
+  },
   tell: (text) => {
     if (phone) return phone.notify(text)
     early.push(text)
@@ -804,8 +815,14 @@ if (env('TELEGRAM', 'on') === 'off') {
       }),
       ayra_rules: rulesServer({ allowances: ALLOWANCES }),
       ayra_jobs: jobsServer({ jobs: JOBS, allowWrites: ALLOW_WRITES }),
-      // Research answers as a text report with numbered sources — no board on a phone.
-      ayra_research: researchServer({ research: RESEARCH, channel: 'telegram' }),
+      // Research answers as a text report with numbered sources — no cards on a
+      // phone. `turn` is the owner's own words and their rank (telegram.mjs),
+      // which admit a run and are the reviewer's original question.
+      ayra_research: researchServer({
+        research: RESEARCH,
+        channel: 'telegram',
+        turn: () => phone?.turn?.() ?? null,
+      }),
     },
     allowances: ALLOWANCES,
     jobs: JOBS,
@@ -813,6 +830,9 @@ if (env('TELEGRAM', 'on') === 'off') {
     // Approve buttons on the phone, and /stop.
     approvals: APPROVALS,
     onHalt: () => halt('telegram'),
+    // A question ranked complex: start the research planner while the brain
+    // reads it, so the run skips the planner's start-up.
+    onComplex: () => RESEARCH.ready(),
   })
   CONVERSATIONS.add(telegram)
   phone = telegram
@@ -852,6 +872,24 @@ wss.on('connection', (socket, req) => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg))
   }
 
+  /** Set once the brain is open; tools and events only reach for it after that. */
+  let conversation = null
+  /** The question being answered: { ask, rank, text } (brain.mjs), or null. */
+  const turnOf = () => conversation?.turn?.() ?? null
+
+  /**
+   * Every blade carries the turn it belongs to — the brain's own `ask` at the
+   * moment it is sent — so the face can drop a card that arrives after the
+   * owner has moved on to the next question.
+   */
+  const sendBlade = (blade) => send({ type: 'blade', blade, ask: turnOf()?.ask ?? undefined })
+
+  /**
+   * This screen's cards, turn by turn (sources.mjs): what each turn's web
+   * search and pages brought back, the one data card and the one sources card.
+   */
+  const cards = createTurnCards({ send: sendBlade, turn: turnOf })
+
   // The session still names the connectors the gate removed, and the HUD's own
   // display server. Neither is something the owner can use, so the SYSTEMS rail
   // shows only what is really live.
@@ -860,10 +898,11 @@ wss.on('connection', (socket, req) => {
     if (msg.type === 'ready' && Array.isArray(msg.servers)) {
       return send({ ...msg, servers: msg.servers.filter((n) => n !== 'ayra' && !removed.has(n)) })
     }
-    // A web search's links go straight onto a blade — see sources.mjs.
-    if (msg.type === 'sources') {
-      return send({ type: 'blade', blade: sourcesCard(msg), ask: msg.ask })
-    }
+    // A web search's links and text, and the pages read, stay with the turn
+    // for show_data and the sources card; the face never sees them. A turn's
+    // end puts the sources card up when nothing else did — before the done
+    // frame, so the card still belongs to the turn on the face.
+    if (cards.observe(msg)) return
     send(msg)
   }
 
@@ -871,18 +910,19 @@ wss.on('connection', (socket, req) => {
   // first turn. Refined later by the real init message.
   send({ type: 'ready', servers: [] })
 
-  const conversation = BRAIN.open({
+  conversation = BRAIN.open({
     systemPrompt: SYSTEM_PROMPT,
     servers: {
       // The HUD as an in-process server. Its handler closes over this socket,
-      // so a `display` call lands on screen directly.
-      ayra: displayServer((blade) => send({ type: 'blade', blade })),
+      // so a `display` call lands on screen directly; `show_data` checks its
+      // figures against this turn's results and draws through `cards`.
+      ayra: displayServer(sendBlade, { cards }),
       // Her Chrome — the owner's "Chrome (AYRA)" window (browser.mjs).
       ayra_browser: browserServer({
         allowWrites: ALLOW_WRITES,
         channel: 'hud',
         approve: (request) => APPROVALS.ask(request),
-        emitBlade: (blade) => send({ type: 'blade', blade }),
+        emitBlade: sendBlade,
       }),
       // Her Windows apps (apps.mjs) — UI Automation, so Windows only.
       ...(WINDOWS && {
@@ -890,19 +930,22 @@ wss.on('connection', (socket, req) => {
           allowWrites: ALLOW_WRITES,
           channel: 'hud',
           approve: (request) => APPROVALS.ask(request),
-          emitBlade: (blade) => send({ type: 'blade', blade }),
+          emitBlade: sendBlade,
         }),
       }),
       // What she may do without asking (rules.mjs).
       ayra_rules: rulesServer({ allowances: ALLOWANCES }),
       // Long tasks in the background (jobs.mjs); their reports go to Telegram when it is on.
       ayra_jobs: jobsServer({ jobs: JOBS, allowWrites: ALLOW_WRITES, reportsTo: phone ? 'Telegram' : null }),
-      // The research agent: its live board lands on this screen as one blade,
-      // replaced in place on every update.
+      // The research agent: a small progress card while it works, then the
+      // turn's data and sources cards. They pass through `cards`, so show_data
+      // and the turn's end know research has put them up. `turn` is the
+      // owner's question and its rank, which admit a run.
       ayra_research: researchServer({
         research: RESEARCH,
-        emitBlade: (blade) => send({ type: 'blade', blade }),
+        emitBlade: (blade) => cards.research(blade),
         channel: 'hud',
+        turn: turnOf,
       }),
     },
     emit,
@@ -930,18 +973,26 @@ wss.on('connection', (socket, req) => {
     }
 
     if (msg.type === 'ask' && typeof msg.text === 'string') {
-      conversation.ask(msg.text, typeof msg.id === 'string' ? msg.id : null)
+      // Ranked on the owner's own words (triage.mjs, microseconds, no model):
+      // a complex question gets the depth line in front of it, and the
+      // research planner is started while the brain reads it, so the run
+      // skips the planner's start-up. Nothing is started for anything else.
+      const rank = rankQuery(msg.text)
+      if (rank.level === 'complex') {
+        // A warm-up only: whatever goes wrong there, the question still goes.
+        try {
+          RESEARCH.ready()
+        } catch (err) {
+          console.warn(`[ayra] research warm-up failed — ${err?.message ?? err}`)
+        }
+      }
+      conversation.ask(msg.text, typeof msg.id === 'string' ? msg.id : null, { rank })
     }
 
     if (msg.type === 'interrupt') conversation.interrupt()
 
     // The owner has started speaking: wake a sleeping brain while they talk.
-    // A research planner is started too: if this turns out to be research, its first stage
-    // skips the start-up (an idle one sends nothing and closes after ten minutes).
-    if (msg.type === 'warm') {
-      conversation.warm()
-      RESEARCH.ready()
-    }
+    if (msg.type === 'warm') conversation.warm()
 
     // The owner's answer to an Approve card, or the kill switch.
     if (msg.type === 'approval' && typeof msg.id === 'string') {

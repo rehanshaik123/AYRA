@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Research } from './lib/research'
+import type { BladeLink, DataCard, Research } from './lib/research'
 
 export type Phase =
   | 'offline'   // waiting for the click that unlocks audio
@@ -12,24 +12,39 @@ export type Phase =
   | 'speaking'  // reading the answer back
 
 /**
- * A blade — the one surface AYRA puts things on: search results, an article,
- * a picture, a video. Blades own their own geometry, stack rather than replace
- * each other, and can be pulled forward or thrown full screen by the user.
+ * A blade — the one surface AYRA puts things on: an answer's figures and its
+ * sources, an article, a picture, a video. Docked they sit in a column beside
+ * her; any one can be thrown full screen.
  */
 export type Blade = {
   id: string
   title: string
-  kind: 'article' | 'image' | 'gallery' | 'video' | 'embed' | 'markup' | 'research'
+  kind: 'article' | 'image' | 'gallery' | 'video' | 'embed' | 'markup' | 'research' | 'sources' | 'data'
   /** article / image / video / embed. */
   url?: string
   /** gallery. */
   images?: string[]
   /** markup — model-authored HTML, sanitised before it renders. */
   html?: string
-  /** research — the research agent's live board state (bridge/research.mjs). */
+  /** research — the research agent's live state (bridge/research.mjs). */
   research?: Research
-  /** article only: the words restyled, or the real page. */
-  mode?: 'reader' | 'live'
+  /** sources — the links the answer used, at most five. */
+  links?: BladeLink[]
+  /** data — the figures that answer the question. */
+  data?: DataCard
+  /**
+   * article: the words restyled ('reader') or the real page ('live').
+   * data: where the answer came from ('live', or a saved run: 'cache', 'offline').
+   */
+  mode?: 'reader' | 'live' | 'cache' | 'offline'
+  /** data, from a saved run: when it was saved (ISO). */
+  savedAt?: string
+  /** data: the answer's confidence in words, "High (82%)". */
+  confidence?: string
+  /** The id of a card this one takes the place of (a research progress card). */
+  replaces?: string
+  /** 'long': two minutes before it closes by itself, whatever its hold. */
+  life?: 'long'
   size: 'compact' | 'tall' | 'wide' | 'full'
   hold: 'turn' | 'sticky'
   /** The owner pressed Keep: it stays, through the next answer too. */
@@ -68,12 +83,18 @@ type State = {
   connected: string[]
   /** Name of the speech-synthesis voice in use, shown in the HUD. */
   voice: string
-  /** Blades currently open, newest last — which is also front-most. */
+  /** Blades currently open, oldest first — the history, not the screen order (see dockOrder). */
   blades: Blade[]
-  /** The blade the user has pulled forward, or null for "the newest one". */
+  /** The blade the user has pulled forward, or null for "the top one". */
   focusedBlade: string | null
   /** A blade thrown to full screen, or null. */
   expandedBlade: string | null
+  /**
+   * Ids of cards that have closed. A late update for one of them (the research
+   * engine's last progress frame, a frame still in flight when the owner
+   * pressed X) must not bring it back.
+   */
+  gone: ReadonlySet<string>
   /** Actions waiting for the owner's yes, oldest first. */
   approvals: Approval[]
 
@@ -98,6 +119,99 @@ type State = {
   appendToLastTurn: (text: string) => void
 }
 
+/**
+ * Six is the ceiling: three show in the dock and the rest wait their turn, and
+ * past six the waiting ones are history nobody will come back to. The oldest
+ * falls off — never a kept card, nor a research run still going.
+ */
+export const MAX_BLADES = 6
+
+/** How many closed ids are remembered. Ids are unique per card, so this only bounds memory. */
+const GONE_MAX = 300
+
+/** A card the 6-cap may not take away. */
+function protectedCard(b: Blade): boolean {
+  return b.kept === true || (b.kind === 'research' && b.research?.status === 'running')
+}
+
+/** The closed set with these ids added, oldest forgotten first. */
+function remember(gone: ReadonlySet<string>, ids: string[]): ReadonlySet<string> {
+  if (!ids.length) return gone
+  const next = new Set(gone)
+  for (const id of ids) {
+    next.delete(id)
+    next.add(id)
+  }
+  for (const id of next) {
+    if (next.size <= GONE_MAX) break
+    next.delete(id)
+  }
+  return next
+}
+
+/** Focus and full screen let go of a card that is no longer there. */
+function settle(
+  s: Pick<State, 'focusedBlade' | 'expandedBlade'>,
+  blades: Blade[],
+): Pick<State, 'focusedBlade' | 'expandedBlade'> {
+  const alive = (id: string | null) => (id && blades.some((b) => b.id === id) ? id : null)
+  return { focusedBlade: alive(s.focusedBlade), expandedBlade: alive(s.expandedBlade) }
+}
+
+/**
+ * The docked column, top to bottom: the research progress card, then the
+ * figures, then the sources, then anything else — newest first within a kind —
+ * so an answer's two cards always sit together at the top. The first `max` are
+ * shown; the rest wait until those close.
+ */
+const DOCK_RANK: Partial<Record<Blade['kind'], number>> = { research: 0, data: 1, sources: 2 }
+
+export function dockOrder(blades: Blade[], max = 3): { visible: Blade[]; hidden: Blade[] } {
+  const ordered = blades
+    .map((b, i) => ({ b, i, rank: DOCK_RANK[b.kind] ?? 3 }))
+    .sort((x, y) => x.rank - y.rank || y.i - x.i)
+    .map((x) => x.b)
+  return { visible: ordered.slice(0, max), hidden: ordered.slice(max) }
+}
+
+/**
+ * Whether a blade frame belongs on screen (src/lib/bridge.ts). The bridge
+ * stamps each one with the turn it came from (`ask`); a frame from a turn the
+ * owner has already talked over — a slow search landing after the next
+ * question — is dropped rather than put up beside the new answer. An
+ * unstamped frame is no turn's in particular and always passes.
+ */
+export function bladeIsCurrent(ask: unknown, current: string | null): boolean {
+  if (typeof ask !== 'string' || !ask) return true
+  return ask === current
+}
+
+/**
+ * Cards close by themselves (the owner, 2026-10-06: "it's not closing itself").
+ * Long enough to read a handful of results; a sticky card or a research result
+ * ('long') stays two minutes. A finished research progress card goes almost at
+ * once — its results are already up beside it.
+ */
+export const TURN_MS = 40_000
+export const LONG_MS = 120_000
+export const RESEARCH_DONE_MS = 3_000
+
+/**
+ * How long a card stays before closing by itself, or null for never. A page, a
+ * video or a player is something to read or watch, not glance at, so those
+ * never close on their own; nor does a research run that is still going.
+ */
+export function bladeLife(blade: Blade): number | null {
+  if (blade.kind === 'article' || blade.kind === 'video' || blade.kind === 'embed') return null
+  if (blade.kind === 'research') {
+    const status = blade.research?.status
+    if (status === 'running') return null
+    if (status === 'done') return RESEARCH_DONE_MS
+  }
+  if (blade.life === 'long' || blade.hold === 'sticky') return LONG_MS
+  return TURN_MS
+}
+
 export const useStore = create<State>((set) => ({
   phase: 'offline',
   level: 0,
@@ -110,40 +224,62 @@ export const useStore = create<State>((set) => ({
   blades: [],
   focusedBlade: null,
   expandedBlade: null,
+  gone: new Set<string>(),
   approvals: [],
 
   setVoice: (voice) => set({ voice }),
   /**
-   * Six is the ceiling, and it is about the stack reading as a stack: past
-   * about six the ones at the back are a millimetre of edge each and the depth
-   * stops meaning anything. The oldest falls off, which is also the one the
-   * user has had longest to look at.
+   * A blade with an id already on screen is an update: it is replaced where it
+   * stands and the focus stays where the owner left it (the research card
+   * updates five times a second; stealing focus each time would make [ and ]
+   * useless). Only a new id is appended and focused.
+   *
+   * `replaces` closes that card in the same update, so the research progress
+   * card and its results never flash up together. A new data or sources card
+   * closes the older ones of its kind — one answer's figures on screen, not
+   * three answers'. A card that has closed stays closed.
    */
   pushBlade: (blade) =>
     set((s) => {
-      const next = [...s.blades.filter((b) => b.id !== blade.id), blade].slice(-6)
-      // A new blade comes to the front. Leaving the old focus in place would
-      // open something the user asked for and then hide it behind what they
-      // were looking at before.
-      return { blades: next, focusedBlade: blade.id }
+      if (!blade || typeof blade.id !== 'string' || !blade.id || s.gone.has(blade.id)) return {}
+      const at = s.blades.findIndex((b) => b.id === blade.id)
+      if (at >= 0) {
+        const old = s.blades[at]
+        const blades = [...s.blades]
+        blades[at] = { ...blade, kept: old.kept === true || blade.kept === true }
+        const closed = blade.replaces && blade.replaces !== blade.id ? [blade.replaces] : []
+        const next = blades.filter((b) => !closed.includes(b.id))
+        return { blades: next, gone: remember(s.gone, closed), ...settle(s, next) }
+      }
+
+      const closed = new Set<string>()
+      if (blade.replaces && blade.replaces !== blade.id) closed.add(blade.replaces)
+      if (blade.kind === 'data' || blade.kind === 'sources') {
+        for (const b of s.blades) if (b.kind === blade.kind && !b.kept) closed.add(b.id)
+      }
+      let next = [...s.blades.filter((b) => !closed.has(b.id)), blade]
+      // Over the cap: the oldest card the cap may take, until under it or none is left.
+      while (next.length > MAX_BLADES) {
+        const victim = next.findIndex((b) => b !== blade && !protectedCard(b))
+        if (victim < 0) break
+        closed.add(next[victim].id)
+        next = next.filter((_, i) => i !== victim)
+      }
+      const left = settle(s, next)
+      return { blades: next, gone: remember(s.gone, [...closed]), ...left, focusedBlade: blade.id }
     }),
   closeBlade: (id) =>
-    set((s) => ({
-      blades: s.blades.filter((b) => b.id !== id),
-      focusedBlade: s.focusedBlade === id ? null : s.focusedBlade,
-      expandedBlade: s.expandedBlade === id ? null : s.expandedBlade,
-    })),
+    set((s) => {
+      const next = s.blades.filter((b) => b.id !== id)
+      return { blades: next, gone: remember(s.gone, [id]), ...settle(s, next) }
+    }),
   // 'turn' blades go when the user speaks again,
   // 'sticky' ones stay until something replaces them.
   clearBlades: () =>
     set((s) => {
-      const kept = s.blades.filter((b) => b.hold === 'sticky' || b.kept)
-      const alive = new Set(kept.map((b) => b.id))
-      return {
-        blades: kept,
-        focusedBlade: s.focusedBlade && alive.has(s.focusedBlade) ? s.focusedBlade : null,
-        expandedBlade: s.expandedBlade && alive.has(s.expandedBlade) ? s.expandedBlade : null,
-      }
+      const next = s.blades.filter((b) => b.hold === 'sticky' || b.kept)
+      const cleared = s.blades.filter((b) => !next.includes(b)).map((b) => b.id)
+      return { blades: next, gone: remember(s.gone, cleared), ...settle(s, next) }
     }),
   keepBlade: (id, kept) => set((s) => ({ blades: s.blades.map((b) => (b.id === id ? { ...b, kept } : b)) })),
   focusBlade: (focusedBlade) => set({ focusedBlade }),
@@ -189,7 +325,9 @@ export function accentFor(phase: Phase): string {
 // Handy while dressing the scene for camera: in the dev server you can drive
 // the visuals from the console without talking, e.g.
 //   __ayra.setPhase('tooling'); __ayra.setLevel(0.8)
-if (import.meta.env.DEV) {
+// `env?.` because the unit tests load this file in Node, where Vite's
+// `import.meta.env` does not exist.
+if (import.meta.env?.DEV) {
   // Not `useStore.getState()` directly: zustand replaces the state object on
   // every set, so a captured snapshot's *actions* keep working while every
   // data field reads forever as it was at module load. `__ayra.phase` said

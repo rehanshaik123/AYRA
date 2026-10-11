@@ -384,6 +384,14 @@ export function startTelegram({ token, ownerId, brain, systemPrompt, servers = {
     interrupt() {
       conversation?.interrupt()
     },
+    /**
+     * The question being answered — { ask, rank, text } in the owner's own
+     * words (brain.mjs) — or null. The research tool admits a run on it, not
+     * on the model's restatement.
+     */
+    turn() {
+      return conversation?.turn?.() ?? null
+    },
     /** "Show me": a picture to the owner's phone (a JPEG, base64). */
     /** Resolves true once Telegram has the picture, false if it could not be sent. */
     photo(jpegBase64, caption = '') {

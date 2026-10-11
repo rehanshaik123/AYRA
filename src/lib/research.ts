@@ -1,306 +1,416 @@
 /**
- * The research board's data — the state object the bridge's research engine
- * (bridge/research.mjs) sends inside a `kind: 'research'` blade — and the small
- * pure helpers the board (src/ui/Research.tsx) renders it with.
+ * The research agent's state — the object the bridge's research engine
+ * (bridge/research.mjs) sends inside a `kind: 'research'` blade — and the two
+ * result cards every web answer ends with: `data` (the figures) and `sources`
+ * (the links used). Plus the small pure helpers the cards render them with
+ * (src/ui/Research.tsx, src/ui/Blades.tsx).
  *
  * The types mirror the engine's object field for field. They are a protocol
  * between the bridge and the face, so change both sides together or not at all.
  *
- * Everything in here is pure on purpose: the board is the centrepiece of a live
- * demo, and every decision about what it shows can be tested without a browser
- * (test/research-face.test.mjs).
+ * Everything in here is pure on purpose: every decision about what a card shows
+ * can be tested without a browser (test/research-face.test.mjs).
  */
 
-export type ResearchStageKey = 'plan' | 'search' | 'read' | 'extract' | 'verify' | 'answer'
+export type ResearchLevel = 'simple' | 'moderate' | 'complex'
+
+/** The ranker's verdict on the question (bridge/triage.mjs). */
+export type ResearchRank = {
+  /** 0..10 */
+  score: number
+  level: ResearchLevel
+  /** How many parts the question is split into: 0, 3 or 4. */
+  parts: number
+  /** Short plain phrases: 'comparison', 'several parts', … */
+  reasons: string[]
+}
+
+export type ResearchStageKey = 'rank' | 'split' | 'agents' | 'review'
 
 export type ResearchStage = {
   key: ResearchStageKey
-  /** 'Plan' | 'Search' | 'Read' | 'Extract' | 'Cross-check' | 'Answer' */
+  /** 'Rank' | 'Split' | 'Agents' | 'Review' */
   label: string
   state: 'wait' | 'run' | 'done' | 'fail' | 'skip'
+  note?: string
   /** Duration once done or failed. */
   ms?: number
-  /** '3 sub-questions', '24 found · 7 picked', '6 of 7 read', … */
-  note?: string
+}
+
+export type PartState = 'wait' | 'search' | 'read' | 'report' | 'done' | 'fail'
+
+/** One sub-agent: a part of the question, searched, read and reported on. */
+export type ResearchPart = {
+  /** 1-based. */
+  i: number
+  /** 2–4 words. */
+  title: string
+  question: string
+  state: PartState
+  /** Links its search found. */
+  found: number
+  /** Pages read for it. */
+  read: number
+  /** Quoted findings that survived the quote check. */
+  findings: number
+  error?: string
+}
+
+/** What the reviewer did with the findings. */
+export type ResearchReview = {
+  findings: number
+  kept: number
+  duplicates: number
+  offTopic: number
+  weak: number
 }
 
 export type ResearchSourceKind =
   'gov' | 'academic' | 'reference' | 'news' | 'org' | 'company' | 'blog' | 'forum' | 'social' | 'web'
 
 export type ResearchSource = {
-  /** 1..N once selected; 0 while only "found" during the search stage. */
   n: number
   title: string
   url: string
-  /** 'who.int', 'bbc.co.uk' — the hostname without www. */
+  /** 'who.int' — the hostname without www. */
   domain: string
   kind: ResearchSourceKind
   /** 0..1 */
   trust: number
-  /** Short reasons: ['government site', 'dated 2026-03-02', 'injection text removed']. */
-  why: string[]
-  state: 'found' | 'reading' | 'read' | 'failed' | 'skipped'
-  /** ISO date (YYYY-MM-DD) when known. */
-  published?: string
-  /** Injection text was found in the page and removed. */
-  injection?: boolean
-  /** Verified claims taken from it. */
-  claims: number
-  /** Indexes (0-based) of the sub-questions it came from. */
-  subq: number[]
-  /** Short, for failed: 'blocked (403)', 'no readable text', 'timed out'. */
-  error?: string
+  /** Cited by the answer, a kept fact or a figure. */
+  used: boolean
 }
 
 export type ResearchFact = {
-  /** 'f1', 'f2', … */
   id: string
   text: string
   status: 'corroborated' | 'single' | 'disputed'
   /** 0..1 */
   confidence: number
-  /** Source n's that support it. */
   support: number[]
-  /** Source n's that contradict it. */
   contradict: number[]
+  /** 0..10, the reviewer's score against the question. */
+  relevance: number
+}
+
+/** The figure a data card leads with. `value` is a display string: "₹1,23,450", "6.2%", "Yes". */
+export type DataHeadline = {
+  label: string
+  value: string
+  unit?: string
+  asOf?: string
+  change?: string
+  /** The source number it came from. */
+  n?: number
+}
+
+export type DataRow = {
+  label: string
+  value: string
+  unit?: string
+  note?: string
+  n?: number
+}
+
+/** A data card's content: the clear figures that answer the question. */
+export type DataCard = {
+  title: string
+  headline: DataHeadline | null
+  rows: DataRow[]
   note?: string
 }
 
+/** One link on a sources card. */
+export type BladeLink = {
+  n?: number
+  title: string
+  url: string
+  domain: string
+}
+
 export type Research = {
-  /** 'rs-<base36 time>-<seq>' — also the blade's id. */
+  /** 'rs-<base36 time>-<seq>' — also the progress card's blade id. */
   id: string
   question: string
-  status: 'running' | 'done' | 'failed' | 'stopped'
+  status: 'running' | 'done' | 'failed' | 'stopped' | 'skipped'
   mode: 'live' | 'cache' | 'offline'
   /** Epoch ms, for the live timer. */
   startedAt: number
   /** Elapsed so far, or the total once finished. */
   ms: number
-  /** ISO, for cache and offline. */
-  cachedAt?: string
-  depth: 'quick' | 'standard' | 'deep'
-  /** Always all six, in order. */
-  stages: ResearchStage[]
-  plan: { intent: string; subquestions: string[] } | null
-  /** During search: found candidates (n 0). From ranking on: the selected ones, numbered. */
-  sources: ResearchSource[]
-  stats: {
-    /** Unique links found. */
-    found: number
-    /** Pages read successfully. */
-    read: number
-    /** Quotes checked. */
-    quotes: number
-    /** Quotes found in the page. */
-    verified: number
-    /** Claims dropped: the quote was not in the page. */
-    dropped: number
-    /** Sources with injection text removed. */
-    injections: number
-    /** Claude calls made. */
-    calls: number
-  }
-  facts: ResearchFact[]
-  /** What could not be established. */
-  gaps: string[]
-  answer: { text: string; confidence: number | null; label: 'High' | 'Medium' | 'Low' | null }
-  error?: string
   /** The SDK's API-equivalent figure (Pro login: not billed). */
   costUsd?: number
+  error?: string
+  /** ISO, for cache and offline. */
+  cachedAt?: string
+  /** Null only when the bridge sent none worth showing. */
+  rank: ResearchRank | null
+  /** Always the four, in order. */
+  stages: ResearchStage[]
+  parts: ResearchPart[]
+  review: ResearchReview | null
+  stats: {
+    /** Claude calls made. */
+    calls: number
+    found: number
+    read: number
+    findings: number
+    quotes: number
+    /** Findings dropped: quote not in the page, or a figure that did not check out. */
+    dropped: number
+    injections: number
+  }
+  answer: { text: string; confidence: number | null; label: 'High' | 'Medium' | 'Low' | null }
+  data: DataCard | null
+  sources: ResearchSource[]
+  facts: ResearchFact[]
+  gaps: string[]
 }
 
 export type Tone = 'green' | 'amber' | 'red' | 'dim'
 
-/* ----------------------------------------------------------------- defaults */
+/* ----------------------------------------------------------------- coercion */
 
-/** The six stages, in order, with the labels the board falls back to. */
+/** The four stages, in order, with the labels the card falls back to. */
 export const STAGES: ReadonlyArray<readonly [ResearchStageKey, string]> = [
-  ['plan', 'Plan'],
-  ['search', 'Search'],
-  ['read', 'Read'],
-  ['extract', 'Extract'],
-  ['verify', 'Cross-check'],
-  ['answer', 'Answer'],
+  ['rank', 'Rank'],
+  ['split', 'Split'],
+  ['agents', 'Agents'],
+  ['review', 'Review'],
 ]
 
+const STATUSES: ReadonlySet<string> = new Set(['running', 'done', 'failed', 'stopped', 'skipped'])
+const MODES: ReadonlySet<string> = new Set(['live', 'cache', 'offline'])
+const LEVELS: ReadonlySet<string> = new Set(['simple', 'moderate', 'complex'])
+const STAGE_STATES: ReadonlySet<string> = new Set(['wait', 'run', 'done', 'fail', 'skip'])
+const PART_STATES: ReadonlySet<string> = new Set(['wait', 'search', 'read', 'report', 'done', 'fail'])
+const FACT_STATES: ReadonlySet<string> = new Set(['corroborated', 'single', 'disputed'])
 const KINDS: ReadonlySet<string> = new Set([
   'gov', 'academic', 'reference', 'news', 'org', 'company', 'blog', 'forum', 'social', 'web',
 ])
-const STAGE_STATES: ReadonlySet<string> = new Set(['wait', 'run', 'done', 'fail', 'skip'])
-const SOURCE_STATES: ReadonlySet<string> = new Set(['found', 'reading', 'read', 'failed', 'skipped'])
-const FACT_STATES: ReadonlySet<string> = new Set(['corroborated', 'single', 'disputed'])
 
 type Loose = Record<string, unknown>
 const rec = (x: unknown): Loose => (x && typeof x === 'object' ? (x as Loose) : {})
 const num = (x: unknown, or = 0): number => (typeof x === 'number' && Number.isFinite(x) ? x : or)
-const str = (x: unknown): string => (typeof x === 'string' ? x : x == null ? '' : String(x))
-const opt = (x: unknown): string | undefined => (typeof x === 'string' && x ? x : undefined)
 const list = (x: unknown): unknown[] => (Array.isArray(x) ? x : [])
 const pick = <T extends string>(x: unknown, allowed: ReadonlySet<string>, or: T): T =>
   typeof x === 'string' && allowed.has(x) ? (x as T) : or
+/** A count: a whole number, never negative. */
+const count = (x: unknown): number => Math.max(0, Math.round(num(x)))
+/** A source number: a positive whole number, or nothing. */
+const sourceN = (x: unknown): number | undefined =>
+  typeof x === 'number' && Number.isInteger(x) && x > 0 && x < 1000 ? x : undefined
 
 /**
- * A board state that is safe to render, whatever arrived.
+ * Anything as a string. An object whose toString throws (or is missing, as on
+ * a null-prototype object) is nothing rather than a crash.
+ */
+function str(x: unknown): string {
+  if (typeof x === 'string') return x
+  if (x == null) return ''
+  try {
+    return String(x)
+  } catch {
+    return ''
+  }
+}
+
+/** One line of at most `max` characters, cut with an ellipsis. */
+function clip(x: unknown, max: number): string {
+  const s = str(x).replace(/\s+/g, ' ').trim()
+  return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s
+}
+
+/** Like clip, but absent when empty — for the optional fields. */
+function optClip(x: unknown, max: number): string | undefined {
+  return clip(x, max) || undefined
+}
+
+/**
+ * A research state that is safe to render, whatever arrived.
  *
  * The object comes over a socket from another process. A React render that
  * throws takes the whole interface down with it, and an object where a string
  * was expected does exactly that — so every field is coerced to its type here,
- * once, and the board never has to wonder.
+ * once, and clipped, and the card never has to wonder.
  */
 export function withDefaults(raw: unknown): Research {
   const r = rec(raw)
   const stats = rec(r.stats)
   const answer = rec(r.answer)
-  const plan = r.plan ? rec(r.plan) : null
   const stages = list(r.stages).map(rec)
   const label = answer.label === 'High' || answer.label === 'Medium' || answer.label === 'Low' ? answer.label : null
   const confidence = typeof answer.confidence === 'number' && Number.isFinite(answer.confidence)
-    ? answer.confidence
+    ? clamp01(answer.confidence)
     : null
 
   return {
-    id: str(r.id),
-    question: str(r.question),
-    status: pick(r.status, new Set(['running', 'done', 'failed', 'stopped']), 'running'),
-    mode: pick(r.mode, new Set(['live', 'cache', 'offline']), 'live'),
+    id: clip(r.id, 80),
+    question: clip(r.question, 400),
+    status: pick(r.status, STATUSES, 'running'),
+    mode: pick(r.mode, MODES, 'live'),
     startedAt: num(r.startedAt),
     ms: Math.max(0, num(r.ms)),
-    cachedAt: opt(r.cachedAt),
-    depth: pick(r.depth, new Set(['quick', 'standard', 'deep']), 'standard'),
-    // Always the six, in pipeline order, whatever order or subset arrived.
+    costUsd: typeof r.costUsd === 'number' && Number.isFinite(r.costUsd) ? r.costUsd : undefined,
+    error: optClip(r.error, 240),
+    cachedAt: optClip(r.cachedAt, 40),
+    rank: cleanRank(r.rank),
+    // Always the four, in pipeline order, whatever order or subset arrived;
+    // a stage the face does not know is dropped.
     stages: STAGES.map(([key, fallback]) => {
       const s = stages.find((x) => x.key === key) ?? {}
       return {
         key,
-        label: str(s.label) || fallback,
+        label: clip(s.label, 24) || fallback,
         state: pick(s.state, STAGE_STATES, 'wait'),
-        ms: typeof s.ms === 'number' && Number.isFinite(s.ms) ? s.ms : undefined,
-        note: opt(s.note),
+        note: optClip(s.note, 120),
+        ms: typeof s.ms === 'number' && Number.isFinite(s.ms) && s.ms >= 0 ? s.ms : undefined,
       }
     }),
-    plan: plan
-      ? { intent: str(plan.intent), subquestions: list(plan.subquestions).map(str).filter(Boolean) }
-      : null,
-    sources: list(r.sources).map((x) => {
-      const s = rec(x)
+    parts: list(r.parts).slice(0, 6).map((x, k) => {
+      const p = rec(x)
       return {
-        n: Math.max(0, Math.round(num(s.n))),
-        title: str(s.title),
-        url: str(s.url),
-        domain: str(s.domain),
+        i: sourceN(p.i) ?? k + 1,
+        title: clip(p.title, 60),
+        question: clip(p.question, 300),
+        state: pick(p.state, PART_STATES, 'wait'),
+        found: count(p.found),
+        read: count(p.read),
+        findings: count(p.findings),
+        error: optClip(p.error, 120),
+      }
+    }),
+    review: r.review && typeof r.review === 'object'
+      ? (() => {
+          const v = rec(r.review)
+          return {
+            findings: count(v.findings),
+            kept: count(v.kept),
+            duplicates: count(v.duplicates),
+            offTopic: count(v.offTopic),
+            weak: count(v.weak),
+          }
+        })()
+      : null,
+    stats: {
+      calls: count(stats.calls),
+      found: count(stats.found),
+      read: count(stats.read),
+      findings: count(stats.findings),
+      quotes: count(stats.quotes),
+      dropped: count(stats.dropped),
+      injections: count(stats.injections),
+    },
+    answer: { text: str(answer.text).slice(0, 4000), confidence, label },
+    data: cleanData(r.data),
+    sources: list(r.sources).slice(0, 40).map((x) => {
+      const s = rec(x)
+      const url = clip(s.url, 2000)
+      return {
+        n: count(s.n),
+        title: clip(s.title, 200),
+        url,
+        domain: clip(s.domain, 120) || domainOf(url),
         kind: pick(s.kind, KINDS, 'web'),
         trust: clamp01(num(s.trust)),
-        why: list(s.why).map(str).filter(Boolean),
-        state: pick(s.state, SOURCE_STATES, 'found'),
-        published: opt(s.published),
-        injection: s.injection === true,
-        claims: Math.max(0, num(s.claims)),
-        subq: list(s.subq).filter((i): i is number => typeof i === 'number' && Number.isInteger(i) && i >= 0),
-        error: opt(s.error),
+        used: s.used === true,
       }
     }),
-    stats: {
-      found: num(stats.found),
-      read: num(stats.read),
-      quotes: num(stats.quotes),
-      verified: num(stats.verified),
-      dropped: num(stats.dropped),
-      injections: num(stats.injections),
-      calls: num(stats.calls),
-    },
-    facts: list(r.facts).map((x, i) => {
+    facts: list(r.facts).slice(0, 20).map((x, i) => {
       const f = rec(x)
-      const ns = (v: unknown) => list(v).filter((n): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0)
+      const ns = (v: unknown) => list(v).map(sourceN).filter((n): n is number => n !== undefined)
       return {
-        id: str(f.id) || `f${i + 1}`,
-        text: str(f.text),
+        id: clip(f.id, 20) || `f${i + 1}`,
+        text: clip(f.text, 400),
         status: pick(f.status, FACT_STATES, 'single'),
         confidence: clamp01(num(f.confidence)),
         support: ns(f.support),
         contradict: ns(f.contradict),
-        note: opt(f.note),
+        relevance: Math.min(10, count(f.relevance)),
       }
     }),
-    gaps: list(r.gaps).map(str).filter(Boolean),
-    answer: { text: str(answer.text), confidence, label },
-    error: opt(r.error),
-    costUsd: typeof r.costUsd === 'number' && Number.isFinite(r.costUsd) ? r.costUsd : undefined,
+    gaps: list(r.gaps).map((g) => clip(g, 200)).filter(Boolean).slice(0, 8),
   }
 }
 
-/* ---------------------------------------------------------------- citations */
-
-export type CitePart = { text: string } | { cite: number }
+function cleanRank(raw: unknown): ResearchRank | null {
+  const k = rec(raw)
+  if (typeof k.level !== 'string' || !LEVELS.has(k.level)) return null
+  return {
+    score: Math.min(10, count(k.score)),
+    level: k.level as ResearchLevel,
+    parts: Math.min(6, count(k.parts)),
+    reasons: list(k.reasons).map((s) => clip(s, 40)).filter(Boolean).slice(0, 6),
+  }
+}
 
 /**
- * A citation group and the whitespace before it: `[3]`, `[2, 5]`, `[2-4]`.
- * One to three digits only, so a year in brackets ("[2024]") stays prose.
+ * A data card's content, safe to render: every field a clipped string, at most
+ * eight rows, a headline only when it has a value. Null when nothing is left to
+ * show — no headline, no rows and no note.
  */
-const CITE = /\s*\[(\d{1,3}(?:\s*[,–-]\s*\d{1,3})*)\]/g
+export function cleanData(raw: unknown): DataCard | null {
+  if (!raw || typeof raw !== 'object') return null
+  const d = rec(raw)
+  const h = d.headline && typeof d.headline === 'object' ? rec(d.headline) : null
+  const value = h ? clip(h.value, 40) : ''
+  const headline: DataHeadline | null = h && value
+    ? strip({
+        label: clip(h.label, 60),
+        value,
+        // The bridge's own limits (research.mjs, panels.mjs): a figure it has
+        // checked against the page is never cut short here.
+        unit: optClip(h.unit, 20),
+        asOf: optClip(h.asOf, 40),
+        change: optClip(h.change, 40),
+        n: sourceN(h.n),
+      })
+    : null
+  const rows = list(d.rows)
+    .map((x) => {
+      const row = rec(x)
+      return strip({
+        label: clip(row.label, 60),
+        value: clip(row.value, 40),
+        unit: optClip(row.unit, 20),
+        note: optClip(row.note, 80),
+        n: sourceN(row.n),
+      })
+    })
+    .filter((row) => row.label || row.value)
+    .slice(0, 8)
+  const note = optClip(d.note, 240)
+  if (!headline && !rows.length && !note) return null
+  return strip({ title: clip(d.title, 40), headline, rows, note })
+}
 
-/** The source numbers in one bracket group, in order, without repeats. */
-function citeNumbers(group: string): number[] {
-  const out: number[] = []
-  const add = (n: number) => {
-    if (Number.isInteger(n) && n > 0 && !out.includes(n)) out.push(n)
-  }
-  for (const part of group.split(',')) {
-    const [a, b] = part.split(/[–-]/).map((s) => Number(s.trim()))
-    if (b === undefined) add(a)
-    // A short range is a range; anything wider is two citations, not a list
-    // of forty chips.
-    else if (b >= a && b - a <= 9) for (let n = a; n <= b; n++) add(n)
-    else {
-      add(a)
-      add(b)
+/**
+ * A sources card's links, safe to render: strings clipped, the domain filled in
+ * from the URL when missing, repeats dropped, at most `max`. A bare URL string
+ * is accepted as a link too.
+ */
+export function cleanLinks(raw: unknown, max = 5): BladeLink[] {
+  const out: BladeLink[] = []
+  const seen = new Set<string>()
+  for (const x of list(raw)) {
+    const l = typeof x === 'string' ? { url: x } : rec(x)
+    const url = clip(l.url, 2000)
+    const title = clip(l.title, 200)
+    if (!url && !title) continue
+    if (url) {
+      if (seen.has(url)) continue
+      seen.add(url)
     }
+    out.push(strip({ n: sourceN(l.n), title, url, domain: clip(l.domain, 80) || domainOf(url) }))
+    if (out.length >= max) break
   }
   return out
 }
 
-/**
- * Answer text cut into prose and citations, for chips the owner can point at.
- *
- * The space before a citation goes with it: the chip sits against the word it
- * supports, the way a superscript does, rather than floating a gap away.
- */
-export function splitCitations(text: string): CitePart[] {
-  const out: CitePart[] = []
-  const push = (t: string) => {
-    if (!t) return
-    const last = out[out.length - 1]
-    if (last && 'text' in last) last.text += t
-    else out.push({ text: t })
-  }
-  const src = String(text ?? '')
-  let at = 0
-  for (const m of src.matchAll(CITE)) {
-    const ns = citeNumbers(m[1])
-    if (!ns.length) continue
-    push(src.slice(at, m.index))
-    for (const n of ns) out.push({ cite: n })
-    at = (m.index ?? 0) + m[0].length
-  }
-  push(src.slice(at))
-  return out
-}
-
-export type AnswerBlock = { kind: 'p' | 'li'; text: string }
-
-/**
- * The answer as paragraphs and bullets. The synthesiser is asked for plain
- * text with "- " bullets; stray Markdown emphasis and heading marks are
- * dropped rather than shown as asterisks.
- */
-export function answerBlocks(text: string): AnswerBlock[] {
-  const out: AnswerBlock[] = []
-  for (const raw of String(text ?? '').split(/\r?\n/)) {
-    const line = raw.replace(/\*\*|__/g, '').replace(/^\s*#{1,6}\s+/, '').trim()
-    if (!line) continue
-    const bullet = /^[-•*]\s+(.+)$/.exec(line)
-    out.push(bullet ? { kind: 'li', text: bullet[1] } : { kind: 'p', text: line })
-  }
-  return out
+/** Optional fields that came out empty are left off, not set to undefined. */
+function strip<T extends object>(o: T): T {
+  for (const k of Object.keys(o) as Array<keyof T>) if (o[k] === undefined) delete o[k]
+  return o
 }
 
 /* ------------------------------------------------------------------ figures */
@@ -340,55 +450,82 @@ export function liveElapsed(
   return Math.max(recorded, since)
 }
 
+/** '1 source', '3 findings'. */
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`
+}
+
 /* -------------------------------------------------------------------- words */
 
-export function confidenceTone(label: Research['answer']['label']): Tone {
-  if (label === 'High') return 'green'
-  if (label === 'Medium') return 'amber'
-  if (label === 'Low') return 'red'
-  return 'dim'
+/** The rank badge: 'COMPLEX · 8/10', or '' when the bridge sent no rank. */
+export function rankLabel(rank: ResearchRank | null): string {
+  if (!rank) return ''
+  return `${rank.level.toUpperCase()} · ${rank.score}/10`
 }
 
-/** Same thresholds as the engine's labels, applied to a source's trust. */
-export function trustTone(trust: number): Exclude<Tone, 'dim'> {
-  if (trust >= 0.75) return 'green'
-  if (trust >= 0.5) return 'amber'
-  return 'red'
+const PART_WORDS: Record<PartState, string> = {
+  wait: 'waiting',
+  search: 'searching',
+  read: 'reading',
+  report: 'reporting',
+  done: 'done',
+  fail: 'failed',
 }
 
-export function statusTone(status: ResearchFact['status']): Exclude<Tone, 'dim'> {
-  if (status === 'corroborated') return 'green'
-  if (status === 'disputed') return 'red'
-  return 'amber'
+/** A part's state chip, in words. */
+export function partStateLabel(state: PartState): string {
+  return PART_WORDS[state] ?? 'waiting'
 }
 
-/** 'Corroborated · 3 sources' / 'Single source' / 'Disputed'. */
-export function statusLabel(fact: Pick<ResearchFact, 'status' | 'support'>): string {
-  if (fact.status === 'disputed') return 'Disputed'
-  if (fact.status === 'single') return 'Single source'
-  const k = new Set(fact.support).size
-  return k > 1 ? `Corroborated · ${k} sources` : 'Corroborated'
+/** A part is at work — its chip carries a spinner. */
+export function partActive(state: PartState): boolean {
+  return state === 'search' || state === 'read' || state === 'report'
 }
 
-const KIND_LABELS: Record<ResearchSourceKind, string> = {
-  gov: 'Government',
-  academic: 'Academic',
-  reference: 'Reference',
-  news: 'News',
-  org: 'Organisation',
-  company: 'Company',
-  blog: 'Blog',
-  forum: 'Forum',
-  social: 'Social',
-  web: 'Web',
-}
-
-export function kindLabel(kind: ResearchSourceKind): string {
-  return KIND_LABELS[kind] ?? 'Web'
+/** '3 sources · 5 findings' once reading starts; '12 found' while searching; '' before. */
+export function partCounts(p: Pick<ResearchPart, 'state' | 'found' | 'read' | 'findings'>): string {
+  if (p.state === 'wait') return ''
+  if (p.state === 'search') return p.found ? `${p.found} found` : ''
+  return `${plural(p.read, 'source')} · ${plural(p.findings, 'finding')}`
 }
 
 /**
- * The pill beside the title. What went wrong outranks where the answer came
+ * The reviewer's row: 'Reviewer: 14 findings → 6 kept · 3 duplicates · 2 off-topic',
+ * or what it is doing until it has a verdict.
+ */
+export function reviewLine(r: Pick<Research, 'review' | 'stages'>): string {
+  const v = r.review
+  if (v) {
+    const bits = [`${v.kept} kept`]
+    if (v.duplicates) bits.push(plural(v.duplicates, 'duplicate'))
+    if (v.offTopic) bits.push(`${v.offTopic} off-topic`)
+    if (v.weak) bits.push(`${v.weak} weak`)
+    return `Reviewer: ${plural(v.findings, 'finding')} → ${bits.join(' · ')}`
+  }
+  const state = r.stages.find((s) => s.key === 'review')?.state
+  if (state === 'run') return 'Reviewer: scoring the findings…'
+  if (state === 'skip') return 'Reviewer: skipped'
+  if (state === 'fail') return 'Reviewer: unavailable, facts taken from the findings'
+  return 'Reviewer: waiting'
+}
+
+const DOING: Record<ResearchStageKey, string> = {
+  rank: 'Ranking the question',
+  split: 'Splitting the question',
+  agents: 'Agents at work',
+  review: 'Reviewing the findings',
+}
+
+/** What the run is doing right now, in words — '' once it has stopped. */
+export function activityLine(r: Pick<Research, 'status' | 'stages'>): string {
+  if (r.status !== 'running') return ''
+  const stage = r.stages.find((s) => s.state === 'run') ?? r.stages.find((s) => s.state === 'wait')
+  if (!stage) return 'Working…'
+  return stage.note || `${DOING[stage.key] ?? 'Working'}…`
+}
+
+/**
+ * The pill beside the rank. What went wrong outranks where the answer came
  * from, which outranks whether it is still going.
  */
 export function statusPill(
@@ -397,81 +534,61 @@ export function statusPill(
   const pulse = r.status === 'running'
   if (r.status === 'failed') return { text: 'FAILED', tone: 'red', pulse }
   if (r.status === 'stopped') return { text: 'STOPPED', tone: 'amber', pulse }
+  if (r.status === 'skipped') return { text: 'SKIPPED', tone: 'dim', pulse }
   if (r.mode === 'cache') return { text: 'SAVED', tone: 'accent', pulse }
   if (r.mode === 'offline') return { text: 'OFFLINE', tone: 'amber', pulse }
   if (r.status === 'running') return { text: 'LIVE', tone: 'accent', pulse }
   return { text: 'DONE', tone: 'green', pulse }
 }
 
-const DOING: Record<ResearchStageKey, string> = {
-  plan: 'Planning the research',
-  search: 'Searching the web',
-  read: 'Reading the sources',
-  extract: 'Pulling out quoted evidence',
-  verify: 'Cross-checking the claims',
-  answer: 'Writing the answer',
-}
-
-/** What the agent is doing right now, in words — '' once it has stopped. */
-export function activity(r: Pick<Research, 'status' | 'stages'>): string {
-  if (r.status !== 'running') return ''
-  const stage = r.stages.find((s) => s.state === 'run') ?? r.stages.find((s) => s.state === 'wait')
-  return stage ? `${DOING[stage.key] ?? 'Working'}…` : 'Working…'
-}
-
-/**
- * A stable key per source row. The URL is the row's identity across updates —
- * a candidate found during search keeps its row (and its animation) when it is
- * picked and numbered — with a suffix in case the same link arrives twice.
- */
-export function rowKeys(sources: Pick<ResearchSource, 'url' | 'title'>[]): string[] {
-  const seen = new Map<string, number>()
-  return sources.map((s, i) => {
-    const base = s.url || s.title || `row-${i}`
-    const k = seen.get(base) ?? 0
-    seen.set(base, k + 1)
-    return k ? `${base}#${k}` : base
-  })
-}
-
-/** Only web pages open as a reader card; anything else in a URL field is ignored. */
+/** Only web pages become links; anything else in a URL field is shown as text. */
 export function isWebUrl(url: string): boolean {
   return /^https?:\/\/[^\s/]+/i.test(String(url ?? ''))
 }
 
-export type Metric = { label: string; value: string; hint?: string; tone?: Tone }
-
-/**
- * The footer — the numbers that show the work: how many quotes were checked
- * against the page they claimed to come from, and what was thrown out.
- */
-export function metrics(r: Pick<Research, 'stats' | 'sources'>): Metric[] {
-  const s = r.stats
-  const selected = r.sources.filter((x) => x.n > 0).length
-  return [
-    { label: 'quotes checked', value: String(s.quotes) },
-    { label: 'verified', value: String(s.verified), tone: s.verified ? 'green' : undefined },
-    { label: 'dropped', value: String(s.dropped), hint: 'not in the source', tone: s.dropped ? 'amber' : undefined },
-    { label: 'injections removed', value: String(s.injections), tone: s.injections ? 'red' : undefined },
-    { label: 'sources read', value: `${s.read}/${selected || s.read}` },
-    { label: 'Claude calls', value: String(s.calls) },
-  ]
+/** 'https://www.who.int/news' → 'who.int'; '' for anything that is not a web URL. */
+export function domainOf(url: string): string {
+  if (!isWebUrl(url)) return ''
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, '')
+  } catch {
+    return ''
+  }
 }
 
-/** 'API-equivalent $0.21 — not billed on Pro', or '' when there is no figure. */
-export function costLine(costUsd: number | undefined): string {
-  if (typeof costUsd !== 'number' || !Number.isFinite(costUsd) || costUsd <= 0) return ''
-  return `API-equivalent $${costUsd.toFixed(2)} — not billed on Pro`
-}
-
-/** '7 Oct, 09:12' in the laptop's own time — '' when the date will not parse. */
-export function savedWhen(iso: string | undefined): string {
+/** 'saved 5 h ago' — '' when the date will not parse. */
+export function savedAgo(iso: string | undefined, now: number): string {
   const t = Date.parse(String(iso ?? ''))
   if (!Number.isFinite(t)) return ''
-  return new Date(t).toLocaleString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  const s = Math.max(0, Math.round((now - t) / 1000))
+  if (s < 60) return 'saved just now'
+  if (s < 3600) return `saved ${Math.floor(s / 60)} min ago`
+  if (s < 48 * 3600) return `saved ${Math.floor(s / 3600)} h ago`
+  return `saved ${Math.floor(s / 86400)} d ago`
+}
+
+/**
+ * A data card's footer: the confidence, and for a replayed or offline answer
+ * how old it is — 'Confidence High (82%) · saved 5 h ago'. '' when neither.
+ */
+export function dataFoot(
+  b: { confidence?: unknown; mode?: unknown; savedAt?: unknown },
+  now: number,
+): string {
+  const bits: string[] = []
+  const confidence = typeof b.confidence === 'string' ? clip(b.confidence, 40) : ''
+  if (confidence) bits.push(`Confidence ${confidence}`)
+  if (b.mode === 'cache' || b.mode === 'offline') {
+    const ago = savedAgo(str(b.savedAt), now) || 'saved earlier'
+    bits.push(b.mode === 'offline' ? `offline · ${ago}` : ago)
+  }
+  return bits.join(' · ')
+}
+
+/** Which way a change points: '+1.2%' up, '−340' down, anything else neither. */
+export function changeTone(change: string | undefined): 'up' | 'down' | '' {
+  const s = String(change ?? '').trim()
+  if (/^[+▲↑]/.test(s)) return 'up'
+  if (/^[-−–▼↓]/.test(s)) return 'down'
+  return ''
 }

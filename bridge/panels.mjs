@@ -2,18 +2,23 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 import { probeUrl } from './page.mjs'
 import { IDENTITY } from './identity.mjs'
+import { supportsNumbers } from './trust.mjs'
 
 /**
  * The `display` tool — AYRA's screen.
  *
  * Rather than filling in a fixed set of card templates, the model authors the
- * panel itself: markup, layout, emphasis, and which animation it arrives with.
- * A search result and a phone screenshot and a revenue figure should not look
- * like the same component with different words in it, and only the thing
- * composing the answer knows what the answer wants to look like.
+ * panel itself: markup, layout, emphasis. A phone screenshot and a gallery
+ * should not look like the same component with different words in it, and
+ * only the thing composing the answer knows what the answer wants to look like.
  *
  * What's fixed is the design system below, so everything it builds still looks
  * like one interface. The browser sanitises the markup before it renders.
+ *
+ * A web answer is the exception, and has its own tool: `show_data` draws the
+ * data card — a figure, a name, a date, a score — from fields, not markup, and
+ * every number on it is checked against what the search really said. The
+ * sources card beside it is the bridge's own (sources.mjs).
  *
  * It runs in-process (an SDK MCP server, not a subprocess), so the handler
  * pushes straight down the open WebSocket — no round trip, no temp file.
@@ -51,10 +56,8 @@ PICTURES AND VIDEO — these work. Use them.
     result gave it and it appears. The bridge fetches every remote image
     server-side and hands the bytes to the display, so hosts that refuse to be
     hotlinked still render — nothing is loaded by the page itself.
-  - If a search came back with pictures, SHOW the pictures. A row of thumbnails
-    down the side of the headlines beats headlines alone, every time — and a
-    grid of results is the whole answer to an image search, not a decoration
-    on it.
+  - If an image search came back with pictures, SHOW the pictures: a grid of
+    results is the whole answer to an image search, not a decoration on it.
   - Video results are for playing, not describing. A YouTube or Vimeo result
     goes in an <iframe> inside .hud-embed; a direct .mp4 or .webm goes in a
     <video class="hud-video" controls>.
@@ -62,23 +65,15 @@ PICTURES AND VIDEO — these work. Use them.
     A guessed address is a broken image, and a broken image is worse than none.
 
 WHERE THE CONTENT COMES FROM — read this before showing anything from the web.
-  - Search with WebSearch, then read the page with WebFetch. What comes back is
-    what you render — rewritten into these classes, in your own words and this
-    interface's shape. You are not linking to an article, you are showing it.
-  - Do NOT put a bare source URL on screen and leave the page to fetch it for
-    itself. Half the web refuses that: news CDNs answer 403 to anything that
-    is not their own page, and the panel renders as an empty rectangle. Reading
-    the page first is what makes the difference between an article appearing
-    and a blank card.
-  - So: asked about a page, crawl it, then panel the substance — the headline,
-    the two or three lines that matter, the figure, the photograph.
+  - A web answer is not a panel. After a web search the sources card appears by
+    itself, and the answer's figure goes on show_data. Never compose a card of
+    search results, headlines or a page's substance for it.
   - Image URLs that came back IN a tool result are real and will render; the
     bridge fetches them server-side. An image URL you inferred or assembled
     yourself will not. Never guess one.
 
 RULES
-  - No inline colours. The accent is themed by the 'accent' argument; use the
-    classes and it follows automatically.
+  - No inline colours. Use the classes; .hud-hot picks up the accent colour.
   - No <style>, <script>, <form>, or event handlers. They are stripped.
   - <iframe> is allowed for exactly three hosts: www.youtube-nocookie.com/embed,
     www.youtube.com/embed and player.vimeo.com/video. Any other src and the
@@ -92,14 +87,14 @@ RULES
 
 EXAMPLES
 
-Search results:
+A list from the laptop:
 <div class="hud-rows">
-  <div class="hud-row"><span class="hud-idx">01</span><span class="hud-main"><span class="hud-label">Anthropic ships Claude Opus 5</span><span class="hud-sub">A step change on agentic coding</span></span><span class="hud-tag">reuters</span></div>
-  <div class="hud-row"><span class="hud-idx">02</span><span class="hud-main"><span class="hud-label">OpenAI responds within the week</span></span><span class="hud-tag">verge</span></div>
+  <div class="hud-row"><span class="hud-idx">01</span><span class="hud-main"><span class="hud-label">Physics notes.pdf</span><span class="hud-sub">Downloads · today</span></span><span class="hud-tag">2 MB</span></div>
+  <div class="hud-row"><span class="hud-idx">02</span><span class="hud-main"><span class="hud-label">Exam timetable.xlsx</span></span><span class="hud-tag">48 KB</span></div>
 </div>
 
-A single figure:
-<div><span class="hud-metric">1,284</span><span class="hud-unit">unread since monday</span></div>
+A single figure from the laptop (a web figure goes on show_data instead):
+<div><span class="hud-metric">1,284</span><span class="hud-unit">files in Downloads</span></div>
 
 An image:
 <div><img class="hud-img" src="https://images.example.com/sr71.jpg"><span class="hud-caption">SR-71 Blackbird</span></div>
@@ -113,12 +108,6 @@ Image search results — the pictures ARE the answer, so lead with them:
     <img class="hud-thumb" src="https://images.example.com/sr71-hangar.jpg">
   </div>
   <span class="hud-caption">SR-71 Blackbird · four of two hundred results</span>
-</div>
-
-Headlines with their thumbnails:
-<div class="hud-rows">
-  <div class="hud-row"><img class="hud-thumb" src="https://cdn.example.com/launch.jpg"><span class="hud-main"><span class="hud-label">Starship clears the tower on the eleventh flight</span><span class="hud-sub">Booster caught, ship lost on re-entry</span></span><span class="hud-tag">reuters</span></div>
-  <div class="hud-row"><img class="hud-thumb" src="https://cdn.example.org/pad.jpg"><span class="hud-main"><span class="hud-label">Pad damage limited to the flame trench</span></span><span class="hud-tag">ars</span></div>
 </div>
 
 A video result — embedded and playable:
@@ -137,7 +126,7 @@ A short readout:
 const schema = {
   title: z
     .string()
-    .describe('Short heading for the panel, two to four words. e.g. "SEARCH RESULTS", "INBOX".'),
+    .describe('Short heading for the panel, two to four words. e.g. "DOWNLOADS", "INBOX".'),
   html: z
     .string()
     .describe(
@@ -145,16 +134,8 @@ const schema = {
         'this tool description. Author it for the specific content — a list, an ' +
         'image, a number and a caption, whatever fits.',
     ),
-  anim: z
-    .enum(['materialise', 'sweep', 'unfold', 'stagger', 'snap'])
-    .default('materialise')
-    .describe(
-      'How it arrives. materialise = scan-wipe reveal, the default. ' +
-        'sweep = slides in from the edge, good for results. ' +
-        'unfold = expands vertically, good for images. ' +
-        'stagger = children land one after another, good for lists. ' +
-        'snap = instant with a flicker, good for alerts and single figures.',
-    ),
+  // `anim` and `accent` were dropped: the face never used either, and every
+  // unused argument is read on every turn.
   slot: z
     .enum(['right', 'left', 'wide'])
     .default('right')
@@ -162,14 +143,6 @@ const schema = {
       'Where it sits. right = the default stack beside the reactor. ' +
         'left = the opposite side, for a second simultaneous panel. ' +
         'wide = a broader card under the reactor, for images or dense tables.',
-    ),
-  accent: z
-    .enum(['default', 'amber', 'violet', 'green', 'red'])
-    .default('default')
-    .describe(
-      'Colour identity. default = the interface cyan. amber = caution or ' +
-        'pending. violet = generated or synthetic content. green = confirmed ' +
-        'or healthy. red = failure or alert. Use it meaningfully, not decoratively.',
     ),
   hold: z
     .enum(['turn', 'sticky'])
@@ -183,18 +156,19 @@ const schema = {
 const DESCRIPTION = `Put something on the ${IDENTITY.name} heads-up display.
 
 You are designing the panel, not filling in a template — compose the markup for
-the content at hand and choose the animation, position and colour that suit it.
+the content at hand and choose the position that suits it.
 
-Web search results are shown for you: the moment a search returns, its sources
-go on screen by themselves. Don't compose a card for them — not even when the
-user asks to see the results; they already can. Answer out loud.
+Not for a web answer. After a web search the sources card appears by itself and
+the answer's figure, name, date or score goes on \`show_data\`. Never compose a
+card of results, headlines or a page's substance — not even when the user asks
+to see them; the cards already show it. Answer out loud.
 
-Use it whenever the answer has OTHER substance worth seeing rather than hearing:
-images, a list, a figure, a short readout.
+Use it for OTHER things the user asked to see: pictures, a video, a list or a
+figure from the laptop, a short readout.
 
-If the search came back with pictures, show the pictures — thumbnails from the
-web render properly here, and describing an image you are holding the URL of is
-a worse answer than putting it on the screen. If it came back with a video,
+If an image search came back with pictures, show the pictures — thumbnails from
+the web render properly here, and describing an image you are holding the URL of
+is a worse answer than putting it on the screen. If it came back with a video,
 embed it so it plays.
 
 Call it BEFORE or WHILE you speak, so the panel is up as you start talking.
@@ -219,8 +193,8 @@ const BLADE_DESCRIPTION = `Open something on the blades — the big surface.
 
 A panel is a card you glance at. A blade is a thing you LOOK at: a photograph
 worth seeing properly, an article worth reading, a video worth watching. Blades
-stack, the newest in front, and the user can pull an older one forward or throw
-one to full screen. Use a blade whenever the content deserves the frame, and a
+sit in a column beside you, and the user can pull one forward or throw it to
+full screen. Use a blade whenever the content deserves the frame, and a
 panel when it deserves a line.
 
 Choosing what to open:
@@ -307,116 +281,276 @@ the bytes — it does not know whether the user asked to read this or merely to
 see it, what is already on screen, or whether the point was the picture or the
 argument. You know those things. Overrule it whenever you have reason to.`
 
+// ---------------------------------------------------------------------------
+// The answer's data card
+// ---------------------------------------------------------------------------
+
+const DATA_DESCRIPTION = `Put a web answer's data card on screen.
+
+After a web search, SAY the answer first, the figure first. Then call this once,
+in the same message, and say nothing after it. Only when the answer is a figure,
+a name, a date, a score or a yes/no ("what's the price of gold", "who won the
+match", "when does it launch"); skip it for news, how-to and explanations.
+
+- headline: the answer. For a quantity, \`value\` is the number exactly as the
+  results give it ("₹1,23,450", "69,104", "6.2%") and its unit goes in \`unit\`
+  ("per 10 g"). Who won the match: { label: "Winner", value: "India" }.
+- rows: at most three supporting figures, e.g. { label: "Margin", value: "6 wickets" }.
+- sources: the URLs of the results you actually used, as the search gave them —
+  at most three. The sources card lists them.
+- note: one short line, only when it matters. A figure you calculated or
+  converted yourself says so here ("Converted at the RBI rate").
+
+Every number must be one the search or page results give. The sources card
+appears by itself; never use \`display\` for the same answer, and never call this
+after the research tool, which puts up its own cards.`
+
+const field = z.string()
+const dataSchema = {
+  title: field.describe('The card heading in a few words, e.g. "GOLD PRICE · HYDERABAD".'),
+  headline: z
+    .object({
+      label: field.describe('What the figure is, e.g. "24K gold" or "Winner".'),
+      value: field.describe('The figure as the results give it, e.g. "₹1,23,450", "6.2%", "India", "Yes".'),
+      unit: field.optional().describe('Its unit, e.g. "per 10 g".'),
+      asOf: field.optional().describe('When it is from, e.g. "8 Oct, 10:30 am".'),
+      change: field.optional().describe('Its move, as the results give it, e.g. "+0.8% today".'),
+    })
+    .nullish()
+    .describe('The one answer.'),
+  rows: z
+    .array(
+      z.object({
+        label: field,
+        value: field,
+        unit: field.optional(),
+        note: field.optional(),
+      }),
+    )
+    .nullish()
+    .describe('At most three supporting figures.'),
+  note: field.optional().describe('One short line, only when it matters.'),
+  sources: z.array(field).nullish().describe('The URLs you used, as the search gave them; at most three.'),
+}
+
 /**
- * @param {(blade: object) => void} emitBlade - pushes a blade to the browser
+ * What the card holds: a headline, three rows, a short note, three sources (the
+ * owner's redesign). A unit sits beside the big figure, so it stays short — the
+ * face's own limit (src/lib/research.ts), so nothing is cut twice.
  */
-export function displayServer(emitBlade) {
+export const DATA_LIMITS = { title: 32, value: 40, label: 48, unit: 20, text: 40, note: 140, rows: 3, sources: 3 }
+
+/** A note that owns up to arithmetic: its figures need not be on the page. */
+const WORKED_OUT = /\b(?:calculat|convert|comput)/i
+
+/** One line, clipped at a word where it can be so a figure is never cut in half. */
+const clipLine = (value, max) => {
+  const s = String(value ?? '').replace(/\s+/g, ' ').trim()
+  if (s.length <= max) return s
+  const cut = s.slice(0, max - 1)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
+}
+
+/** One headline or row as the card shows it, or null when it has no value to show. */
+function cleanItem(raw, extra) {
+  if (!raw || typeof raw !== 'object') return null
+  const value = clipLine(raw.value, DATA_LIMITS.value)
+  if (!value) return null
+  const out = { label: clipLine(raw.label, DATA_LIMITS.label), value }
+  for (const key of ['unit', ...extra]) {
+    const v = clipLine(raw[key], key === 'unit' ? DATA_LIMITS.unit : DATA_LIMITS.text)
+    if (v) out[key] = v
+  }
+  return out
+}
+
+/**
+ * The data card, checked: what show_data puts on screen, or the reason it
+ * refuses — handed back as an error, so the model gets one more go.
+ *
+ * @param {object} args — show_data's input
+ * @param {{ links: object[], pages: string[], text: string, data: boolean, research: boolean } | null} evidence
+ *   this turn's search results and pages (createTurnCards in sources.mjs)
+ * @returns {{ ok: true, data: object, urls: string[] } | { ok: false, error?: string, already?: boolean }}
+ */
+export function checkData(args, evidence) {
+  const headline = cleanItem(args?.headline, ['asOf', 'change'])
+  const rows = (Array.isArray(args?.rows) ? args.rows : [])
+    .map((r) => cleanItem(r, ['note']))
+    .filter((r) => r && r.label)
+    .slice(0, DATA_LIMITS.rows)
+  if (!headline && !rows.length) {
+    return { ok: false, error: 'Not shown: give a headline or at least one row, each with a value.' }
+  }
+  if (!evidence || (!evidence.links.length && !evidence.pages.length)) {
+    return { ok: false, error: 'No sources this turn: just say the answer.' }
+  }
+  if (evidence.research) {
+    return { ok: false, error: 'Not shown: the research cards are already on screen. Say nothing more.' }
+  }
+  if (evidence.data) return { ok: false, already: true }
+  const note = clipLine(args?.note, DATA_LIMITS.note)
+  // A figure the model wrote that the results never gave is the one failure
+  // this card exists to prevent — unless it says it did the arithmetic.
+  if (!WORKED_OUT.test(note)) {
+    const figures = [headline?.value, headline?.change, ...rows.map((r) => r.value)].filter(Boolean)
+    for (const value of figures) {
+      if (!supportsNumbers(value, evidence.text).ok) {
+        return { ok: false, error: `"${value}" is not in the search results — use the figure as the results give it.` }
+      }
+    }
+  }
+  const data = {
+    title: clipLine(args?.title, DATA_LIMITS.title) || 'ANSWER',
+    headline,
+    rows,
+    ...(note ? { note } : {}),
+  }
+  const urls = (Array.isArray(args?.sources) ? args.sources : [])
+    .filter((u) => typeof u === 'string' && u.trim())
+    .slice(0, DATA_LIMITS.sources)
+  return { ok: true, data, urls }
+}
+
+/**
+ * The HUD's tools, for displayServer — and for tests.
+ *
+ * @param {(blade: object) => void} emitBlade - pushes a blade to the browser
+ * @param {{ cards?: ReturnType<import('./sources.mjs').createTurnCards> }} [options]
+ *   cards — this connection's per-turn cards (server.mjs): what show_data
+ *           checks figures against, and how it draws the data and sources cards
+ */
+export function displayTools(emitBlade, { cards } = {}) {
+  return [
+    tool('display', DESCRIPTION, schema, async (args) => {
+      // Refuse rather than warn. Emitting anyway put a blank card on screen
+      // and told the model nothing, so it had no reason to try again; handed
+      // back as an error it gets one more go with actual content in it.
+      //
+      // The media test counts video and iframe as well as img, because a
+      // panel whose whole point is a playable result carries no text at all —
+      // rejecting it would refuse the one thing this tool was just taught to
+      // do. <source> counts too: a <video> is often written with its src on
+      // the child element rather than the parent.
+      const text = String(args.html ?? '').replace(/<[^>]*>/g, '').trim()
+      if (!text && !/<(img|video|iframe|source)\b/i.test(args.html ?? '')) {
+        console.warn('[ayra] display called with an empty body:', args.title)
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text:
+                'Not shown: the panel body was empty. A panel needs visible ' +
+                'text or an image — call display again with the content ' +
+                'composed into the html argument.',
+            },
+          ],
+        }
+      }
+      /**
+       * Composed markup opens as a blade, not as a card.
+       *
+       * There is one surface now. A second place for things to appear meant
+       * the user had two places to look and the model had a decision to make
+       * every time it wanted to show something — and it made that decision
+       * on grounds it could not possibly know, since only the person looking
+       * at the screen knows whether they are glancing or reading.
+       *
+       * The tool keeps its name and its design system because the model is
+       * fluent in both; only where the result lands has changed.
+       */
+      emitBlade({
+        id: `p${Date.now().toString(36)}-${(seq++).toString(36)}`,
+        title: String(args.title ?? '').trim() || 'DISPLAY',
+        kind: 'markup',
+        html: args.html,
+        size: args.slot === 'wide' ? 'wide' : 'compact',
+        hold: args.hold ?? 'turn',
+      })
+      return { content: [{ type: 'text', text: 'On screen.' }] }
+    }),
+
+    tool('blade', BLADE_DESCRIPTION, bladeSchema, async (args) => {
+      const kind = args.kind
+      const url = String(args.url ?? '').trim()
+      const images = Array.isArray(args.images) ? args.images.filter(Boolean) : []
+
+      // Refused rather than emitted, for the same reason the display tool
+      // refuses an empty body: a blade that opens onto nothing looks like the
+      // interface failing, and the model gets no signal to try again.
+      if (kind === 'gallery' && !images.length) {
+        return refuse('Not opened: a gallery needs at least one image URL in `images`.')
+      }
+      if (kind === 'markup' && !String(args.html ?? '').trim()) {
+        return refuse('Not opened: kind "markup" needs an `html` body.')
+      }
+      if (['article', 'image', 'video', 'embed'].includes(kind) && !url) {
+        return refuse(`Not opened: kind "${kind}" needs a \`url\`.`)
+      }
+
+      const blade = {
+        id: `b${Date.now().toString(36)}-${(seq++).toString(36)}`,
+        title: String(args.title ?? '').trim() || 'DISPLAY',
+        kind,
+        url: url || undefined,
+        images: images.length ? images.slice(0, 8) : undefined,
+        html: args.html || undefined,
+        mode: args.mode ?? 'reader',
+        // A reading column for anything meant to be read, a broad frame for
+        // anything meant to be looked at. Getting this wrong is the difference
+        // between an article you can follow and one in a letterbox.
+        size: args.size ?? (kind === 'article' ? 'tall' : 'wide'),
+        hold: args.hold ?? 'turn',
+      }
+      emitBlade(blade)
+      return { content: [{ type: 'text', text: `Open on the blades as "${blade.title}".` }] }
+    }),
+
+    tool(
+      'probe_url',
+      PROBE_DESCRIPTION,
+      { url: z.string().describe('The absolute URL to inspect.') },
+      async (args) => {
+        const report = await probeUrl(String(args.url ?? ''))
+        return { content: [{ type: 'text', text: JSON.stringify(report, null, 1) }] }
+      },
+    ),
+
+    tool('show_data', DATA_DESCRIPTION, dataSchema, async (args) => {
+      const verdict = checkData(args, cards?.evidence() ?? null)
+      // A second call in one turn would be a second data card: the first stays.
+      if (verdict.already) return said('Already on screen. Say nothing more.')
+      if (!verdict.ok) return refuse(verdict.error)
+      // The data card, then the sources card narrowed to what she used; ids
+      // are the turn's own (d-<ask>, src-<ask>), so the face replaces in place.
+      cards.showData(verdict.data, verdict.urls)
+      return said('Shown. Say nothing more.')
+    }),
+  ]
+}
+
+/**
+ * The HUD as an in-process MCP server: `display`, `blade`, `probe_url` and
+ * `show_data` (see displayTools).
+ *
+ * @param {(blade: object) => void} emitBlade - pushes a blade to the browser
+ * @param {{ cards?: ReturnType<import('./sources.mjs').createTurnCards> }} [options]
+ */
+export function displayServer(emitBlade, options = {}) {
   return createSdkMcpServer({
     name: 'ayra',
     version: '1.0.0',
     instructions:
-      `The ${IDENTITY.name} heads-up display. Use \`display\` to put content on screen ` +
-      'alongside what you say.',
+      `The ${IDENTITY.name} heads-up display. \`show_data\` puts a web answer's figure on ` +
+      'screen; `display` and `blade` show anything else the owner asks to see.',
     // Never defer this behind tool search — if the model has to go looking for
     // it, it won't occur to it to show anything.
     alwaysLoad: true,
-    tools: [
-      tool('display', DESCRIPTION, schema, async (args) => {
-        // Refuse rather than warn. Emitting anyway put a blank card on screen
-        // and told the model nothing, so it had no reason to try again; handed
-        // back as an error it gets one more go with actual content in it.
-        //
-        // The media test counts video and iframe as well as img, because a
-        // panel whose whole point is a playable result carries no text at all —
-        // rejecting it would refuse the one thing this tool was just taught to
-        // do. <source> counts too: a <video> is often written with its src on
-        // the child element rather than the parent.
-        const text = String(args.html ?? '').replace(/<[^>]*>/g, '').trim()
-        if (!text && !/<(img|video|iframe|source)\b/i.test(args.html ?? '')) {
-          console.warn('[ayra] display called with an empty body:', args.title)
-          return {
-            isError: true,
-            content: [
-              {
-                type: 'text',
-                text:
-                  'Not shown: the panel body was empty. A panel needs visible ' +
-                  'text or an image — call display again with the content ' +
-                  'composed into the html argument.',
-              },
-            ],
-          }
-        }
-        /**
-         * Composed markup opens as a blade, not as a card.
-         *
-         * There is one surface now. A second place for things to appear meant
-         * the user had two places to look and the model had a decision to make
-         * every time it wanted to show something — and it made that decision
-         * on grounds it could not possibly know, since only the person looking
-         * at the screen knows whether they are glancing or reading.
-         *
-         * The tool keeps its name and its design system because the model is
-         * fluent in both; only where the result lands has changed.
-         */
-        emitBlade({
-          id: `p${Date.now().toString(36)}-${(seq++).toString(36)}`,
-          title: String(args.title ?? '').trim() || 'DISPLAY',
-          kind: 'markup',
-          html: args.html,
-          size: args.slot === 'wide' ? 'wide' : 'compact',
-          hold: args.hold ?? 'turn',
-        })
-        return { content: [{ type: 'text', text: 'On screen.' }] }
-      }),
-
-      tool('blade', BLADE_DESCRIPTION, bladeSchema, async (args) => {
-        const kind = args.kind
-        const url = String(args.url ?? '').trim()
-        const images = Array.isArray(args.images) ? args.images.filter(Boolean) : []
-
-        // Refused rather than emitted, for the same reason the display tool
-        // refuses an empty body: a blade that opens onto nothing looks like the
-        // interface failing, and the model gets no signal to try again.
-        if (kind === 'gallery' && !images.length) {
-          return refuse('Not opened: a gallery needs at least one image URL in `images`.')
-        }
-        if (kind === 'markup' && !String(args.html ?? '').trim()) {
-          return refuse('Not opened: kind "markup" needs an `html` body.')
-        }
-        if (['article', 'image', 'video', 'embed'].includes(kind) && !url) {
-          return refuse(`Not opened: kind "${kind}" needs a \`url\`.`)
-        }
-
-        const blade = {
-          id: `b${Date.now().toString(36)}-${(seq++).toString(36)}`,
-          title: String(args.title ?? '').trim() || 'DISPLAY',
-          kind,
-          url: url || undefined,
-          images: images.length ? images.slice(0, 8) : undefined,
-          html: args.html || undefined,
-          mode: args.mode ?? 'reader',
-          // A reading column for anything meant to be read, a broad frame for
-          // anything meant to be looked at. Getting this wrong is the difference
-          // between an article you can follow and one in a letterbox.
-          size: args.size ?? (kind === 'article' ? 'tall' : 'wide'),
-          hold: args.hold ?? 'turn',
-        }
-        emitBlade(blade)
-        return { content: [{ type: 'text', text: `Open on the blades as "${blade.title}".` }] }
-      }),
-
-      tool(
-        'probe_url',
-        PROBE_DESCRIPTION,
-        { url: z.string().describe('The absolute URL to inspect.') },
-        async (args) => {
-          const report = await probeUrl(String(args.url ?? ''))
-          return { content: [{ type: 'text', text: JSON.stringify(report, null, 1) }] }
-        },
-      ),
-    ],
+    tools: displayTools(emitBlade, options),
   })
 }
 
+const said = (text) => ({ content: [{ type: 'text', text }] })
 const refuse = (text) => ({ isError: true, content: [{ type: 'text', text }] })

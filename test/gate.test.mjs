@@ -79,6 +79,29 @@ test("AYRA's display is always allowed; removed servers get no free pass", () =>
   assert.equal(readOnly.decide('mcp__ayra_eyes__look'), false)
 })
 
+test("AYRA's own tools are allowed by name, and only by name", () => {
+  const named = [
+    'mcp__ayra__display',
+    'mcp__ayra__blade',
+    'mcp__ayra__probe_url',
+    'mcp__ayra__show_data',
+    'mcp__ayra_research__research',
+    'mcp__ayra_research__recent_research',
+  ]
+  for (const gate of [readOnly, writes]) {
+    for (const tool of named) assert.equal(gate.decide(tool), true, tool)
+  }
+  assert.deepEqual(readOnly.review('mcp__ayra__show_data', { title: 'GOLD', headline: { label: 'a', value: '1' } }), { verdict: 'allow' })
+  // A tool on those servers that is not on the list gets no free pass: it falls
+  // to the default rules like any other server's (with writes off, refused).
+  for (const tool of ['mcp__ayra__run_script', 'mcp__ayra__ui_theme', 'mcp__ayra_research__delete_reports']) {
+    assert.equal(readOnly.decide(tool), false, tool)
+  }
+  // The default rules still apply in full: a read verb reads, an effectful one needs writes.
+  assert.equal(readOnly.decide('mcp__ayra_research__list_reports'), true)
+  assert.equal(writes.decide('mcp__ayra_research__delete_reports'), true)
+})
+
 test('the research agent only reads, so it is allowed with writes off', () => {
   for (const gate of [readOnly, writes]) {
     assert.equal(gate.decide('mcp__ayra_research__research'), true)
