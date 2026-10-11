@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  cleanPlan, createDeepResearch, deepProgressBlade, deepReply, deepResultBlades, deepTools, itemScore, recencyScore,
+  REDDIT_BLOCKED, cleanPlan, createDeepResearch, deepProgressBlade, deepReply, deepResultBlades, deepTools, itemScore, recencyScore,
 } from '../bridge/deep.mjs'
 import { researchServer } from '../bridge/research.mjs'
 import { cleanLinks, withDefaults } from '../src/lib/research.ts'
@@ -281,7 +281,7 @@ after(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true })
 })
 
-function rig({ over, platforms, pages, limits } = {}) {
+function rig({ over, platforms, pages, limits, blocked } = {}) {
   const fake = fakeAgent({ over })
   const P = fakePlatforms(platforms)
   const web = fakeFetch(pages)
@@ -298,6 +298,7 @@ function rig({ over, platforms, pages, limits } = {}) {
     now: () => NOW,
     limits,
     dir,
+    ...(blocked ? { blocked } : {}),
   })
   return { deep, fake, P, web, logged, dir }
 }
@@ -351,7 +352,8 @@ test('a full run: reasoning, one lane per platform, ranked results and a cited a
     assert.deepEqual(c.tools, ['WebSearch'])
     assert.equal(c.model, 'worker-model')
   }
-  assert.match(of('search').find((c) => /Platform: Reddit/.test(c.prompt)).prompt, /^1\. site:reddit\.com best node job queue/m)
+  // The site is kept by WebSearch's allowed_domains, not "site:" in the query.
+  assert.match(of('search').find((c) => /Platform: Reddit/.test(c.prompt)).prompt, /allowed_domains set to \["reddit\.com"\]:\n1\. best node job queue/)
   assert.match(of('search').find((c) => /Platform: Web/.test(c.prompt)).prompt, /^1\. node job queue comparison 2026$/m)
   for (const c of [...of('report'), ...of('rank'), ...of('final')]) assert.ok(!c.tools?.length, `${c.kind} has no tools`)
   assert.equal(of('rank')[0].model, 'main-model')
@@ -485,6 +487,15 @@ test('a failing lane is marked and the run goes on; a used-up free limit says so
   assert.equal(part(state, 'reddit').state, 'done')
   assert.ok(state.ranked.every((x) => x.platform !== 'github' && x.platform !== 'stackoverflow'))
   assert.ok(state.ranked.length > 0)
+})
+
+test('a platform the real search cannot reach (Reddit) says why on the board, and spends no search', async () => {
+  const { deep, fake } = rig({ blocked: { reddit: REDDIT_BLOCKED } })
+  const state = await deep.run(QUESTION)
+  assert.equal(state.status, 'done', state.error)
+  assert.equal(part(state, 'reddit').state, 'fail')
+  assert.equal(part(state, 'reddit').error, REDDIT_BLOCKED)
+  assert.ok(!fake.calls.some((c) => c.kind === 'search' && /Platform: Reddit/.test(c.prompt)))
 })
 
 test('when no platform can be searched, the run fails with a clear sentence and no rank or final call', async () => {

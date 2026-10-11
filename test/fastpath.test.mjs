@@ -79,9 +79,11 @@ test('an app that is not installed opens its site, else falls to the brain', asy
   assert.equal(await runFast(parseFast('open notepad'), hands({ openApp: missing })), null)
 })
 
-test('nothing to pause → the brain explains', async () => {
+test('nothing to pause → she says so; nothing to play → the brain (it can open a player)', async () => {
   const h = hands({ media: { command: async () => false } })
-  assert.equal(await runFast(parseFast('pause the music'), h), null)
+  assert.equal((await runFast(parseFast('pause the music'), h)).said, 'Nothing is playing right now.')
+  assert.equal((await runFast(parseFast('next song'), h)).said, 'Nothing is playing right now.')
+  assert.equal(await runFast(parseFast('play music'), h), null)
 })
 
 test('the note tells the brain what was done', () => {

@@ -44,8 +44,13 @@ export const LAG_MAX_MS = 1600
 export const SPEAKERS_ON = 0.02
 /** …for at least this share of the burst's speech. */
 export const ACTIVE_SHARE = 0.5
-/** …and the two curves must agree at least this well (Pearson, -1..1). */
-export const MIN_CORR = 0.55
+/**
+ * …and the two curves must agree at least this well (Pearson, -1..1).
+ * Measured live 2026-10-12 (real microphone, laptop speakers): three clips of
+ * "Hey AYRA" played by a laptop app, another Chrome and the owner's own
+ * recording matched at 0.70, 0.58 and 0.80 — 0.55 left too little room.
+ */
+export const MIN_CORR = 0.5
 /** A 20 ms step is speech when it is within this many dB of the burst's loudest. */
 const SPEECH_DB = 25
 /** …and above this level at all (RMS, 0..1): a burst of near-silence is not judged. */

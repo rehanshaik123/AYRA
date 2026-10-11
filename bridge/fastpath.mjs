@@ -179,8 +179,13 @@ export async function runFast(intent, hands) {
   try {
     if (intent.kind === 'media') {
       const done = await hands.media.command(intent.action)
-      if (!done) return null // nothing playing to pause, no player to skip: the brain explains
-      return { said: intent.said, note: `the music: ${intent.action}` }
+      if (done) return { said: intent.said, note: `the music: ${intent.action}` }
+      // Nothing playing to pause or skip: say so. Handed to the brain, it once
+      // reached for a PowerShell media key that waited two minutes on an
+      // Approve nobody was there to give (2026-10-12). "Play" with no player
+      // open does go to the brain, which can open one.
+      if (intent.action === 'play') return null
+      return { said: 'Nothing is playing right now.', note: `the music: ${intent.action} — nothing was playing` }
     }
     if (intent.kind === 'site') {
       await hands.openSite(intent.url)
