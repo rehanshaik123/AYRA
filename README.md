@@ -32,9 +32,10 @@ ID. In the HUD: **Space** to talk, **Space** again to send, **Space Space** or *
 ## Hands-free
 
 Press **W** in her window (or **Ctrl+Alt+W** / the tray menu from any app) and just say "AYRA" —
-from any app, her window needn't be in front. An offline wake-word spotter runs on the laptop
-(`npm run models` downloads it once), so nothing is sent anywhere until she hears her name. After
-answering she listens about 15 seconds for a follow-up. **Space** works as before.
+from any app, her window needn't be in front. Only short bursts of speech that start after a quiet
+moment are checked for her name (never the room, never while music plays), at most 120 an hour.
+After answering she listens about 15 seconds for a follow-up. **Ctrl+Alt+Space** is Space from any
+app. While she listens, whatever is playing (Spotify, a video) pauses, and resumes after.
 
 ## Research agent
 

@@ -348,22 +348,26 @@ sources card per turn (sources.mjs).
 ## Hybrid hearing · branch `research-agent` (2026-10-11)
 
 **Goal (the owner):** keep Space (it works well), and add a way to talk while working in other
-apps: say "AYRA" from anywhere, she listens, answers and waits for the next command.
+apps: say "AYRA" from anywhere, she listens, answers and waits for the next command — and she must
+not answer Spotify or videos playing out loud.
 
-**Architecture:** while hands-free is on, the face streams its microphone to the bridge's `/wake`
-socket (loopback only) and an offline keyword spotter (sherpa-onnx, Apache-2.0, 5 MB model from
-`npm run models`) listens for her name — nothing goes to ElevenLabs until it hears it. The 2 s
-before the wake go to Scribe with the turn; the words must be spoken *to* her (`wake.ts`
-`addressed`), which rejects look-alikes ("Ira went to the market"). After an answer she listens
-15 s for a follow-up without her name. W, Ctrl+Alt+W or the tray menu switch it (bridge `/hearing`,
-tray-only). Chrome runs without background throttling so her window keeps time behind other apps.
+**Architecture:** while hands-free is on, the face's speech detector sends only a short burst (≤ 2.5 s)
+of speech that began after a quiet moment, and nothing while the room stays busy (music, video), to
+the bridge's `/wake` socket; ElevenLabs Scribe, with her name as a key term, says what was said, and
+`wake.ts` decides if it was her name spoken to her (capped at 120 checks an hour). Then the turn
+starts from where that burst began. After an answer she listens 15 s for a follow-up. Whatever is
+playing pauses while she listens and resumes after (Windows media controls, `media.mjs`). W,
+Ctrl+Alt+W or the tray menu switch hands-free; Ctrl+Alt+Space is Space from any app (tray `/talk`).
+First tried fully offline (sherpa-onnx keyword spotting, a 20M streaming recogniser, Whisper tiny):
+all caught test voices but none caught the owner's own "Hey Aira" — dropped.
 
-- [x] H.1 Spotter: `bridge/wake.mjs`, `/wake` socket, tuned spellings in identity.json (`wake.spotter`).
-- [x] H.2 Face: worklet streaming + `armFrom`, `listen.ts`, `voice.ts` handsFree/wake, App follow-up.
-- [x] H.3 Switches: W, the tray menu and Ctrl+Alt+W (AYRA.exe → `/hearing`), the HUD status line.
-- [x] H.4 Tests + live check with a fake microphone: chatter ignored, "Ira…" rejected, "Hey AYRA,
-      what time is it?" answered 1.0 s after it was said, 15 s follow-up, back to standby.
-- [ ] H.5 🧑 The owner's own voice, in the room, from another app (accent, distance, a video playing).
+- [x] H.1 Name check: `bridge/wake.mjs` (bursts → Scribe + key term, hourly cap), worklet bursts and busy-room gate.
+- [x] H.2 Face: `listen.ts`, `voice.ts` handsFree / wake from the burst, App follow-up, name-only = just listen.
+- [x] H.3 Switches: W, the tray menu and Ctrl+Alt+W (`/hearing`), Ctrl+Alt+Space (`/talk`), the HUD status line.
+- [x] H.4 Music pauses while she listens (`media.mjs` / `media.ps1`).
+- [x] H.5 The owner's own recorded "Hey Aira" (fake microphone, real face and bridge): woke on the first
+      one, listened for the command, back to standby; Spotify's lyrics come back as "[background music]".
+- [ ] H.6 🧑 Live, in the room: say "AYRA" from another app with and without music playing.
 
 ## Phase 7 — Apps, one at a time · branch `phase-7-apps`
 
