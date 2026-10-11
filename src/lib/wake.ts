@@ -69,6 +69,12 @@ export function addressed(text: string): boolean {
   return !NARRATIVE.test(afterWake(text))
 }
 
+/** Nothing but her name, however often: "AYRA. AYRA.", "Hey Aira, hey Aira". */
+export function onlyName(text: string): boolean {
+  const rest = text.replace(new RegExp(WAKE.source, 'gi'), '').replace(/[\s,.!?:;-]+/g, '')
+  return rest.length === 0 && WAKE.test(text)
+}
+
 /** Everything after the wake phrase, which is usually the actual command. */
 export function afterWake(text: string): string {
   const m = WAKE.exec(text)

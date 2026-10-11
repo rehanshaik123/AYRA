@@ -20,16 +20,17 @@
  *   { type: 'audio', pcm }         Int16Array, 16 kHz mono
  *   { type: 'end', ms }            quiet for SILENCE_MS — the segment is over
  *   { type: 'level', v, energy, floor, threshold, speaking }  ~25 times a second
- *   { type: 'stream', pcm }        hands-free only: every SEND_MS of the room, for
- *                                  the offline wake-word spotter (bridge/wake.mjs)
+ *   { type: 'candidate', pcm }     hands-free only: a short burst of speech that began
+ *                                  after a quiet moment — is it her name? (bridge/wake.mjs)
  * Messages from the page: { guard: boolean } · { armed: boolean } — push-to-talk:
  * unarmed, nothing is ever sent (the owner, 2026-10-06: listen only when I press
  * Space) · { finish: true } — the owner pressed Space again: end the segment now,
  * however loud the room (a video playing next door never goes quiet) ·
- * { stream: boolean } — hands-free (2026-10-11): send the room to the spotter,
- * which never leaves the laptop · { armFrom: ms } — the spotter heard her name:
- * start a segment now from the last `ms` of audio, so "AYRA, open Notepad" said
- * in one breath reaches the transcriber whole.
+ * { stream: boolean } — hands-free (2026-10-11): listen for bursts that might be
+ * her name — never the room itself, and nothing while sound hardly stops (music,
+ * a video) · { armFrom: ms } / { armFromCandidate: true } — her name was heard:
+ * start a segment now from the last `ms` of audio, or from where that burst
+ * began, so "AYRA, open Notepad" said in one breath reaches the transcriber whole.
  *
  * ListenCore holds all of it and knows nothing about Web Audio, so it is tested
  * in Node (test/listen-worklet.test.mjs).
@@ -58,8 +59,24 @@ const PRE_ROLL_MS = 400
 const SEND_MS = 100
 /** How often the level goes to the page. */
 const LEVEL_MS = 40
-/** Hands-free: audio kept for `armFrom` — the name is spotted a moment after it is said. */
-const HISTORY_MS = 3000
+/** Hands-free: audio kept for `armFrom` — the name is checked a few seconds after it is said. */
+const HISTORY_MS = 8000
+/** The longest burst sent for a name check (bridge/wake.mjs CLIP_MS). */
+const CANDIDATE_MS = 2500
+/** A burst counts only after this much quiet: a name is said into a pause, not mid-song. */
+const QUIET_BEFORE_MS = 400
+/**
+ * The burst is over after this much quiet. Not shorter: people pause after
+ * "hey" — at 400 ms the owner's "Hey… Aira" was cut after "Hey" and checked as
+ * "[birds chirping]" (2026-10-11).
+ */
+const CANDIDATE_GAP_MS = 750
+/**
+ * How busy the room has been lately (share of loud moments over ~ACTIVITY_MS).
+ * Above BUSY it is music, a video or a call, and nothing is sent at all.
+ */
+const ACTIVITY_MS = 8000
+const BUSY = 0.45
 /** The floor adapts slowly upward (a fan spinning up) and quickly downward (a door closing). */
 const FLOOR_UP = 0.0008
 const FLOOR_DOWN = 0.02
@@ -88,10 +105,16 @@ export class ListenCore {
     this.preRoll = []
     this.pending = []
     this.events = []
-    /** Hands-free: the room streams to the spotter, and the last HISTORY_MS is kept. */
+    /** Hands-free: bursts go for a name check, and the last HISTORY_MS is kept. */
     this.stream = false
     this.history = []
-    this.streamed = []
+    this.activity = 0
+    this.heardAt = -Infinity
+    this.candAt = -1
+    this.cand = null
+    this.candStart = -1
+    this.candHold = false
+    this.candOk = false
   }
 
   /** Feed one block of microphone samples; returns what happened. */
@@ -131,15 +154,7 @@ export class ListenCore {
     this.t += STEP_MS
     const t = this.t
 
-    if (this.stream) {
-      this.history.push(pcm)
-      if (this.history.length > HISTORY_MS / STEP_MS) this.history.shift()
-      this.streamed.push(pcm)
-      if (this.streamed.length * STEP_MS >= SEND_MS) {
-        this.events.push({ type: 'stream', pcm: join(this.streamed) })
-        this.streamed = []
-      }
-    }
+    if (this.stream) this.listenForName(pcm, energy, t)
 
     // Adapt the floor only when this is certainly not speech.
     if (!this.speaking && this.armedAt < 0) {
@@ -219,13 +234,68 @@ export class ListenCore {
     return this.events
   }
 
-  /** Hands-free on or off: stream the room to the spotter, keeping the last few seconds. */
+  /**
+   * Hands-free, one detector step: keep the recent audio, and pick out a burst
+   * that might be her name — speech that began after a quiet moment, in a room
+   * that isn't busy — to send for a check. One burst per stretch of speech.
+   */
+  listenForName(pcm, energy, t) {
+    this.history.push(pcm)
+    if (this.history.length > HISTORY_MS / STEP_MS) this.history.shift()
+    // Measured against the floor before the guard boost: her own voice is
+    // kept out by the page (it ignores names while she speaks), not here.
+    const loud = energy > this.floor * TRIGGER_OVER_FLOOR
+    this.activity += ((loud ? 1 : 0) - this.activity) * (STEP_MS / ACTIVITY_MS)
+    const quietFor = t - this.heardAt
+    if (loud) this.heardAt = t
+    // Listening already, or she is speaking (her own voice is no wake word).
+    if (this.armed || this.guard) {
+      this.cand = null
+      this.candAt = -1
+      return
+    }
+    if (this.cand) {
+      this.cand.push(pcm)
+      if (this.cand.length * STEP_MS >= CANDIDATE_MS || t - this.heardAt >= CANDIDATE_GAP_MS) {
+        if (this.candOk) this.events.push({ type: 'candidate', pcm: join(this.cand) })
+        this.cand = null
+        this.candHold = true
+      }
+      return
+    }
+    if (this.candHold) {
+      // Wait for the stretch of speech to end before the next burst.
+      if (quietFor >= CANDIDATE_GAP_MS && !loud) this.candHold = false
+      return
+    }
+    if (!loud) {
+      this.candAt = -1
+      return
+    }
+    if (this.candAt < 0) {
+      this.candAt = t
+      this.candOk = quietFor >= QUIET_BEFORE_MS && this.activity < BUSY
+    } else if (t - this.candAt >= START_MS) {
+      const n = Math.min(this.history.length, Math.round((t - this.candAt + PRE_ROLL_MS) / STEP_MS))
+      this.cand = this.history.slice(-n)
+      this.candStart = t - n * STEP_MS
+    }
+  }
+
+  /** Hands-free on or off: bursts go for a name check; the last few seconds are kept. */
   setStream(on) {
     this.stream = Boolean(on)
-    if (!this.stream) {
-      this.history = []
-      this.streamed = []
-    }
+    this.history = []
+    this.cand = null
+    this.candAt = -1
+    this.candHold = false
+    this.activity = 0
+  }
+
+  /** Her name was heard in the last burst: listen from where that burst began. */
+  armFromCandidate() {
+    const ms = this.candStart >= 0 ? this.t - this.candStart + STEP_MS : PRE_ROLL_MS
+    return this.armFrom(ms)
   }
 
   /**
@@ -302,8 +372,9 @@ if (typeof registerProcessor === 'function' && typeof AudioWorkletProcessor === 
           }
         }
         if (e.data && 'stream' in e.data) this.core.setStream(e.data.stream)
-        if (e.data && typeof e.data.armFrom === 'number') {
-          for (const ev of this.core.armFrom(e.data.armFrom)) {
+        if (e.data && (typeof e.data.armFrom === 'number' || e.data.armFromCandidate)) {
+          const events = e.data.armFromCandidate ? this.core.armFromCandidate() : this.core.armFrom(e.data.armFrom)
+          for (const ev of events) {
             if (ev.type === 'audio') this.port.postMessage(ev, [ev.pcm.buffer])
             else this.port.postMessage(ev)
           }
@@ -315,7 +386,7 @@ if (typeof registerProcessor === 'function' && typeof AudioWorkletProcessor === 
       const channel = inputs[0]?.[0]
       if (channel) {
         for (const ev of this.core.push(channel)) {
-          if (ev.type === 'audio' || ev.type === 'stream') this.port.postMessage(ev, [ev.pcm.buffer])
+          if (ev.type === 'audio' || ev.type === 'candidate') this.port.postMessage(ev, [ev.pcm.buffer])
           else this.port.postMessage(ev)
         }
       }

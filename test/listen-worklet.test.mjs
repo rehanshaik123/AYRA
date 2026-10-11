@@ -124,38 +124,60 @@ test('finish ends the segment at once however loud the room, and says when nothi
   assert.equal(idle[0].empty, true)
 })
 
-test('hands-free: the room streams to the spotter every 100 ms, but nothing is heard as speech while unarmed', () => {
+test('hands-free: a word said after quiet goes for a name check once; the room itself is never sent', () => {
   const core = new ListenCore(RATE)
   core.arm(false)
   core.setStream(true)
-  const events = feed(core, 1000, voice(0.2))
-  const streamed = events.filter((e) => e.type === 'stream')
-  assert.ok(streamed.length >= 9 && streamed.length <= 10, `${streamed.length} stream chunks`)
-  assert.equal(streamed[0].pcm.length, OUT_RATE / 10)
-  assert.deepEqual(kinds(events).filter((k) => k !== 'stream'), [])
-  assert.equal(samples(events), 0)
+  feed(core, 2000, () => noise(0.002)())
+  const events = [...feed(core, 800, voice(0.2)), ...feed(core, 1500, () => noise(0.002)())]
+  const bursts = events.filter((e) => e.type === 'candidate')
+  assert.equal(bursts.length, 1)
+  assert.ok(bursts[0].pcm.length >= OUT_RATE * 0.8 && bursts[0].pcm.length <= OUT_RATE * 2.5, String(bursts[0].pcm.length))
+  assert.equal(events.filter((e) => e.type === 'audio').length, 0)
 })
 
-test('her name heard: a segment starts at once from the audio just before it, then ends on silence', () => {
+test('hands-free: a long stretch of speech sends one burst, at most 2.5 s', () => {
   const core = new ListenCore(RATE)
   core.arm(false)
   core.setStream(true)
-  feed(core, 2000, voice(0.2)) // "AYRA, open Notepad" — said before the spotter knew
-  const woken = core.armFrom(1500)
+  feed(core, 2000, () => noise(0.002)())
+  const bursts = feed(core, 6000, voice(0.2)).filter((e) => e.type === 'candidate')
+  assert.equal(bursts.length, 1)
+  assert.equal(bursts[0].pcm.length, (OUT_RATE * 2500) / 1000)
+})
+
+test('hands-free: in a busy room (music, a video) nothing goes for a check', () => {
+  const core = new ListenCore(RATE)
+  core.arm(false)
+  core.setStream(true)
+  feed(core, 2000, () => noise(0.002)())
+  // Music: loud, with short gaps, for twelve seconds.
+  for (let i = 0; i < 12; i++) {
+    feed(core, 850, voice(0.2))
+    feed(core, 150, () => noise(0.002)())
+  }
+  const after = [...feed(core, 500, () => noise(0.002)()), ...feed(core, 800, voice(0.2))]
+  assert.equal(after.filter((e) => e.type === 'candidate').length, 0)
+})
+
+test('her name heard: listening starts where the burst began', () => {
+  const core = new ListenCore(RATE)
+  core.arm(false)
+  core.setStream(true)
+  feed(core, 2000, () => noise(0.002)())
+  feed(core, 800, voice(0.2))
+  feed(core, 1500, () => noise(0.002)())
+  const woken = core.armFromCandidate()
   assert.deepEqual(woken.map((e) => e.type), ['start', 'audio'])
-  assert.equal(woken[0].woken, true)
-  assert.equal(woken[1].pcm.length, (OUT_RATE * 1500) / 1000)
-  const rest = feed(core, 1500, () => noise(0.002)())
-  assert.ok(kinds(rest).includes('end'))
+  const secs = woken[1].pcm.length / OUT_RATE
+  assert.ok(secs >= 2.2 && secs <= 3.2, String(secs))
 })
 
-test('hands-free off forgets the room; waking with nothing kept starts an empty segment', () => {
+test('while she speaks, nothing goes for a check', () => {
   const core = new ListenCore(RATE)
   core.arm(false)
   core.setStream(true)
-  feed(core, 500, voice(0.2))
-  core.setStream(false)
-  assert.equal(feed(core, 300, voice(0.2)).filter((e) => e.type === 'stream').length, 0)
-  const woken = core.armFrom(1500)
-  assert.deepEqual(woken.map((e) => e.type), ['start'])
+  core.guard = true
+  feed(core, 2000, () => noise(0.002)())
+  assert.equal([...feed(core, 800, voice(0.2)), ...feed(core, 1500, () => noise(0.002)())].filter((e) => e.type === 'candidate').length, 0)
 })

@@ -10,10 +10,11 @@ import { BRIDGE_WS_URL } from '../config'
  * the owner is still talking; the finished text about a third of a second
  * after they stop.
  *
- * Hands-free (2026-10-11) adds a second, local path: while it is on, the
- * worklet streams the whole room to the bridge's `/wake` socket, where an
- * offline spotter listens for her name (bridge/wake.mjs). That audio never
- * leaves the laptop; only after the name does a turn go to ElevenLabs.
+ * Hands-free (2026-10-11) adds a second path: while it is on, the worklet
+ * sends short bursts of speech that began after a quiet moment to the bridge's
+ * `/wake` socket, which has ElevenLabs say what was said (bridge/wake.mjs).
+ * The room itself is never streamed, and nothing is sent while music or a
+ * video keeps the room busy.
  */
 
 export type ListenHandlers = {
@@ -31,9 +32,9 @@ export type ListenHandlers = {
   /** Live hearing cannot work: `code` is ElevenLabs' (quota_exceeded, auth_error…)
    *  or 'unavailable' / 'no_key' / 'capture'. */
   onError: (code: string, message: string) => void
-  /** Hands-free: the spotter heard her name. */
-  onWake?: () => void
-  /** Hands-free cannot work: 'no_model' (run `npm run models`), 'no_engine', 'unavailable'. */
+  /** Hands-free: what was said in a burst — is it her name? (wake.ts decides) */
+  onHeard?: (text: string) => void
+  /** Hands-free cannot work, or is resting: 'no_key', 'limit' (the hourly cap), 'unavailable'. */
   onWakeError?: (code: string, message: string) => void
 }
 
@@ -47,10 +48,10 @@ export type Listener = {
   arm: (on: boolean) => void
   /** End the segment now — the owner pressed Space to send. */
   finish: () => void
-  /** Hands-free: stream the room to the offline spotter (true) or stop (false). */
+  /** Hands-free: send bursts of speech for a name check (true) or stop (false). */
   stream: (on: boolean) => void
-  /** Her name was heard: start a segment from the last `ms` of audio. */
-  armFrom: (ms: number) => void
+  /** Her name was heard: start a segment from where that burst began. */
+  armFromCandidate: () => void
   live: () => boolean
   meter: () => { energy: number; floor: number; threshold: number; speaking: boolean }
 }
@@ -148,10 +149,10 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
       } catch {
         return
       }
-      if (m.type === 'wake') h.onWake?.()
+      if (m.type === 'heard') h.onHeard?.((m as { text?: string }).text ?? '')
       else if (m.type === 'error') {
-        // A missing model or engine won't fix itself by re-dialling.
-        refused = true
+        // No key won't fix itself by re-dialling; the hourly cap is only a pause.
+        if (m.code !== 'limit') refused = true
         h.onWakeError?.(m.code ?? 'error', m.message ?? '')
       }
     }
@@ -174,9 +175,9 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
 
   node.port.onmessage = (e: MessageEvent) => {
     const ev = e.data as { type: string; pcm?: Int16Array; v?: number } & typeof meter
-    if (ev.type === 'stream' && ev.pcm) {
-      // The room, for the spotter only. Dropped while the socket is down: a
-      // name said during a reconnect is lost, but nothing piles up.
+    if (ev.type === 'candidate' && ev.pcm) {
+      // A burst for the name check. Dropped while the socket is down: a name
+      // said during a reconnect is lost, but nothing piles up.
       if (wakeSocket?.readyState === WebSocket.OPEN) wakeSocket.send(ev.pcm.buffer as ArrayBuffer)
       return
     }
@@ -225,7 +226,7 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
         dialWake()
       } else closeWake()
     },
-    armFrom: (ms) => node.port.postMessage({ armFrom: ms }),
+    armFromCandidate: () => node.port.postMessage({ armFromCandidate: true }),
     live: () => !stopped && ctx.state !== 'closed',
     meter: () => meter,
   }

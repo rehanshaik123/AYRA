@@ -87,7 +87,7 @@ namespace Ayra
   // ayra.ini, written by scripts/shortcuts.mjs: key=value, one per line.
   class Config
   {
-    public string Exe, Icon, Root, Node, Chrome, FaceUrl, HealthUrl, HearingUrl, Title, Hotkey, HandsFreeHotkey;
+    public string Exe, Icon, Root, Node, Chrome, FaceUrl, HealthUrl, HearingUrl, TalkUrl, Title, Hotkey, HandsFreeHotkey, TalkHotkey;
     public List<string> ChromeArgs = new List<string>();
 
     public static Config Load()
@@ -101,6 +101,7 @@ namespace Ayra
       c.Icon = Path.Combine(dir, "ayra.ico");
       c.Hotkey = "ctrl+alt+a";
       c.HandsFreeHotkey = "ctrl+alt+w";
+      c.TalkHotkey = "ctrl+alt+space";
       foreach (var raw in File.ReadAllLines(path, Encoding.UTF8))
       {
         var line = raw.Trim();
@@ -119,12 +120,14 @@ namespace Ayra
           case "title": c.Title = value; break;
           case "hotkey": if (value.Length > 0) c.Hotkey = value; break;
           case "handsfree": if (value.Length > 0) c.HandsFreeHotkey = value; break;
+          case "talk": if (value.Length > 0) c.TalkHotkey = value; break;
         }
       }
       if (c.Root == null || c.Node == null || c.FaceUrl == null || c.HealthUrl == null || c.Title == null)
         throw new Exception("ayra.ini is incomplete. Run `npm run shortcuts` in the AYRA folder again.");
       // Push-to-talk or hands-free (bridge/server.mjs /hearing), beside /health.
       c.HearingUrl = c.HealthUrl.Substring(0, c.HealthUrl.LastIndexOf('/')) + "/hearing";
+      c.TalkUrl = c.HealthUrl.Substring(0, c.HealthUrl.LastIndexOf('/')) + "/talk";
       return c;
     }
   }
@@ -138,6 +141,8 @@ namespace Ayra
     readonly HotkeyWindow hotkey;
     // Hands-free (say her name) on or off, from any app.
     readonly HotkeyWindow handsFreeKey;
+    // Talk from any app without bringing her window forward: what Space does in it.
+    readonly HotkeyWindow talkKey;
     readonly ToolStripMenuItem handsFreeItem;
     int switching;
     readonly SynchronizationContext ui;
@@ -159,6 +164,7 @@ namespace Ayra
 
       menu.Items.Add("Open AYRA", null, delegate { Open(false); });
       menu.Items.Add("Talk to AYRA   " + Pretty(config.Hotkey), null, delegate { Open(true); });
+      menu.Items.Add("Talk from any app   " + Pretty(config.TalkHotkey), null, delegate { Talk(); });
       handsFreeItem = new ToolStripMenuItem("Hands-free: say AYRA   " + Pretty(config.HandsFreeHotkey), null, delegate { SwitchHearing(); });
       menu.Items.Add(handsFreeItem);
       if (config.Chrome != null) menu.Items.Add("Open Chrome (AYRA)", null, delegate { window.OpenChrome(); });
@@ -181,6 +187,9 @@ namespace Ayra
       else if (!hotkey.Registered)
         Notify(Pretty(config.Hotkey) + " is already used by another app, so AYRA's hotkey is off. Set AYRA_HOTKEY and run npm run shortcuts again.");
       handsFreeKey = new HotkeyWindow(config.HandsFreeHotkey, delegate { SwitchHearing(); });
+      talkKey = new HotkeyWindow(config.TalkHotkey, delegate { Talk(); });
+      if (talkKey.Valid && !talkKey.Registered)
+        Notify(Pretty(config.TalkHotkey) + " is already used by another app, so the talk hotkey is off. Set AYRA_TALK_HOTKEY and run npm run shortcuts again.");
       if (handsFreeKey.Valid && !handsFreeKey.Registered)
         Notify(Pretty(config.HandsFreeHotkey) + " is already used by another app, so the hands-free hotkey is off. Set AYRA_HANDSFREE_HOTKEY and run npm run shortcuts again.");
 
@@ -205,6 +214,22 @@ namespace Ayra
         try { window.Show(talk); }
         catch (Exception e) { Notify(e.Message); }
         finally { Monitor.Exit(opening); }
+      });
+    }
+
+    // Space, from any app: she listens (or sends what she heard) and answers out
+    // loud, without her window coming forward. Opened first when it is closed.
+    void Talk()
+    {
+      ThreadPool.QueueUserWorkItem(delegate
+      {
+        if (Hearing.Talk(config) == 409)
+        {
+          int faces = 0;
+          Open(false);
+          for (int i = 0; i < 40 && faces == 0; i++) { Thread.Sleep(500); Hearing.Get(config, out faces); }
+          if (faces > 0) Hearing.Talk(config);
+        }
       });
     }
 
@@ -265,6 +290,7 @@ namespace Ayra
       watch.Dispose();
       hotkey.Dispose();
       handsFreeKey.Dispose();
+      talkKey.Dispose();
       icon.Visible = false;
       bridge.Stop();
       icon.Dispose();
@@ -673,6 +699,27 @@ namespace Ayra
         using (var r = new StreamReader(res.GetResponseStream())) return Mode(r.ReadToEnd());
       }
       catch { return null; }
+    }
+
+    // POST /talk: the HTTP status (409: her window isn't open), or 0 when unreachable.
+    public static int Talk(Config c)
+    {
+      try
+      {
+        var req = (HttpWebRequest)WebRequest.Create(c.TalkUrl);
+        req.Method = "POST";
+        req.Timeout = 3000;
+        req.Proxy = null;
+        req.ContentLength = 0;
+        req.Headers["x-ayra"] = "tray";
+        using (var res = (HttpWebResponse)req.GetResponse()) return (int)res.StatusCode;
+      }
+      catch (WebException e)
+      {
+        var res = e.Response as HttpWebResponse;
+        return res == null ? 0 : (int)res.StatusCode;
+      }
+      catch { return 0; }
     }
 
     static string Mode(string body)

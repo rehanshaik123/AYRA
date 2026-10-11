@@ -52,7 +52,7 @@ export type VoiceHandlers = {
   onUtterance: (text: string) => void
   /** The recogniser is unusable. Distinct from the user saying nothing. */
   onError: (message: string) => void
-  /** Hands-free: the offline spotter heard her name (bridge/wake.mjs). */
+  /** Hands-free: her name was heard (a burst checked by bridge/wake.mjs, matched by wake.ts). */
   onWakeWord?: () => void
   /** Hands-free stopped working (no model, no engine, bridge gone). */
   onHandsFreeError?: (message: string) => void
@@ -91,13 +91,6 @@ const RELEASE_MS = 30000
 const SEND_WAIT_MS = 3000
 /** The browser recogniser's last words trail the speaker by about this much. */
 const BROWSER_SEND_MS = 700
-/**
- * How much audio from before the wake goes to the transcriber. The spotter
- * reports the name a moment after it is said, and the command may already be
- * under way ("AYRA, open Notepad" in one breath); the words that come back must
- * contain the name, which is the second check against look-alikes.
- */
-const WAKE_PREROLL_MS = 2000
 
 // ---------------------------------------------------------------------------
 // Endpointing
@@ -606,22 +599,29 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
         if (h.mode() !== 'command' || worded || assemble.held()) return
         h.onPartial(v > 0.04 ? '…' : '')
       },
-      // Her own voice saying her name ("I'm AYRA") must not wake her.
-      onWake: () => {
-        if (speakingNow()) return
+      // A burst came back as words: her name (wake.ts), and not her own voice
+      // saying it ("I'm AYRA")?
+      onHeard: (text) => {
+        diag.heard = text
+        diag.heardAt = Date.now()
+        if (speakingNow() || !WAKE.test(text)) {
+          drop(`hands-free heard "${text.slice(-40)}" — not her name`)
+          return
+        }
         diag.wakes++
         h.onWakeWord?.()
       },
       onWakeError: (code, message) => {
         diag.lastError = `wake ${code}: ${message}`
+        // The hourly cap only rests the name check; hands-free stays on.
+        if (code === 'limit') {
+          h.onError(`Hands-free is resting: ${message}.`)
+          return
+        }
         hands = false
         listener?.stream(false)
         if (!armed && !releaseTimer) releaseTimer = setTimeout(release, RELEASE_MS)
-        h.onHandsFreeError?.(
-          code === 'no_model'
-            ? 'Hands-free needs its wake-word model: run "npm run models" in the AYRA folder, then switch it on again.'
-            : `Hands-free stopped: ${message || code}.`,
-        )
+        h.onHandsFreeError?.(`Hands-free stopped: ${message || code}.`)
       },
       onError: (code, message) => {
         diag.restarts++
@@ -736,7 +736,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
       if (releaseTimer) clearTimeout(releaseTimer)
       releaseTimer = null
       listener.warm()
-      listener.armFrom(WAKE_PREROLL_MS)
+      listener.armFromCandidate()
     },
   }
 }

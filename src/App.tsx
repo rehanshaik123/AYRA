@@ -21,12 +21,14 @@ import {
   haltAll,
   watchConnection,
   watchHearing,
+  watchTalk,
+  media,
   reportHearing,
   bridgeServers,
 } from './lib/bridge'
 import { inputLevel } from './lib/listen'
 import { probeCapabilities } from './lib/capabilities'
-import { BARE_NAME, LEADING_NAME, addressed, afterWake } from './lib/wake'
+import { BARE_NAME, LEADING_NAME, addressed, afterWake, onlyName } from './lib/wake'
 import { withHonorific } from './identity'
 
 /**
@@ -151,6 +153,31 @@ export default function App() {
   const wokeByName = useRef(false)
   /** This listening window is the hands-free follow-up after an answer. */
   const followUp = useRef(false)
+  /**
+   * Music paused for listening (the owner, 2026-10-11: she was answering
+   * Spotify's lyrics). Resumed only once she is really back on standby — a
+   * follow-up window right after an answer keeps it paused.
+   */
+  const mediaPaused = useRef(false)
+  const mediaTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pauseMedia = () => {
+    if (mediaTimer.current) clearTimeout(mediaTimer.current)
+    mediaTimer.current = null
+    if (mediaPaused.current) return
+    mediaPaused.current = true
+    media('pause')
+  }
+  const resumeMediaSoon = () => {
+    if (!mediaPaused.current || mediaTimer.current) return
+    mediaTimer.current = setTimeout(() => {
+      mediaTimer.current = null
+      if (store.getState().phase !== 'dormant') return
+      mediaPaused.current = false
+      media('resume')
+    }, 800)
+  }
+  /** Space — or the tray's talk hotkey from any app — one press. */
+  const press = useRef<() => void>(() => {})
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // -- helpers --------------------------------------------------------------
@@ -178,6 +205,7 @@ export default function App() {
     s.setActiveTool(null)
     sfx.duck(false)
     s.setPhase('dormant')
+    resumeMediaSoon()
   }
 
   /** Open the mic and wait. `window` is how long before she gives up.
@@ -189,6 +217,7 @@ export default function App() {
     const s = store.getState()
     s.setCaption('')
     s.setPhase('listening')
+    pauseMedia()
     if (from === 'name') {
       voice.current?.wake()
     } else {
@@ -418,8 +447,9 @@ export default function App() {
     }
 
     // People keep using his name as a vocative once they're already talking to
-    // him. Strip it rather than sending "jarvis" to the model as a question.
-    if (BARE_NAME.test(text)) {
+    // him. Strip it rather than sending "jarvis" to the model as a question —
+    // said twice too ("AYRA. AYRA.", the owner's hands-free test, 2026-10-11).
+    if (BARE_NAME.test(text) || onlyName(text)) {
       listen(AWAIT_SPEECH_MS)
       return
     }
@@ -615,6 +645,7 @@ export default function App() {
     store.getState().setPhase('dormant')
     // How she listened last time, without announcing it.
     watchHearing((mode) => void setHearing(mode))
+    watchTalk(() => press.current())
     if (savedHearing() === 'hands-free') void setHearing('hands-free', false)
     else reportHearing('push')
   }
@@ -732,7 +763,10 @@ export default function App() {
       // whatever the first one began included.
       if (e.code !== 'Space' || e.repeat) return
       e.preventDefault()
+      press.current()
+    }
 
+    press.current = () => {
       const phase = store.getState().phase
       const now = performance.now()
       const double = now - lastSpace.current < DOUBLE_TAP_MS

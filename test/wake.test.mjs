@@ -65,3 +65,9 @@ test('hands-free: spoken TO her counts, a sentence ABOUT someone with her name d
     assert.equal(addressed(said), false, said)
   }
 })
+
+test('her name alone, however often, is not a question', async () => {
+  const { onlyName } = await import('../src/lib/wake.ts')
+  for (const said of ['AYRA. AYRA.', 'Hey, Aira. Aira.', 'ayra']) assert.equal(onlyName(said), true, said)
+  for (const said of ['AYRA, what time is it', 'hello', '']) assert.equal(onlyName(said), false, said)
+})

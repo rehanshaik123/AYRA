@@ -25,7 +25,8 @@ import { displayServer } from './panels.mjs'
 import { createTurnCards } from './sources.mjs'
 import { rankQuery } from './triage.mjs'
 import { relayListening } from './listen.mjs'
-import { createSpotter, relayWake, WAKE_THRESHOLD } from './wake.mjs'
+import { PER_HOUR, relayWake } from './wake.mjs'
+import { createMedia } from './media.mjs'
 import { serveFace } from './face.mjs'
 import { createApprovals } from './approvals.mjs'
 import { createAllowances } from './allowances.mjs'
@@ -340,7 +341,7 @@ const handleRequest = async (req, res) => {
   // Only AYRA.exe: it sends this header and no Origin. A web page always sends
   // an Origin, and could not add the header without a preflight the bridge
   // never grants — so no page can turn the microphone on.
-  if (req.url === '/hearing' && (req.method === 'GET' || req.method === 'POST')) {
+  if ((req.url === '/hearing' && (req.method === 'GET' || req.method === 'POST')) || (req.url === '/talk' && req.method === 'POST')) {
     if (origin || req.headers['x-ayra'] !== 'tray') {
       res.writeHead(403)
       return res.end('forbidden')
@@ -350,6 +351,13 @@ const handleRequest = async (req, res) => {
       res.end(JSON.stringify(body))
     }
     if (req.method === 'GET') return reply(200, { mode: HEARING.mode, faces: HEARING.faces.size })
+    // The talk hotkey (AYRA.exe, Ctrl+Alt+Space by default): what Space does in
+    // her window — listen, then send — from any app, without bringing her forward.
+    if (req.url === '/talk') {
+      if (!HEARING.faces.size) return reply(409, { error: "her window isn't open" })
+      for (const send of HEARING.faces) send({ type: 'talk', by: 'tray' })
+      return reply(200, { ok: true })
+    }
     let body = ''
     for await (const chunk of req) {
       body += chunk
@@ -898,19 +906,15 @@ function listen(socket) {
 }
 
 /**
- * Hands-free: while it is on, the face streams its microphone on `/wake` and an
- * offline spotter listens for her name (wake.mjs). Nothing sent on this socket
- * ever leaves the laptop. Loaded on first use; a missing model is reported to
- * the face (and retried next time, so `npm run models` needs no restart).
+ * Hands-free: the face sends short bursts of speech on `/wake` and the bridge
+ * has ElevenLabs say what was said (wake.mjs); the face decides if it was her
+ * name. One hourly cap for every open face.
  */
-let SPOTTER = null
-const spotter = () =>
-  (SPOTTER ??= createSpotter({
-    spellings: IDENTITY.wake.spotter ?? [],
-    label: IDENTITY.name,
-    threshold: Number(env('WAKE_THRESHOLD', WAKE_THRESHOLD)) || WAKE_THRESHOLD,
-    log: (msg) => console.warn(msg),
-  }))
+const WAKE_CHECKS = []
+const WAKE_PER_HOUR = Number(env('WAKE_CHECKS_PER_HOUR', PER_HOUR)) || PER_HOUR
+
+/** Whatever is playing pauses while she listens (media.mjs). */
+const MEDIA = createMedia({ log: (msg) => console.log(msg) })
 
 /**
  * How the face is listening — 'push' (Space) or 'hands-free' (her name) — as it
@@ -924,7 +928,16 @@ const HEARING_MODES = new Set(['push', 'hands-free'])
 wss.on('connection', (socket, req) => {
   const path = (req.url ?? '/').split('?')[0]
   if (path === '/listen') return listen(socket)
-  if (path === '/wake') return relayWake(socket, { spotter, log: (msg) => console.warn(msg) })
+  if (path === '/wake') {
+    return relayWake(socket, {
+      key: elevenKey(),
+      keyterms: [IDENTITY.name],
+      language: IDENTITY.language.split('-')[0] || 'en',
+      perHour: WAKE_PER_HOUR,
+      checks: WAKE_CHECKS,
+      log: (msg) => console.warn(msg),
+    })
+  }
   console.log('[ayra] client connected')
 
   const send = (msg) => {
@@ -1061,6 +1074,10 @@ wss.on('connection', (socket, req) => {
 
     // The face says how it is listening now (on connect and on every switch).
     if (msg.type === 'hearing' && HEARING_MODES.has(msg.mode)) HEARING.mode = msg.mode
+
+    // She has started listening (pause what's playing) or gone back to standby (resume it).
+    if (msg.type === 'media' && msg.action === 'pause') void MEDIA.pause()
+    if (msg.type === 'media' && msg.action === 'resume') void MEDIA.resume()
   })
   HEARING.faces.add(send)
 

@@ -193,6 +193,8 @@ function dispatch(ws: WebSocket) {
       onApproval?.({ type: 'halt', by: msg.by ?? '' })
     } else if (msg.type === 'hearing' && (msg.mode === 'push' || msg.mode === 'hands-free')) {
       onHearing?.(msg.mode)
+    } else if (msg.type === 'talk') {
+      onTalk?.()
     }
   })
 }
@@ -498,6 +500,17 @@ export function watchHearing(fn: (mode: 'push' | 'hands-free') => void) {
 }
 export function reportHearing(mode: 'push' | 'hands-free'): void {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'hearing', mode }))
+}
+
+/** The tray's talk hotkey (AYRA.exe → the bridge): what Space does, from any app. */
+let onTalk: (() => void) | null = null
+export function watchTalk(fn: () => void) {
+  onTalk = fn
+}
+
+/** Pause whatever is playing while she listens, resume it after (bridge/media.mjs). */
+export function media(action: 'pause' | 'resume'): void {
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'media', action }))
 }
 
 export function warmBrain(): void {
