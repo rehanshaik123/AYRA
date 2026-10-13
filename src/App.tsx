@@ -24,9 +24,11 @@ import {
   watchTalk,
   media,
   reportHearing,
+  reportFace,
   bridgeServers,
 } from './lib/bridge'
 import { inputLevel } from './lib/listen'
+import { glance, sameGlance, type Glance } from './lib/glance'
 import { probeCapabilities } from './lib/capabilities'
 import { BARE_NAME, LEADING_NAME, addressed, afterWake, onlyName } from './lib/wake'
 import { withHonorific } from './identity'
@@ -102,6 +104,8 @@ const savedMode = (): Mode => {
 /** How long the boot sequence (Boot.tsx) stays up. It only has to cover the
  *  bridge connecting and the voice probe; the old nine seconds were pure wait. */
 const BOOT_MS = 2400
+/** The bubble's report: at most this often while words stream (lib/glance.ts). */
+const GLANCE_MS = 150
 
 /** A spoken answer to an Approve card. Hindi yes/no too — the owner's own words. */
 const SAID_YES = /^(yes|yeah|yep|yup|sure|ok(ay)?|go ahead|do it|allow( it)?|approve(d)?|confirm(ed)?|haan|ha)\b/i
@@ -688,6 +692,34 @@ export default function App() {
   }
 
   // -- level pump + keys ----------------------------------------------------
+
+  // The bubble on top of every app (AYRA.exe): her phase and one line, sent to
+  // the bridge when they change — at most every 150 ms while words stream.
+  useEffect(() => {
+    let sent: Glance | null = null
+    let timer = 0
+    const report = () => {
+      timer = 0
+      const g = glance(store.getState(), wokeByName.current ? 'name' : 'press')
+      if (sameGlance(sent, g)) return
+      sent = g
+      reportFace(g)
+    }
+    const unsubscribe = store.subscribe(() => {
+      if (!timer) timer = window.setTimeout(report, GLANCE_MS)
+    })
+    // Again on reconnect, so a restarted bridge knows at once.
+    const ping = window.setInterval(() => {
+      sent = null
+      report()
+    }, 10_000)
+    return () => {
+      unsubscribe()
+      window.clearTimeout(timer)
+      window.clearInterval(ping)
+    }
+    // `store` is the store's own hook — the same object for the life of the page.
+  }, [store])
 
   useEffect(() => {
     let raf = 0

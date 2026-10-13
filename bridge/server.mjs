@@ -346,7 +346,10 @@ const handleRequest = async (req, res) => {
   // Only AYRA.exe: it sends this header and no Origin. A web page always sends
   // an Origin, and could not add the header without a preflight the bridge
   // never grants — so no page can turn the microphone on.
-  if ((req.url === '/hearing' && (req.method === 'GET' || req.method === 'POST')) || (req.url === '/talk' && req.method === 'POST')) {
+  const trayCall =
+    ((req.url === '/hearing' || req.url === '/face') && req.method === 'GET') ||
+    ((req.url === '/hearing' || req.url === '/talk') && req.method === 'POST')
+  if (trayCall) {
     if (origin || req.headers['x-ayra'] !== 'tray') {
       res.writeHead(403)
       return res.end('forbidden')
@@ -355,8 +358,11 @@ const handleRequest = async (req, res) => {
       res.writeHead(status, { 'content-type': 'application/json' })
       res.end(JSON.stringify(body))
     }
+    // The bubble (AYRA.exe): how her window is doing — phase and one line of
+    // caption — polled a few times a second. Loopback and tray-only like the rest.
+    if (req.url === '/face') return reply(200, { ...FACE, faces: HEARING.faces.size, hearing: HEARING.mode, age: Date.now() - FACE.at })
     if (req.method === 'GET') return reply(200, { mode: HEARING.mode, faces: HEARING.faces.size })
-    // The talk hotkey (AYRA.exe, Ctrl+Alt+Space by default): what Space does in
+    // The talk hotkey (AYRA.exe, Alt+Space by default) and the bubble: what Space does in
     // her window — listen, then send — from any app, without bringing her forward.
     if (req.url === '/talk') {
       if (!HEARING.faces.size) return reply(409, { error: "her window isn't open" })
@@ -964,6 +970,14 @@ const WAKE_SOCKETS = new Set()
 const HEARING = { mode: 'push', faces: new Set() }
 const HEARING_MODES = new Set(['push', 'hands-free'])
 
+/**
+ * Her window as the bubble shows it (AYRA.exe, GET /face): the phase, one line
+ * of caption (what she heard, or what she is saying), whose words they are,
+ * and whether the last listen began with her name. Reported by the face.
+ */
+const FACE = { phase: 'offline', text: '', who: '', by: '', at: 0 }
+const FACE_PHASES = new Set(['offline', 'boot', 'dormant', 'waking', 'listening', 'thinking', 'tooling', 'speaking'])
+
 // The HUD channel: one WebSocket, one conversation.
 wss.on('connection', (socket, req) => {
   const path = (req.url ?? '/').split('?')[0]
@@ -983,6 +997,9 @@ wss.on('connection', (socket, req) => {
       perHour: WAKE_PER_HOUR,
       checks: WAKE_CHECKS,
       speakers: SPEAKERS,
+      // Every burst and why it was or wasn't her name, in the day's audit log
+      // ("hearing" lines) — tuning hands-free from evidence (2026-10-13).
+      record: (entry) => AUDIT.log({ type: 'hearing', ...entry }),
       log: (msg) => console.warn(msg),
     })
   }
@@ -1218,6 +1235,15 @@ wss.on('connection', (socket, req) => {
     // The face says how it is listening now (on connect and on every switch).
     if (msg.type === 'hearing' && HEARING_MODES.has(msg.mode)) HEARING.mode = msg.mode
 
+    // Her phase and caption, for the bubble (GET /face).
+    if (msg.type === 'face' && FACE_PHASES.has(msg.phase)) {
+      FACE.phase = msg.phase
+      FACE.text = typeof msg.text === 'string' ? msg.text.replace(/\s+/g, ' ').slice(-160) : ''
+      FACE.who = msg.who === 'you' || msg.who === 'her' ? msg.who : ''
+      FACE.by = msg.by === 'name' || msg.by === 'press' ? msg.by : ''
+      FACE.at = Date.now()
+    }
+
     // She has started listening (pause what's playing) or gone back to standby (resume it).
     if (msg.type === 'media' && msg.action === 'pause') void MEDIA.pause()
     if (msg.type === 'media' && msg.action === 'resume') void MEDIA.resume()
@@ -1227,6 +1253,8 @@ wss.on('connection', (socket, req) => {
   socket.on('close', () => {
     console.log('[ayra] client disconnected')
     HEARING.faces.delete(send)
+    // The last window gone: the bubble shows her as closed, not frozen mid-phase.
+    if (!HEARING.faces.size) Object.assign(FACE, { phase: 'offline', text: '', who: '', by: '', at: Date.now() })
     unsubscribe()
     CONVERSATIONS.delete(conversation)
     conversation.close()

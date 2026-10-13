@@ -504,6 +504,11 @@ let onHearing: ((mode: 'push' | 'hands-free') => void) | null = null
 export function watchHearing(fn: (mode: 'push' | 'hands-free') => void) {
   onHearing = fn
 }
+/** Her phase and one line of caption, for the bubble on top of every app (lib/glance.ts). */
+export function reportFace(g: { phase: string; text: string; who: string; by: string }): void {
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'face', ...g }))
+}
+
 export function reportHearing(mode: 'push' | 'hands-free'): void {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'hearing', mode }))
 }
