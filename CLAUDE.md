@@ -117,6 +117,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/origin.mjs` · `bridge/net.mjs` · `bridge/page.mjs` | Which pages may talk to the bridge · SSRF-safe outbound fetching (use for EVERY server-side fetch) · web pages for blades |
 | `src/App.tsx` · `src/identity.ts` · `src/config.ts` | The face's conductor (boot, phases, voice loop, turns) · identity for the face · the bridge address |
 | `src/lib/bridge.ts` · `capabilities.ts` | WebSocket client to the bridge · `/health` probe (is ElevenLabs there?) |
+| `src/lib/glance.ts` | What the bubble shows: her phase and one line, reported to the bridge as `face` frames |
 | `src/lib/wake.ts` · `voice.ts` · `listen.ts` · `audio.ts` | Her name and its mishearings (stripped from what you say) · the voice loop: push-to-talk (`open / send / close`), echo, browser fallback · live hearing to the bridge · the one microphone stream |
 | `public/listen-worklet.js` | AYRA's ears on the audio thread: speech detection + 16 kHz PCM, never throttled in a background tab |
 | `src/lib/tts.ts` · `fillers.ts` · `vocative.ts` · `sfx.ts` | Speaking (ElevenLabs, browser voice as fallback) · short "On it!" lines · the comma before "boss" · synthesised interface beeps |
@@ -126,7 +127,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `src/ui/Boot.tsx` · `Ignition.tsx` · `Diagnostics.tsx` · `Suggestions.tsx` | Start-up sequence · INITIALISE button · diagnostics (D) · rotating example questions |
 | `src/store.ts` · `src/index.css` | App state · all styles incl. the `.hud-*` design system blades use |
 | `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` · `bench.mjs` · `demo.mjs` · `bridge-copy.mjs` · `research.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test · `npm run bench` speed table · `npm run demo` what she can do, live · `npm run bridge:test` · `npm run research` |
-| `desktop/ayra.cs` · `desktop/ayra.ico` | **AYRA.exe**, the tray app: starts with Windows, keeps the bridge running hidden, opens her window, Ctrl+Alt+A to talk · her icon. C# 5 (the compiler that ships with Windows) |
+| `desktop/ayra.cs` · `desktop/ayra.ico` | **AYRA.exe**, the tray app: starts with Windows, keeps the bridge running hidden, opens her window, Ctrl+Alt+A to talk, Alt+Space talk from any app, and **the bubble** — AYRA on top of every app (click = Space, glow by phase, one caption line; polls `GET /face`) · her icon. C# 5 (the compiler that ships with Windows) |
 | `scripts/shortcuts.mjs` · `icon.mjs` | `npm run shortcuts`: builds AYRA.exe into `desktop/bin/` (gitignored) with `ayra.ini`, makes the shortcuts · `npm run icon` |
 | `test/*.test.mjs` | Unit tests, run by `npm test` |
 | `index.html` · `vite.config.ts` | Page shell + strict CSP · dev server, `%AYRA_WORDMARK%` title |
@@ -137,7 +138,8 @@ Planned, with their phase: `db.mjs`, `memory.mjs` (8) · `core.mjs`, `deploy/`
 
 Hands-free (`/wake` WebSocket, loopback): face sends one binary burst (16 kHz PCM, ≤ 2.5 s) per stretch of
 speech that began after quiet; bridge sends `ready`, `heard {text}`, `error {code,message}` (`no_key`, `limit`).
-HUD socket: face sends `hearing {mode}` (push | hands-free) and `media {action: pause|resume}`; bridge sends
+Hands-free also takes `note {event: skip|decision, why?, text?, woke?}` text frames from the face for the hearing log ("hearing" lines in the audit log).
+HUD socket: face sends `hearing {mode}` (push | hands-free), `media {action: pause|resume}` and `face {phase,text,who,by}` (the bubble, read by the tray at `GET /face`); bridge sends
 `hearing {mode, by}` and `talk {by}` from the tray (AYRA.exe → `GET/POST /hearing`, `POST /talk`, tray only:
 `x-ayra: tray`, no Origin).
 
@@ -167,7 +169,7 @@ will live in `bridge/link.mjs` (Phase 10), and the same rule applies.
   `TELEGRAM_OWNER_ID`, `TELEGRAM` — `off` disables it, `CONNECTORS` — default `none`,
   `RESEARCH_MODEL` — the research agent's workers, default `claude-sonnet-5-5`, `HANDSFREE_HOTKEY` —
   AYRA.exe's hands-free switch, default `ctrl+alt+w`, `TALK_HOTKEY` — Space from any app, default
-  `ctrl+alt+space`, `WAKE_CHECKS_PER_HOUR` — the name-check cap, default 120) plus
+  `alt+space`, `BUBBLE` — `off` hides the bubble, `WAKE_CHECKS_PER_HOUR` — the name-check cap, default 120) plus
   `ELEVENLABS_API_KEY`. Writes are off in code (`ALLOW_WRITES = false` in server.mjs) until the
   laptop-hands phase. The bridge sets `ENABLE_TOOL_SEARCH=false` for Claude Code (tools load up
   front; measured faster).

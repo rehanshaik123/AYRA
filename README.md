@@ -34,10 +34,16 @@ ID. In the HUD: **Space** to talk, **Space** again to send, **Space Space** or *
 Press **W** in her window (or **Ctrl+Alt+W** / the tray menu from any app) and just say "AYRA" —
 from any app, her window needn't be in front. Only short bursts of speech that start after a quiet
 moment are checked for her name (never the room, never while music plays), at most 120 an hour.
-After answering she listens about 15 seconds for a follow-up. **Ctrl+Alt+Space** is Space from any
-app. While she listens, whatever is playing (Spotify, a video) pauses, and resumes after. Sound that
+After answering she listens about 15 seconds for a follow-up. **Alt+Space** is Space from any app. While she listens, whatever is playing (Spotify, a video) pauses, and resumes after. Sound that
 comes out of the laptop's own speakers — a video, another app saying her name — is recognised and
 ignored.
+
+## The bubble
+
+A small AYRA bubble sits on top of every app (drag it anywhere). Click it and she listens — your app
+stays in front; click while she talks to interrupt, double-click to stop everything. It glows by what
+she is doing and shows one line: what she heard, or what she is saying. Right-click it for hands-free,
+her window, or to hide it.
 
 ## Researcher mode
 

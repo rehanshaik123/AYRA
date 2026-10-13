@@ -396,6 +396,27 @@ The owner was asleep and asked for the recommended decisions, reported in the mo
       stopped it being built. The owner sets the scope — which apps, which actions run without Approve.
 - [ ] O.6 🧑 Live in the room: hands-free with a video playing; R and a real question.
 
+## The bubble and hands-free from evidence · branch `researcher-mode` (2026-10-13)
+
+**Goal (the owner, 2026-10-13):** hands-free works but sometimes doesn't respond or start listening.
+Decided with the owner: both — a small AYRA bubble on top of every app (a click is always heard,
+the owner's app stays in front), and hands-free fixed from evidence rather than guesses. The talk
+hotkey becomes Alt+Space.
+
+- [x] B.1 The bubble (desktop/ayra.cs `Bubble`, `Caption`): always on top, never takes the focus, draggable
+      (remembered), a click is Space (`/talk`), double click stops everything, right-click: hands-free, her
+      window, hide; glows by phase (cyan standby, blue listening, amber thinking, pink speaking), flashes when
+      hands-free hears her name; one caption line (your words grey, hers white, newest words kept); out of the
+      way of full-screen apps. State: the face reports `face {phase,text,who,by}` (src/lib/glance.ts), the
+      tray polls `GET /face`.
+- [x] B.2 The hearing log: every burst (sent or skipped, the speaker verdict, Scribe's words and time) and the
+      face's verdict, as "hearing" lines in the day's audit log.
+- [x] B.3 Music pause no longer pauses her own window (AYRA.Desk) — it could cut her greeting or reply.
+- [x] B.4 Speaker filter: the owner talking over a video is kept (much louder than the speakers explain),
+      unless the match is strong (≥ 0.70).
+- [x] B.5 Talk hotkey Alt+Space (AYRA_TALK_HOTKEY); AYRA_BUBBLE=off turns the bubble off.
+- [ ] B.6 🧑 A day of normal use, then tune hands-free from the hearing log.
+
 ## Phase 7 — Apps, one at a time · branch `phase-7-apps`
 
 **Goal:** AYRA reads Gmail, Google Calendar and Google Drive again, then Notion — each added as its
