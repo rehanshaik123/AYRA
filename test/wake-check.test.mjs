@@ -29,6 +29,35 @@ test('a burst becomes words for the face; silence is not reported', async () => 
   assert.deepEqual(client.sent, [{ type: 'ready' }, { type: 'heard', text: 'Hey, Aira.' }])
 })
 
+test('the hearing log: every burst and why, and the face\'s side of it', async () => {
+  const client = fakeClient()
+  const log = []
+  const said = ['Hey AYRA', '']
+  const speakers = { judge: (pcm) => (pcm.length === 16000 ? { fromSpeakers: true, corr: 0.81, active: 0.9, over: 0, why: 'speakers' } : { fromSpeakers: false, corr: 0.1, active: 0, over: 0, why: 'speakers quiet' }) }
+  relayWake(client, { key: 'k', transcribe: async () => said.shift(), speakers, record: (e) => log.push(e) })
+  client.emit('message', Buffer.alloc(16000), true) // half a second, from the speakers
+  client.emit('message', Buffer.alloc(32000), true)
+  client.emit('message', Buffer.alloc(32000), true)
+  client.emit('message', Buffer.from(JSON.stringify({ type: 'note', event: 'skip', why: 'busy room' })), false)
+  client.emit('message', Buffer.from(JSON.stringify({ type: 'note', event: 'decision', text: 'Hey AYRA', woke: true, extra: 'x' })), false)
+  client.emit('message', Buffer.from(JSON.stringify({ type: 'note', event: 'other' })), false)
+  await flush()
+  assert.deepEqual(log[0], { kind: 'burst', ms: 500, result: 'speakers', corr: 0.81, active: 0.9, over: 0, why: 'speakers' })
+  assert.equal(log.filter((e) => e.kind === 'burst' && e.result === 'heard').length, 1)
+  assert.equal(log.find((e) => e.result === 'heard').text, 'Hey AYRA')
+  assert.equal(log.filter((e) => e.result === 'nothing').length, 1)
+  assert.deepEqual(log.filter((e) => e.kind === 'face'), [
+    { kind: 'face', event: 'skip', why: 'busy room' },
+    { kind: 'face', event: 'decision', text: 'Hey AYRA', woke: true },
+  ])
+  // A log that throws never stops a check.
+  const c2 = fakeClient()
+  relayWake(c2, { key: 'k', transcribe: async () => 'AYRA', record: () => { throw new Error('disk full') } })
+  c2.emit('message', Buffer.alloc(32000), true)
+  await flush()
+  assert.deepEqual(c2.sent.at(-1), { type: 'heard', text: 'AYRA' })
+})
+
 test('never more than CLIP_MS of audio goes for a check, whatever the face sends', async () => {
   const client = fakeClient()
   const lengths = []

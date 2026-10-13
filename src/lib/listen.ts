@@ -56,6 +56,8 @@ export type Listener = {
    * soon as the room is quiet (not SILENCE_MS after this moment).
    */
   armFromCandidate: (quietEnd?: boolean) => void
+  /** A line for the hearing log (bridge/wake.mjs): a skipped burst, or what a burst's words were taken for. */
+  note: (entry: { event: 'skip' | 'decision'; why?: string; text?: string; woke?: boolean }) => void
   live: () => boolean
   meter: () => { energy: number; floor: number; threshold: number; speaking: boolean }
 }
@@ -177,12 +179,24 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
     ws?.close()
   }
 
+  /** One line for the hearing log, over the hands-free socket when it is up. */
+  function note(entry: { event: 'skip' | 'decision'; why?: string; text?: string; woke?: boolean }) {
+    if (wakeSocket?.readyState === WebSocket.OPEN) wakeSocket.send(JSON.stringify({ type: 'note', ...entry }))
+  }
+
   node.port.onmessage = (e: MessageEvent) => {
     const ev = e.data as { type: string; pcm?: Int16Array; v?: number } & typeof meter
     if (ev.type === 'candidate' && ev.pcm) {
       // A burst for the name check. Dropped while the socket is down: a name
       // said during a reconnect is lost, but nothing piles up.
       if (wakeSocket?.readyState === WebSocket.OPEN) wakeSocket.send(ev.pcm.buffer as ArrayBuffer)
+      else note({ event: 'skip', why: 'hands-free socket down' })
+      return
+    }
+    // A stretch of speech the worklet did not send for a check, and why — for
+    // the hearing log (bridge/wake.mjs), never for anything else.
+    if (ev.type === 'skip') {
+      note({ event: 'skip', why: String((ev as { why?: string }).why ?? '') })
       return
     }
     if (ev.type === 'audio' && ev.pcm) send(ev.pcm.buffer as ArrayBuffer)
@@ -231,6 +245,7 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
       } else closeWake()
     },
     armFromCandidate: (quietEnd = false) => node.port.postMessage({ armFromCandidate: true, quietEnd }),
+    note,
     live: () => !stopped && ctx.state !== 'closed',
     meter: () => meter,
   }

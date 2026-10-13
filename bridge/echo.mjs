@@ -51,6 +51,12 @@ export const ACTIVE_SHARE = 0.5
  * recording matched at 0.70, 0.58 and 0.80 — 0.55 left too little room.
  */
 export const MIN_CORR = 0.5
+/** A match this strong is the speakers even when the microphone hears more on top. */
+export const STRONG_CORR = 0.7
+/** A speech step this much louder (dB) than the speakers explain is someone else talking… */
+export const OVER_DB = 6
+/** …and when this share of the speech steps is, it is the owner over the speakers. */
+export const OVER_SHARE = 0.35
 /** A 20 ms step is speech when it is within this many dB of the burst's loudest. */
 const SPEECH_DB = 25
 /** …and above this level at all (RMS, 0..1): a burst of near-silence is not judged. */
@@ -250,9 +256,47 @@ export function judgeBurst(micEnv, speakerSamples, arrivedAt, burstMs = micEnv.l
   let playing = 0
   for (const i of speech) if (best.spk[i] > SPEAKERS_ON) playing++
   const active = playing / speech.length
-  if (active < ACTIVE_SHARE) return verdict(false, 'speakers quiet', best.score, active, best.lag)
-  if (best.score < MIN_CORR) return verdict(false, 'a different sound', best.score, active, best.lag)
-  return verdict(true, 'speakers', best.score, active, best.lag)
+  const over = louderThanSpeakers(micSpeech, speech.map((i) => best.spk[i]))
+  const out = (fromSpeakers, why) => ({ ...verdict(fromSpeakers, why, best.score, active, best.lag), over: round2(over) })
+  if (active < ACTIVE_SHARE) return out(false, 'speakers quiet')
+  if (best.score < MIN_CORR) return out(false, 'a different sound')
+  // The owner talking over a video: the curves still half-match, because the
+  // video is in the microphone too, but many speech steps are far louder than
+  // the speakers explain. Measured 2026-10-13: two bursts dropped at 0.52 and
+  // 0.64 that were likely the owner. A strong match is the speakers whatever.
+  if (best.score < STRONG_CORR && over >= OVER_SHARE) return out(false, 'someone talking over the speakers')
+  return out(true, 'speakers')
+}
+
+/**
+ * The share of speech steps where the microphone is much louder (OVER_DB)
+ * than the speakers account for. Fitted, not assumed: the room, the volume and
+ * the microphone's own gain set how loud the speakers come back, so the line
+ * from speaker level to microphone level is fitted over this burst (log scale)
+ * and only what stands well above it counts.
+ */
+export function louderThanSpeakers(mic, spk) {
+  const n = Math.min(mic.length, spk.length)
+  if (n < 2) return 0
+  const x = []
+  const y = []
+  for (let i = 0; i < n; i++) {
+    x.push(Math.log10(Math.max(Number.isFinite(spk[i]) ? spk[i] : 0, LOG_EPS)))
+    y.push(Math.log10(Math.max(mic[i], LOG_EPS / 10)))
+  }
+  const mx = x.reduce((a, b) => a + b, 0) / n
+  const my = y.reduce((a, b) => a + b, 0) / n
+  let sxy = 0
+  let sxx = 0
+  for (let i = 0; i < n; i++) {
+    sxy += (x[i] - mx) * (y[i] - my)
+    sxx += (x[i] - mx) ** 2
+  }
+  const a = sxx > 1e-9 ? sxy / sxx : 0
+  const b = my - a * mx
+  let above = 0
+  for (let i = 0; i < n; i++) if (y[i] - (a * x[i] + b) > OVER_DB / 20) above++
+  return above / n
 }
 
 /** bridge/meter.ps1, hidden; it exits when its stdin closes. */

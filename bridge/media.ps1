@@ -1,4 +1,4 @@
-param([string]$Action = 'list', [string]$Ids = '')
+param([string]$Action = 'list', [string]$Ids = '', [string]$Skip = '')
 # AYRA's music manners (bridge/media.mjs): pause whatever is playing while she
 # listens, and resume exactly what she paused. Windows' own media controls
 # (the ones behind the volume flyout), so Spotify, browsers and video apps alike.
@@ -15,6 +15,8 @@ function Await($op, [type]$t) {
 $null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
 $manager = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
 $wanted = @($Ids.Split('|') | Where-Object { $_ })
+# Sessions never to pause: her own window (it plays her voice and her chimes).
+$skipped = @($Skip.Split('|') | Where-Object { $_ })
 $done = @()
 # The owner's own commands ("play the music", "next song") act on the session
 # Windows shows in the volume flyout - the one they last used.
@@ -31,7 +33,7 @@ foreach ($s in $manager.GetSessions()) {
   $id = $s.SourceAppUserModelId
   $status = [string]$s.GetPlaybackInfo().PlaybackStatus
   if ($Action -eq 'list') { $done += "$id=$status" }
-  elseif ($Action -eq 'pause' -and $status -eq 'Playing') {
+  elseif ($Action -eq 'pause' -and $status -eq 'Playing' -and -not ($skipped -contains $id)) {
     if (Await ($s.TryPauseAsync()) ([bool])) { $done += $id }
   }
   elseif ($Action -eq 'resume' -and $wanted -contains $id -and $status -eq 'Paused') {

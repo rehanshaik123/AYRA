@@ -115,6 +115,8 @@ export class ListenCore {
     this.candStart = -1
     this.candHold = false
     this.candOk = false
+    /** Why the stretch being collected won't be sent, when it won't (the hearing log). */
+    this.candWhy = ''
   }
 
   /** Feed one block of microphone samples; returns what happened. */
@@ -258,6 +260,8 @@ export class ListenCore {
       this.cand.push(pcm)
       if (this.cand.length * STEP_MS >= CANDIDATE_MS || t - this.heardAt >= CANDIDATE_GAP_MS) {
         if (this.candOk) this.events.push({ type: 'candidate', pcm: join(this.cand) })
+        // Not sent, and why — for the hearing log, once per stretch of speech.
+        else this.events.push({ type: 'skip', why: this.candWhy })
         this.cand = null
         this.candHold = true
       }
@@ -275,6 +279,7 @@ export class ListenCore {
     if (this.candAt < 0) {
       this.candAt = t
       this.candOk = quietFor >= QUIET_BEFORE_MS && this.activity < BUSY
+      this.candWhy = this.activity >= BUSY ? 'busy room' : 'no quiet before it'
     } else if (t - this.candAt >= START_MS) {
       const n = Math.min(this.history.length, Math.round((t - this.candAt + PRE_ROLL_MS) / STEP_MS))
       this.cand = this.history.slice(-n)

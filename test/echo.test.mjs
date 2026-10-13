@@ -7,6 +7,7 @@ import {
   correlate,
   createSpeakerMeter,
   judgeBurst,
+  louderThanSpeakers,
   micEnvelope,
   resample,
 } from '../bridge/echo.mjs'
@@ -181,6 +182,26 @@ test('the owner starting to speak just as a video voice resumes: still the owner
   const mic = owner.map((v, i) => v + 0.25 * video.at(start + i * FRAME_MS))
   const v = judgeBurst(micEnvelope(pcmOf(mic)), meterSamples(video.at, T - 12_000, T - 30), T)
   assert.equal(v.fromSpeakers, false, JSON.stringify(v))
+})
+
+test('the owner talking over a video, the curves half-matching: the owner (much louder than the speakers explain)', () => {
+  // The video's voice reaches the microphone and so does the owner, loud and
+  // close, in their own syllables — the 2026-10-13 drops at 0.52 and 0.64.
+  const burstEnd = T - 600
+  const video = timeline(burstEnd + 3000, speech(7, 6000, 0.1, 0.3))
+  const owner = [quiet(300), speech(8, 1400, 0.3, 0.6), quiet(760)].flat()
+  const start = burstEnd - owner.length * FRAME_MS
+  const mic = owner.map((v, i) => v + 0.2 * video.at(start + i * FRAME_MS))
+  const v = judgeBurst(micEnvelope(pcmOf(mic)), meterSamples(video.at, T - 12_000, T - 30), T)
+  assert.equal(v.fromSpeakers, false, JSON.stringify(v))
+})
+
+test('louderThanSpeakers: a quieter copy is explained; loud extra steps are not', () => {
+  const spk = speech(9, 1200, 0.05, 0.3).map((v) => v + 0.01)
+  assert.ok(louderThanSpeakers(spk.map((v) => v * 0.2), spk) < 0.05)
+  const mic = spk.map((v, i) => (i % 3 === 0 ? v * 0.2 + 0.4 : v * 0.2))
+  assert.ok(louderThanSpeakers(mic, spk) >= 0.3)
+  assert.equal(louderThanSpeakers([0.1], [0.1]), 0)
 })
 
 test('the speakers silent: the owner', () => {

@@ -642,11 +642,16 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
         diag.heard = text
         diag.heardAt = Date.now()
         lastBurst = text
-        if (speakingNow() || !WAKE.test(text)) {
+        // Each verdict goes to the hearing log too, so a missed "AYRA" can be
+        // traced: heard as something else, or heard while she was talking.
+        const speaking = Boolean(speakingNow())
+        if (speaking || !WAKE.test(text)) {
           drop(`hands-free heard "${text.slice(-40)}" — not her name`)
+          listener?.note({ event: 'decision', text, woke: false, why: speaking ? 'she was speaking' : 'not her name' })
           return
         }
         diag.wakes++
+        listener?.note({ event: 'decision', text, woke: true })
         h.onWakeWord?.()
       },
       onWakeError: (code, message) => {

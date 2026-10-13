@@ -160,6 +160,24 @@ test('hands-free: in a busy room (music, a video) nothing goes for a check', () 
   assert.equal(after.filter((e) => e.type === 'candidate').length, 0)
 })
 
+test('hands-free: a stretch not sent is told to the hearing log, once, with why and no audio', () => {
+  const core = new ListenCore(RATE)
+  core.arm(false)
+  core.setStream(true)
+  feed(core, 2000, () => noise(0.002)())
+  // A video with real pauses: each line is its own stretch, and the room soon counts as busy.
+  const events = []
+  for (let i = 0; i < 10; i++) {
+    events.push(...feed(core, 1200, voice(0.2)))
+    events.push(...feed(core, 900, () => noise(0.002)()))
+  }
+  const skips = events.filter((e) => e.type === 'skip')
+  assert.ok(skips.length >= 3, `skips ${skips.length}`)
+  assert.ok(skips.every((e) => e.why === 'busy room' && !e.pcm))
+  // Every stretch is either sent or skipped, never both.
+  assert.equal(events.filter((e) => e.type === 'candidate').length + skips.length, 10)
+})
+
 test('her name heard: listening starts where the burst began', () => {
   const core = new ListenCore(RATE)
   core.arm(false)

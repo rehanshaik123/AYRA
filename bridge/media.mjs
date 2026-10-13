@@ -18,10 +18,20 @@ import { fileURLToPath } from 'node:url'
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'media.ps1')
 
+/**
+ * Her own window's media session — its app id is AYRA.exe's (desktop/ayra.cs
+ * Program.AppId), shared by her window so the taskbar groups them. It was being
+ * paused when she began listening (log, 2026-10-13: "paused for listening:
+ * AYRA.Desk"), which can cut her own greeting or reply short.
+ */
+export const OWN_SESSIONS = ['AYRA.Desk']
+
 /** Runs media.ps1 and returns the ids it acted on. */
 function runScript(action, ids = []) {
   return new Promise((resolve) => {
-    const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT, action, ids.join('|')], {
+    // Named, and -Ids only when there are some: an empty positional argument is not reliably passed on.
+    const args = ['-Action', action, '-Skip', OWN_SESSIONS.join('|'), ...(ids.length ? ['-Ids', ids.join('|')] : [])]
+    const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT, ...args], {
       windowsHide: true,
     })
     let out = ''

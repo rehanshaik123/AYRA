@@ -84,7 +84,7 @@ export async function scribe(pcm, { key, language = 'en', keyterms = [], fetchIm
  *                epoch ms when it is given, since the judge lines the burst up
  *                with the meter by its arrival time
  */
-export function relayWake(client, { key, keyterms = [], language = 'en', transcribe, perHour = PER_HOUR, now = Date.now, log = () => {}, onAudio, checks = [], speakers }) {
+export function relayWake(client, { key, keyterms = [], language = 'en', transcribe, perHour = PER_HOUR, now = Date.now, log = () => {}, onAudio, checks = [], speakers, record = () => {} }) {
   const toFace = (msg) => {
     if (client.readyState === client.OPEN) client.send(JSON.stringify(msg))
   }
@@ -94,33 +94,46 @@ export function relayWake(client, { key, keyterms = [], language = 'en', transcr
     return
   }
   const hear = transcribe ?? ((pcm) => scribe(pcm, { key, keyterms, language }))
-  /**
-   * Did this burst come out of the laptop's speakers? Then it is nobody
-   * calling her: no check, nothing counted, nothing for the face. Any doubt or
-   * error and it is the owner's (echo.mjs fails open too).
-   */
-  const fromSpeakers = (pcm, t) => {
-    if (!speakers) return false
-    let verdict
+  /** One line of the hearing log; whatever goes wrong there, hearing goes on. */
+  const note = (entry) => {
     try {
-      verdict = speakers.judge(pcm, t)
+      record(entry)
     } catch {
-      return false
+      /* the log is for tuning, never in the way */
     }
-    if (!verdict?.fromSpeakers) return false
-    log(`[ayra] wake: that burst came from the speakers (corr ${Number(verdict.corr).toFixed(2)}) — ignored`)
-    return true
   }
+  /**
+   * What the speaker meter makes of a burst (echo.mjs), or null without one.
+   * Any doubt or error and it is the owner's: the meter fails open too.
+   */
+  const judge = (pcm, t) => {
+    if (!speakers) return null
+    try {
+      return speakers.judge(pcm, t) ?? null
+    } catch {
+      return null
+    }
+  }
+  const meterOf = (v) => (v ? { corr: v.corr, active: v.active, over: v.over, why: v.why } : {})
   toFace({ type: 'ready' })
   let warned = false
   client.on('message', async (data, isBinary) => {
-    if (!isBinary) return
+    if (!isBinary) return faceNote(data)
     onAudio?.(data)
     const t = now()
-    if (fromSpeakers(data, t)) return
+    const ms = Math.round((data.length / (SAMPLE_RATE * 2)) * 1000)
+    // Out of the laptop's own speakers: nobody calling her — no check,
+    // nothing counted, nothing for the face.
+    const v = judge(data, t)
+    if (v?.fromSpeakers) {
+      log(`[ayra] wake: that burst came from the speakers (corr ${Number(v.corr).toFixed(2)}) — ignored`)
+      note({ kind: 'burst', ms, result: 'speakers', ...meterOf(v) })
+      return
+    }
     // The hourly cap, shared by every open face (`checks` is the bridge's list).
     while (checks.length && t - checks[0] > 3_600_000) checks.shift()
     if (checks.length >= perHour) {
+      note({ kind: 'burst', ms, result: 'cap' })
       if (!warned) {
         warned = true
         log(`[ayra] wake: ${perHour} checks this hour — pausing them until the hour is up`)
@@ -134,9 +147,36 @@ export function relayWake(client, { key, keyterms = [], language = 'en', transcr
     const pcm = data.subarray(0, Math.round((SAMPLE_RATE * 2 * CLIP_MS) / 1000))
     try {
       const text = await hear(pcm)
+      note({ kind: 'burst', ms, result: text ? 'heard' : 'nothing', text: clipped(text), checkMs: now() - t, ...meterOf(v) })
       if (text) toFace({ type: 'heard', text })
     } catch (err) {
+      note({ kind: 'burst', ms, result: 'error', error: clipped(err?.message ?? String(err)) })
       log(`[ayra] wake: ${err?.message ?? err}`)
     }
   })
+
+  /**
+   * The face's side of the story, for the same log: a stretch of speech it
+   * did not send (the room was busy, no quiet before it) and what it made of
+   * the words that came back (her name or not, and why not).
+   */
+  function faceNote(data) {
+    let msg
+    try {
+      msg = JSON.parse(String(data))
+    } catch {
+      return
+    }
+    if (msg?.type !== 'note' || !['skip', 'decision'].includes(msg.event)) return
+    note({
+      kind: 'face',
+      event: msg.event,
+      ...(typeof msg.why === 'string' ? { why: clipped(msg.why, 40) } : {}),
+      ...(typeof msg.text === 'string' ? { text: clipped(msg.text) } : {}),
+      ...(typeof msg.woke === 'boolean' ? { woke: msg.woke } : {}),
+    })
+  }
 }
+
+/** A short piece of text for the hearing log. */
+const clipped = (s, max = 80) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, max)
