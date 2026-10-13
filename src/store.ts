@@ -67,6 +67,8 @@ export type Turn = {
   id: string
   role: 'user' | 'assistant'
   text: string
+  /** What of `text` she said out loud (the rest is in her log only — bridge/spoken.mjs). */
+  said?: string
   /** Tool names invoked while producing this turn, for the HUD readout. */
   tools?: string[]
 }
@@ -164,7 +166,8 @@ type State = {
   setError: (e: string | null) => void
   setConnected: (c: string[]) => void
   pushTurn: (t: Turn) => void
-  appendToLastTurn: (text: string) => void
+  /** `spoken` false: shown in her log, not said (the bubble's caption follows what is said). */
+  appendToLastTurn: (text: string, spoken?: boolean) => void
 }
 
 /**
@@ -349,12 +352,12 @@ export const useStore = create<State>((set) => ({
   setError: (error) => set({ error }),
   setConnected: (connected) => set({ connected }),
   pushTurn: (turn) => set((s) => ({ turns: [...s.turns.slice(-40), turn] })),
-  appendToLastTurn: (text) =>
+  appendToLastTurn: (text, spoken = true) =>
     set((s) => {
       const turns = [...s.turns]
       const last = turns[turns.length - 1]
       if (!last || last.role !== 'assistant') return {}
-      turns[turns.length - 1] = { ...last, text: last.text + text }
+      turns[turns.length - 1] = { ...last, text: last.text + text, said: (last.said ?? '') + (spoken ? text : '') }
       return { turns }
     }),
 }))

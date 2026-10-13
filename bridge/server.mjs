@@ -23,6 +23,7 @@ import { clip, createAudit } from './audit.mjs'
 import { startTelegram } from './telegram.mjs'
 import { checkData, displayServer } from './panels.mjs'
 import { createTagFilter, parseCard, stripTags } from './datatag.mjs'
+import { createSpokenFilter, isQuestion, unwrapMore } from './spoken.mjs'
 import { createTurnCards } from './sources.mjs'
 import { rankQuery } from './triage.mjs'
 import { relayListening } from './listen.mjs'
@@ -1042,6 +1043,9 @@ wss.on('connection', (socket, req) => {
     if (tags?.ask !== ask) {
       tags = {
         ask,
+        // How much of it is said out loud (spoken.mjs): a task in a line or two,
+        // a question in full; <more> details are shown, never spoken.
+        spoken: createSpokenFilter({ question: isQuestion(turnOf()?.text ?? '') }),
         filter: createTagFilter((json) => {
           const args = parseCard(json)
           const verdict = args ? checkData(args, cards.evidence()) : { ok: false, error: 'the card was not JSON' }
@@ -1057,16 +1061,24 @@ wss.on('connection', (socket, req) => {
     if (msg.type === 'ready' && Array.isArray(msg.servers)) {
       return send({ ...msg, servers: msg.servers.filter((n) => n !== 'ayra' && !removed.has(n)) })
     }
+    // Her words: shown in her log, spoken only where `quiet` isn't set.
+    const words = (ask, parts) => {
+      for (const p of parts) if (p.text) send({ type: 'text', delta: p.text, ask, ...(p.quiet ? { quiet: true } : {}) })
+    }
     if (msg.type === 'text' && typeof msg.delta === 'string') {
       const delta = tagsFor(msg.ask).push(msg.delta)
-      if (!delta) return
-      msg = { ...msg, delta }
+      if (delta) words(msg.ask, tags.spoken.push(delta))
+      // Speech is about to be needed: keep her voice's socket open (eleven.mjs; at most every 10 s).
+      if (process.env.ELEVENLABS_API_KEY) preconnect()
+      return
     }
     if (msg.type === 'done' || msg.type === 'error') {
-      const rest = tags?.ask === msg.ask ? tags.filter.end() : ''
+      if (tags?.ask === msg.ask) {
+        const rest = tags.filter.end()
+        words(msg.ask, [...(rest ? tags.spoken.push(rest) : []), ...tags.spoken.end()])
+      }
       tags = null
-      if (rest) send({ type: 'text', delta: rest, ask: msg.ask })
-      if (msg.type === 'done' && typeof msg.text === 'string') msg = { ...msg, text: stripTags(msg.text) }
+      if (msg.type === 'done' && typeof msg.text === 'string') msg = { ...msg, text: unwrapMore(stripTags(msg.text)) }
     }
     // A web search's links and text, and the pages read, stay with the turn
     // for show_data and the sources card; the face never sees them. A turn's

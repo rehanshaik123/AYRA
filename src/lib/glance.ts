@@ -26,8 +26,12 @@ const tail = (s: string) => {
   return one.length > GLANCE_MAX ? `…${one.slice(-(GLANCE_MAX - 1))}` : one
 }
 
+/** The last turn of `role`: for her, what she SAID — her log may hold more (bridge/spoken.mjs). */
 const last = (turns: Turn[], role: Turn['role']) => {
-  for (let i = turns.length - 1; i >= 0; i--) if (turns[i].role === role) return turns[i].text
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i]
+    if (t.role === role) return role === 'assistant' && t.said != null ? t.said : t.text
+  }
   return ''
 }
 

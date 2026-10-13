@@ -281,24 +281,30 @@ export default function App() {
 
     const turnId = newId()
     let started = false
+    let shown = false
     let filled = false
 
     try {
       // Researcher mode is read as the question goes out: R pressed mid-answer
       // changes the next question, never the one in flight.
       await ask(said, {
-        onText: (delta) => {
+        onText: (delta, quiet) => {
           if (stale()) return
-          if (!started) {
+          if (!shown) {
+            shown = true
+            store.getState().pushTurn({ id: turnId, role: 'assistant', text: '', said: '' })
+          }
+          // Quiet words (details, a task's answer past its first lines) go in
+          // her log only; she speaks the rest (bridge/spoken.mjs).
+          if (!quiet && !started) {
             started = true
             store.getState().setPhase('speaking')
             // The answer arriving is what ends the tool phase — a timer would
             // clear the readout while a slow tool was still running.
             store.getState().setActiveTool(null)
-            store.getState().pushTurn({ id: turnId, role: 'assistant', text: '' })
           }
-          store.getState().appendToLastTurn(delta)
-          spk.push(delta)
+          store.getState().appendToLastTurn(delta, !quiet)
+          if (!quiet) spk.push(delta)
         },
         onTool: (name) => {
           if (stale()) return

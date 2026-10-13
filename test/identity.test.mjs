@@ -76,6 +76,14 @@ test('the voice persona: the ranker decides research, a web answer is said first
   assert.ok(!/\bquick \(|\bstandard\b|\bdeep\b|\bboard\b/i.test(SYSTEM_PROMPT))
 })
 
+test('the voice persona: a task in a line, a question answered, details in <more> (the owner, 2026-10-13)', () => {
+  assert.ok(SYSTEM_PROMPT.includes('only the minimum — status, progress and anything'))
+  assert.ok(SYSTEM_PROMPT.includes('A task — open, play, send, write, fix, move, set up, find and do: one short sentence.'))
+  assert.ok(SYSTEM_PROMPT.includes('Go into\n  depth only when they ask you to explain'))
+  assert.ok(SYSTEM_PROMPT.includes('inside <more>…</more>'))
+  assert.ok(!SYSTEM_PROMPT.includes('Length is licensed only when reading out data'))
+})
+
 test('the premium voice is the one the owner chose', () => {
   assert.equal(raw.voice.elevenLabsId, 'pFZP5JQG7iQjIQuC4Bku') // Lily — the owner's pick
 })

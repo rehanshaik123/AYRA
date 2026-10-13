@@ -14,8 +14,11 @@ import { withHonorific } from '../identity'
  */
 
 export type AskHandlers = {
-  /** Fires for each chunk of the spoken answer. */
-  onText: (delta: string) => void
+  /**
+   * Fires for each chunk of the answer. `quiet`: shown in her log, never spoken
+   * — details, or a task's answer past its first lines (bridge/spoken.mjs).
+   */
+  onText: (delta: string, quiet: boolean) => void
   /** Fires when Claude starts running a tool. */
   onTool: (name: string) => void
 }
@@ -39,6 +42,8 @@ type Frame = {
   by?: string
   /** `hearing` frames: how she listens — 'push' or 'hands-free'. */
   mode?: string
+  /** `text` frames: shown, not spoken. */
+  quiet?: boolean
   servers?: Array<string | { name?: string }>
 }
 
@@ -430,7 +435,7 @@ export async function ask(
         switch (msg.type) {
           case 'text':
             text += msg.delta ?? ''
-            handlers.onText(msg.delta ?? '')
+            handlers.onText(msg.delta ?? '', msg.quiet === true)
             break
 
           case 'tool':

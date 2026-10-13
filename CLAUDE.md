@@ -107,6 +107,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/jobs.mjs` · `bridge/presence.mjs` | Background jobs — one at a time, 30 min / 60 steps, reported on Telegram; tool server `ayra_jobs` · "I'm back" on Telegram after the laptop was off or asleep |
 | `bridge/research.mjs` · `bridge/trust.mjs` | **The research agent**: `createResearch()` → `run / interrupt / busy / recent / report`; code runs plan → search → read → extract → cross-check → answer with one-shot Claude agents (readers get no tools), reports saved in `data/research/` for replay and offline; tool server `ayra_research` · pure: source trust, injection scan, quote check, confidence |
 | `bridge/deep.mjs` · `bridge/platforms.mjs` | **Researcher mode** (the R key): `createDeepResearch()` → `run / interrupt / busy / ready / report`; planner (high effort) → one lane per platform → rank (relevance + platform signal + trust + freshness) → final cited answer; tool `deep_research` on `ayra_research` · GitHub / Stack Exchange / Hacker News / arXiv public APIs through net.mjs, `signalScore` |
+| `bridge/spoken.mjs` | How much of her answer is said: a task in two sentences, a question in full, `<more>` details shown only |
 | `bridge/fastpath.mjs` · `bridge/datatag.mjs` · `bridge/eleven.mjs` | "Open YouTube", "pause the music" done in code, no model turn · the answer's data card as a `<data>{…}</data>` tag after the spoken answer, cut from speech · a keep-alive ElevenLabs socket for her voice |
 | `bridge/echo.mjs` · `bridge/meter.ps1` | Hands-free ignores the laptop's own speakers: a Windows peak meter, and a burst whose loudness curve matches what was played is dropped before the name check |
 | `bridge/approvals.mjs` | The owner's Approve: holds each "ask" until the first answer (HUD, voice, Telegram) or 2 min → no; `halt()` is the kill switch |
@@ -152,7 +153,7 @@ wake a sleeping brain), `approval {id,ok,always}`, `halt`; brain sends `approve 
 `approved {id,ok,by}`, `halt {by}`,
 `ready {servers}`, `text {delta}`, `tool {name}`, `done {text}`, `error {message}`, `blade` (one with
 `kind: 'research'` carries `research`, the board state — same id each update) — turn
-frames carry `ask: <id>`. Her text may end with a `<data>{…}</data>` tag: the bridge cuts it from the `text`/`done` frames and draws the data card (datatag.mjs). A whole command like "open YouTube" may be answered by the bridge itself (`text` + `done`, no brain). Inside the bridge the brain also emits `sources {query, links}`, which the
+frames carry `ask: <id>`. Her text may end with a `<data>{…}</data>` tag: the bridge cuts it from the `text`/`done` frames and draws the data card (datatag.mjs). `text` frames with `quiet: true` are shown in her log, never spoken: `<more>…</more>` details, and a task's answer past two sentences (spoken.mjs). A whole command like "open YouTube" may be answered by the bridge itself (`text` + `done`, no brain). Inside the bridge the brain also emits `sources {query, links}`, which the
 HUD channel turns into a `blade`. Change both sides together or not at all. The core ↔ desk link protocol
 will live in `bridge/link.mjs` (Phase 10), and the same rule applies.
 
