@@ -97,7 +97,8 @@ const ini = [
   `title=${identity.wordmark}`,
   `hotkey=${env('HOTKEY', 'ctrl+alt+a')}`,
   `handsfree=${env('HANDSFREE_HOTKEY', 'ctrl+alt+w')}`,
-  `talk=${env('TALK_HOTKEY', 'ctrl+alt+space')}`,
+  `talk=${env('TALK_HOTKEY', 'alt+space')}`,
+  `bubble=${env('BUBBLE', 'on')}`,
 ]
 writeFileSync(join(HOME, 'ayra.ini'), `${ini.join('\r\n')}\r\n`)
 

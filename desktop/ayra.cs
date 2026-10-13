@@ -88,6 +88,8 @@ namespace Ayra
   class Config
   {
     public string Exe, Icon, Root, Node, Chrome, FaceUrl, HealthUrl, HearingUrl, TalkUrl, Title, Hotkey, HandsFreeHotkey, TalkHotkey;
+    // The bubble on top of every app (AYRA_BUBBLE=off turns it off for good).
+    public bool Bubble = true;
     public List<string> ChromeArgs = new List<string>();
 
     public static Config Load()
@@ -101,7 +103,7 @@ namespace Ayra
       c.Icon = Path.Combine(dir, "ayra.ico");
       c.Hotkey = "ctrl+alt+a";
       c.HandsFreeHotkey = "ctrl+alt+w";
-      c.TalkHotkey = "ctrl+alt+space";
+      c.TalkHotkey = "alt+space";
       foreach (var raw in File.ReadAllLines(path, Encoding.UTF8))
       {
         var line = raw.Trim();
@@ -121,6 +123,7 @@ namespace Ayra
           case "hotkey": if (value.Length > 0) c.Hotkey = value; break;
           case "handsfree": if (value.Length > 0) c.HandsFreeHotkey = value; break;
           case "talk": if (value.Length > 0) c.TalkHotkey = value; break;
+          case "bubble": c.Bubble = value != "off"; break;
         }
       }
       if (c.Root == null || c.Node == null || c.FaceUrl == null || c.HealthUrl == null || c.Title == null)
@@ -144,6 +147,9 @@ namespace Ayra
     // Talk from any app without bringing her window forward: what Space does in it.
     readonly HotkeyWindow talkKey;
     readonly ToolStripMenuItem handsFreeItem;
+    // AYRA on top of every app: click to talk (Bubble).
+    readonly Bubble bubble;
+    readonly ToolStripMenuItem bubbleItem;
     int switching;
     readonly SynchronizationContext ui;
     readonly System.Threading.Timer watch;
@@ -167,6 +173,13 @@ namespace Ayra
       menu.Items.Add("Talk from any app   " + Pretty(config.TalkHotkey), null, delegate { Talk(); });
       handsFreeItem = new ToolStripMenuItem("Hands-free: say AYRA   " + Pretty(config.HandsFreeHotkey), null, delegate { SwitchHearing(); });
       menu.Items.Add(handsFreeItem);
+      if (config.Bubble)
+      {
+        bubble = new Bubble(config, Talk, SwitchHearing, delegate { Open(false); }, delegate { ShowBubble(false); });
+        bubbleItem = new ToolStripMenuItem("Show the bubble", null, delegate { ShowBubble(!bubble.Wanted); });
+        bubbleItem.Checked = bubble.Wanted;
+        menu.Items.Add(bubbleItem);
+      }
       if (config.Chrome != null) menu.Items.Add("Open Chrome (AYRA)", null, delegate { window.OpenChrome(); });
       menu.Items.Add(new ToolStripSeparator());
       menu.Items.Add("Restart AYRA", null, delegate { ThreadPool.QueueUserWorkItem(delegate { bridge.Restart(); }); });
@@ -280,6 +293,14 @@ namespace Ayra
       finally { Interlocked.Exchange(ref busy, 0); }
     }
 
+    // The bubble on or off (remembered, with where it sits).
+    void ShowBubble(bool on)
+    {
+      if (bubble == null) return;
+      bubble.SetWanted(on);
+      bubbleItem.Checked = on;
+    }
+
     void Notify(string message)
     {
       ui.Post(delegate { if (icon.Visible) icon.ShowBalloonTip(6000, "AYRA", message, ToolTipIcon.Info); }, null);
@@ -291,6 +312,7 @@ namespace Ayra
       hotkey.Dispose();
       handsFreeKey.Dispose();
       talkKey.Dispose();
+      if (bubble != null) bubble.Close();
       icon.Visible = false;
       bridge.Stop();
       icon.Dispose();
@@ -782,6 +804,502 @@ namespace Ayra
       }
       return mods != 0 && key != 0;
     }
+  }
+
+  // A borderless window drawn with per-pixel alpha (smooth round edges, a soft
+  // glow) that stays on top and never takes the focus from the owner's app:
+  // the base of the bubble and its caption.
+  class LayeredForm : Form
+  {
+    const int WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x08000000;
+    const int WM_MOUSEACTIVATE = 0x21, MA_NOACTIVATE = 3;
+
+    public LayeredForm()
+    {
+      FormBorderStyle = FormBorderStyle.None;
+      ShowInTaskbar = false;
+      StartPosition = FormStartPosition.Manual;
+      TopMost = true;
+    }
+
+    protected override CreateParams CreateParams
+    {
+      get
+      {
+        var cp = base.CreateParams;
+        cp.ExStyle |= WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE;
+        return cp;
+      }
+    }
+
+    protected override bool ShowWithoutActivation { get { return true; } }
+
+    protected override void WndProc(ref Message m)
+    {
+      // A click must not pull the focus out of the owner's app.
+      if (m.Msg == WM_MOUSEACTIVATE) { m.Result = (IntPtr)MA_NOACTIVATE; return; }
+      base.WndProc(ref m);
+    }
+
+    // Puts a 32-bit ARGB picture on screen as this window, at its location.
+    public void Present(Bitmap bmp)
+    {
+      if (!IsHandleCreated) return;
+      IntPtr screen = Gdi.GetDC(IntPtr.Zero), mem = Gdi.CreateCompatibleDC(screen), hbmp = IntPtr.Zero, old = IntPtr.Zero;
+      try
+      {
+        hbmp = bmp.GetHbitmap(Color.FromArgb(0));
+        old = Gdi.SelectObject(mem, hbmp);
+        var size = new Gdi.SIZE(bmp.Width, bmp.Height);
+        var src = new Gdi.POINT(0, 0);
+        var dst = new Gdi.POINT(Left, Top);
+        var blend = new Gdi.BLENDFUNCTION { BlendOp = 0, BlendFlags = 0, SourceConstantAlpha = 255, AlphaFormat = 1 };
+        Gdi.UpdateLayeredWindow(Handle, screen, ref dst, ref size, mem, ref src, 0, ref blend, 2);
+      }
+      finally
+      {
+        if (old != IntPtr.Zero) Gdi.SelectObject(mem, old);
+        if (hbmp != IntPtr.Zero) Gdi.DeleteObject(hbmp);
+        Gdi.DeleteDC(mem);
+        Gdi.ReleaseDC(IntPtr.Zero, screen);
+      }
+    }
+  }
+
+  // The bubble: AYRA on top of every app (the owner's choice, 2026-10-13).
+  //   - a click is Space (POST /talk): she listens, sends, or stops and listens;
+  //     a double click stops everything; the owner's app stays in front
+  //   - it glows by her phase and flashes when hands-free hears her name
+  //   - one line beside it: what she heard, or what she is saying
+  //   - drag it anywhere; right-click for hands-free, her window, hiding it
+  //   - out of the way of a full-screen app (a video, a game)
+  // Her state comes from the bridge's /face (tray only), polled 5 times a second.
+  class Bubble : LayeredForm
+  {
+    readonly Config config;
+    readonly Action talk, switchHearing, openWindow, hideMe;
+    readonly Caption caption;
+    readonly ContextMenuStrip menu;
+    readonly ToolStripMenuItem handsFreeItem;
+    readonly System.Windows.Forms.Timer anim;
+    readonly Bitmap face;
+    readonly int body, pad;
+    readonly float scale;
+    readonly string place;
+    string phase = "offline", text = "", who = "", by = "", hearing = "push";
+    int faces;
+    DateTime flashUntil = DateTime.MinValue, lastBusy = DateTime.MinValue, lastDraw = DateTime.MinValue;
+    readonly DateTime started = DateTime.Now;
+    bool dragging, down, fullscreen, wanted = true;
+    Point grab;
+    volatile bool closing;
+
+    public Bubble(Config config, Action talk, Action switchHearing, Action openWindow, Action hideMe)
+    {
+      this.config = config;
+      this.talk = talk;
+      this.switchHearing = switchHearing;
+      this.openWindow = openWindow;
+      this.hideMe = hideMe;
+      using (var g = Graphics.FromHwnd(IntPtr.Zero)) scale = g.DpiX / 96f;
+      body = (int)(52 * scale);
+      pad = (int)(12 * scale);
+      Size = new Size(body + 2 * pad, body + 2 * pad);
+      face = LoadFace(config.Icon);
+      place = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AYRA", "bubble.txt");
+      Location = Restore();
+      caption = new Caption(scale);
+
+      menu = new ContextMenuStrip();
+      handsFreeItem = new ToolStripMenuItem("Hands-free: say AYRA", null, delegate { switchHearing(); });
+      menu.Items.Add(handsFreeItem);
+      menu.Items.Add("Open AYRA's window", null, delegate { openWindow(); });
+      menu.Items.Add(new ToolStripSeparator());
+      menu.Items.Add("Hide the bubble", null, delegate { hideMe(); });
+
+      anim = new System.Windows.Forms.Timer();
+      anim.Interval = 33;
+      anim.Tick += delegate
+      {
+        // 30 frames a second while something is happening; 4 when she is resting.
+        if (!Busy(phase) && DateTime.Now > flashUntil && (DateTime.Now - lastDraw).TotalMilliseconds < 250) return;
+        Draw();
+      };
+      anim.Start();
+      // A window that has never been shown has no handle, and the poll's updates need one.
+      CreateHandle();
+      var poll = new Thread(Poll);
+      poll.IsBackground = true;
+      poll.Start();
+    }
+
+    public bool Wanted { get { return wanted; } }
+
+    // Her face from ayra.ico, its largest picture. scripts/icon.mjs stores every
+    // size as PNG, which .NET Framework's Icon.ToBitmap turns into static (seen
+    // 2026-10-13), so the PNG is read from the file itself.
+    static Bitmap LoadFace(string path)
+    {
+      try
+      {
+        var b = File.ReadAllBytes(path);
+        int count = BitConverter.ToUInt16(b, 4), best = -1, bestSize = 0;
+        for (int i = 0; i < count; i++)
+        {
+          int e = 6 + 16 * i, size = b[e] == 0 ? 256 : b[e];
+          if (size > bestSize) { bestSize = size; best = e; }
+        }
+        if (best < 0) return null;
+        int length = BitConverter.ToInt32(b, best + 8), offset = BitConverter.ToInt32(b, best + 12);
+        using (var ms = new MemoryStream(b, offset, length))
+        using (var img = Image.FromStream(ms)) return new Bitmap(img);
+      }
+      catch
+      {
+        try { using (var ico = new Icon(path, 64, 64)) return ico.ToBitmap(); }
+        catch { return null; }
+      }
+    }
+
+    public void SetWanted(bool on)
+    {
+      wanted = on;
+      Save();
+      Arrange();
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+      base.OnHandleCreated(e);
+      Draw();
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+      closing = true;
+      anim.Stop();
+      caption.Close();
+      base.OnFormClosed(e);
+    }
+
+    // -- the owner's hands -------------------------------------------------
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+      if (e.Button == MouseButtons.Left) { down = true; dragging = false; grab = e.Location; }
+      base.OnMouseDown(e);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+      if (down && !dragging && (Math.Abs(e.X - grab.X) > 4 * scale || Math.Abs(e.Y - grab.Y) > 4 * scale)) dragging = true;
+      if (dragging)
+      {
+        Location = new Point(Left + e.X - grab.X, Top + e.Y - grab.Y);
+        Draw();
+      }
+      base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+      if (e.Button == MouseButtons.Left && down)
+      {
+        down = false;
+        if (dragging) { dragging = false; Save(); }
+        else talk();
+      }
+      else if (e.Button == MouseButtons.Right)
+      {
+        handsFreeItem.Checked = hearing == "hands-free";
+        menu.Show(Cursor.Position);
+      }
+      base.OnMouseUp(e);
+    }
+
+    // -- her state ---------------------------------------------------------
+
+    void Poll()
+    {
+      var url = config.HealthUrl.Substring(0, config.HealthUrl.LastIndexOf('/')) + "/face";
+      while (!closing)
+      {
+        string body = null;
+        try
+        {
+          var req = (HttpWebRequest)WebRequest.Create(url);
+          req.Timeout = 800;
+          req.Proxy = null;
+          req.Headers["x-ayra"] = "tray";
+          using (var res = (HttpWebResponse)req.GetResponse())
+          using (var r = new StreamReader(res.GetResponseStream(), Encoding.UTF8)) body = r.ReadToEnd();
+        }
+        catch { body = null; }
+        var full = Fullscreen();
+        try
+        {
+          if (!closing && IsHandleCreated) BeginInvoke((Action)delegate { Take(body, full); });
+        }
+        catch { }
+        Thread.Sleep(200);
+      }
+    }
+
+    static string Field(string body, string name)
+    {
+      var m = Regex.Match(body, "\"" + name + "\":\"((?:\\\\.|[^\"\\\\])*)\"");
+      if (!m.Success) return "";
+      try { return Regex.Unescape(m.Groups[1].Value); }
+      catch { return m.Groups[1].Value; }
+    }
+
+    void Take(string body, bool full)
+    {
+      var was = phase;
+      var wasBy = by;
+      if (body == null) { phase = "offline"; text = ""; who = ""; by = ""; faces = 0; }
+      else
+      {
+        phase = Field(body, "phase");
+        text = Field(body, "text");
+        who = Field(body, "who");
+        by = Field(body, "by");
+        hearing = Field(body, "hearing");
+        var f = Regex.Match(body, "\"faces\":(\\d+)");
+        faces = f.Success ? int.Parse(f.Groups[1].Value) : 0;
+        if (faces == 0) phase = "offline";
+      }
+      if (Busy(phase)) lastBusy = DateTime.Now;
+      // Her name heard: a flash, so the owner knows at once that she heard.
+      if (phase == "listening" && by == "name" && (was != "listening" || wasBy != "name")) flashUntil = DateTime.Now.AddMilliseconds(700);
+      fullscreen = full;
+      Arrange();
+    }
+
+    static bool Busy(string p) { return p == "waking" || p == "listening" || p == "thinking" || p == "tooling" || p == "speaking"; }
+
+    // Shown or hidden, and the caption beside it.
+    void Arrange()
+    {
+      var show = wanted && !fullscreen;
+      if (show && !Visible) { Show(); Draw(); }
+      if (!show && Visible) Hide();
+      // The last answer stays a few seconds after she finishes, then fades.
+      var recent = (DateTime.Now - lastBusy).TotalSeconds < 5;
+      var line = show && text.Length > 0 && (Busy(phase) || (phase == "dormant" && recent)) ? text : "";
+      if (line.Length == 0 && show && phase == "listening") line = by == "name" ? "Yes? I'm listening." : "Listening...";
+      caption.Say(line, who == "you", Bounds);
+    }
+
+    // The glow by phase; animated while something is happening.
+    void Draw()
+    {
+      if (!Visible || !IsHandleCreated) return;
+      lastDraw = DateTime.Now;
+      var t = (DateTime.Now - started).TotalSeconds;
+      Color ring;
+      float glow, sweep = 0;
+      if (phase == "offline" || phase == "boot") { ring = Color.FromArgb(110, 120, 130); glow = 0.15f; }
+      else if (phase == "listening" || phase == "waking") { ring = Color.FromArgb(56, 189, 248); glow = 0.55f + 0.35f * (float)Math.Abs(Math.Sin(t * 4)); }
+      else if (phase == "thinking" || phase == "tooling") { ring = Color.FromArgb(245, 158, 11); glow = 0.45f; sweep = (float)(t * 360 % 360); }
+      else if (phase == "speaking") { ring = Color.FromArgb(244, 114, 182); glow = 0.45f + 0.35f * (float)Math.Abs(Math.Sin(t * 6)); }
+      else if (hearing == "hands-free") { ring = Color.FromArgb(34, 211, 238); glow = 0.25f + 0.15f * (float)Math.Abs(Math.Sin(t * 1.2)); }
+      else { ring = Color.FromArgb(45, 212, 191); glow = 0.2f; }
+      var flash = DateTime.Now < flashUntil;
+      if (flash) { ring = Color.White; glow = 1f; }
+
+      var w = Width;
+      using (var bmp = new Bitmap(w, Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+      using (var g = Graphics.FromImage(bmp))
+      {
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+        // The soft halo: rings fading outwards.
+        for (int i = pad; i > 0; i -= 2)
+        {
+          var a = (int)(glow * 110 * (1 - (float)i / pad));
+          using (var p = new Pen(Color.FromArgb(Math.Max(0, Math.Min(255, a)), ring), 2))
+            g.DrawEllipse(p, pad - i, pad - i, body + 2 * i - 1, body + 2 * i - 1);
+        }
+        var disc = new Rectangle(pad, pad, body, body);
+        using (var b = new SolidBrush(Color.FromArgb(235, 12, 18, 28))) g.FillEllipse(b, disc);
+        if (face != null)
+        {
+          using (var clip = new System.Drawing.Drawing2D.GraphicsPath())
+          {
+            var inner = Rectangle.Inflate(disc, -(int)(3 * scale), -(int)(3 * scale));
+            clip.AddEllipse(inner);
+            g.SetClip(clip);
+            g.DrawImage(face, inner);
+            g.ResetClip();
+          }
+          if (phase == "offline")
+            using (var dim = new SolidBrush(Color.FromArgb(120, 12, 18, 28))) g.FillEllipse(dim, disc);
+        }
+        using (var p = new Pen(Color.FromArgb((int)(120 + 135 * Math.Min(1f, glow)), ring), 2.5f * scale))
+        {
+          if (sweep > 0 || phase == "thinking" || phase == "tooling")
+          {
+            using (var faint = new Pen(Color.FromArgb(70, ring), 2.5f * scale)) g.DrawEllipse(faint, disc);
+            g.DrawArc(p, disc, sweep, 100);
+          }
+          else g.DrawEllipse(p, disc);
+        }
+        Present(bmp);
+      }
+    }
+
+    // -- where it sits -----------------------------------------------------
+
+    Point Restore()
+    {
+      var area = Screen.PrimaryScreen.WorkingArea;
+      var fallback = new Point(area.Right - Width - (int)(16 * scale), area.Bottom - Height - (int)(16 * scale));
+      try
+      {
+        if (!File.Exists(place)) return fallback;
+        var parts = File.ReadAllText(place).Trim().Split(' ');
+        var p = new Point(int.Parse(parts[0]), int.Parse(parts[1]));
+        if (parts.Length > 2) wanted = parts[2] != "hidden";
+        // Still on a screen that is plugged in?
+        foreach (var s in Screen.AllScreens)
+          if (s.WorkingArea.IntersectsWith(new Rectangle(p, Size))) return p;
+      }
+      catch { }
+      return fallback;
+    }
+
+    void Save()
+    {
+      try
+      {
+        Directory.CreateDirectory(Path.GetDirectoryName(place));
+        File.WriteAllText(place, Left + " " + Top + " " + (wanted ? "shown" : "hidden"));
+      }
+      catch { }
+    }
+
+    // A full-screen app in front (a video, a game, a slideshow): stay out of its way.
+    bool Fullscreen()
+    {
+      try
+      {
+        var h = Native.GetForegroundWindow();
+        if (h == IntPtr.Zero) return false;
+        var cls = new StringBuilder(64);
+        Native.GetClassName(h, cls, cls.Capacity);
+        var c = cls.ToString();
+        if (c == "Progman" || c == "WorkerW" || c == "Shell_TrayWnd") return false;
+        Gdi.RECT r;
+        if (!Gdi.GetWindowRect(h, out r)) return false;
+        var b = Screen.FromHandle(h).Bounds;
+        return r.Left <= b.Left && r.Top <= b.Top && r.Right >= b.Right && r.Bottom >= b.Bottom;
+      }
+      catch { return false; }
+    }
+  }
+
+  // The line beside the bubble: what she heard (grey) or what she is saying (white).
+  class Caption : LayeredForm
+  {
+    readonly float scale;
+    readonly Font font;
+    string shown = "";
+    bool mine;
+    Rectangle anchor;
+
+    public Caption(float scale)
+    {
+      this.scale = scale;
+      font = new Font("Segoe UI", 10f);
+    }
+
+    public void Say(string line, bool yours, Rectangle bubble)
+    {
+      if (line == shown && yours == mine && bubble == anchor) return;
+      shown = line;
+      mine = yours;
+      anchor = bubble;
+      if (line.Length == 0) { if (Visible) Hide(); return; }
+      var maxW = (int)(420 * scale);
+      Size need;
+      var flags = TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
+      using (var g = Graphics.FromHwnd(IntPtr.Zero))
+      {
+        need = TextRenderer.MeasureText(g, line, font, new Size(int.MaxValue, 1000), flags);
+        // Too long for one line: keep the newest words — while she talks, the
+        // end of the sentence is the part being said.
+        var cut = 0;
+        var whole = line;
+        while (need.Width > maxW && cut < whole.Length - 8)
+        {
+          cut += 4;
+          var rest = whole.Substring(cut);
+          var space = rest.IndexOf(' ');
+          if (space > 0 && space < 12) rest = rest.Substring(space + 1);
+          line = "…" + rest.TrimStart('…');
+          need = TextRenderer.MeasureText(g, line, font, new Size(int.MaxValue, 1000), flags);
+        }
+      }
+      int padX = (int)(12 * scale), padY = (int)(7 * scale);
+      var w = Math.Min(maxW, need.Width) + 2 * padX;
+      var h = need.Height + 2 * padY;
+      // Beside the bubble, towards the middle of the screen.
+      var area = Screen.FromRectangle(bubble).WorkingArea;
+      var left = bubble.Left + bubble.Width / 2 > area.Left + area.Width / 2 ? bubble.Left - w + (int)(4 * scale) : bubble.Right - (int)(4 * scale);
+      var top = bubble.Top + (bubble.Height - h) / 2;
+      Bounds = new Rectangle(Math.Max(area.Left, Math.Min(left, area.Right - w)), Math.Max(area.Top, top), w, h);
+      if (!Visible) Show();
+      using (var bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+      using (var g = Graphics.FromImage(bmp))
+      {
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        using (var path = Rounded(new Rectangle(0, 0, w - 1, h - 1), (int)(10 * scale)))
+        using (var b = new SolidBrush(Color.FromArgb(230, 12, 18, 28)))
+        using (var edge = new Pen(Color.FromArgb(90, 56, 189, 248)))
+        {
+          g.FillPath(b, path);
+          g.DrawPath(edge, path);
+        }
+        var colour = mine ? Color.FromArgb(170, 185, 200) : Color.FromArgb(240, 245, 250);
+        using (var brush = new SolidBrush(colour))
+        using (var fmt = new StringFormat(StringFormatFlags.NoWrap))
+        {
+          fmt.Trimming = StringTrimming.EllipsisCharacter;
+          g.DrawString(line, font, brush, new RectangleF(padX, padY - 1, w - 2 * padX, h - 2 * padY + 2), fmt);
+        }
+        Present(bmp);
+      }
+    }
+
+    static System.Drawing.Drawing2D.GraphicsPath Rounded(Rectangle r, int radius)
+    {
+      var d = radius * 2;
+      var p = new System.Drawing.Drawing2D.GraphicsPath();
+      p.AddArc(r.Left, r.Top, d, d, 180, 90);
+      p.AddArc(r.Right - d, r.Top, d, d, 270, 90);
+      p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+      p.AddArc(r.Left, r.Bottom - d, d, d, 90, 90);
+      p.CloseFigure();
+      return p;
+    }
+  }
+
+  static class Gdi
+  {
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; public POINT(int x, int y) { X = x; Y = y; } }
+    [StructLayout(LayoutKind.Sequential)] public struct SIZE { public int W, H; public SIZE(int w, int h) { W = w; H = h; } }
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential, Pack = 1)] public struct BLENDFUNCTION { public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat; }
+    [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+    [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+    [DllImport("user32.dll")] public static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize, IntPtr hdcSrc, ref POINT pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
   }
 
   static class Shortcuts
