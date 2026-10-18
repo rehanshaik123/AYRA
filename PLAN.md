@@ -424,6 +424,12 @@ hotkey becomes Alt+Space.
 - [x] B.9 The minute after every answer: she keeps listening 60 s, but only a sentence that starts with
       "AYRA" counts (wake.ts followUpVerdict); anything else — TV, people, noise — is ignored and kept off
       screen; just her name → "Yes?"; music isn't held paused; Space / Alt+Space / a click then is a normal turn.
+- [x] B.10 Hearing that doesn't cut the owner off: back from the browser recogniser by itself (on the next press
+      after 2 min), more patience before a command counts as finished (a full stop on a pause no longer ends it),
+      the browser recogniser waits 1.4 s. The new ElevenLabs key checked: voice and hearing allowed.
+- [x] B.11 More instant commands (fast path): "stop it" / "pause" when music plays, volume up / down / mute,
+      "play X" (YouTube, first result playing), "play X on Spotify" (search + its Play button, confirmed by
+      Windows' media controls), "search X on YouTube / Google", "close X", several in one breath.
 
 ## Phase 7 — Apps, one at a time · branch `phase-7-apps`
 
