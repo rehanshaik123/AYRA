@@ -90,6 +90,8 @@ namespace Ayra
     public string Exe, Icon, Root, Node, Chrome, FaceUrl, HealthUrl, HearingUrl, TalkUrl, Title, Hotkey, HandsFreeHotkey, TalkHotkey;
     // The bubble on top of every app (AYRA_BUBBLE=off turns it off for good).
     public bool Bubble = true;
+    // Hands-free (say her name) is off unless ayra.ini names a hotkey for it (AYRA_HANDSFREE=on).
+    public bool HandsFree { get { return HandsFreeHotkey != "off"; } }
     public List<string> ChromeArgs = new List<string>();
 
     public static Config Load()
@@ -172,7 +174,7 @@ namespace Ayra
       menu.Items.Add("Talk to AYRA   " + Pretty(config.Hotkey), null, delegate { Open(true); });
       menu.Items.Add("Talk from any app   " + Pretty(config.TalkHotkey), null, delegate { Talk(); });
       handsFreeItem = new ToolStripMenuItem("Hands-free: say AYRA   " + Pretty(config.HandsFreeHotkey), null, delegate { SwitchHearing(); });
-      menu.Items.Add(handsFreeItem);
+      if (config.HandsFree) menu.Items.Add(handsFreeItem);
       if (config.Bubble)
       {
         bubble = new Bubble(config, Talk, SwitchHearing, delegate { Open(false); }, delegate { ShowBubble(false); });
@@ -884,6 +886,11 @@ namespace Ayra
     readonly System.Windows.Forms.Timer anim;
     readonly Bitmap face;
     readonly int body, pad;
+    // Her figure, one picture per pose (scripts/figure.mjs → figure\*.png beside
+    // the exe), scaled once to the size shown; null falls back to the round icon.
+    readonly Dictionary<string, Bitmap> frames;
+    readonly int figW, figH;
+    static readonly string[] FrameNames = { "sleep", "idle", "listen", "think", "magic", "talk-open", "talk-shut" };
     readonly float scale;
     readonly string place;
     string phase = "offline", text = "", who = "", by = "", hearing = "push";
@@ -902,17 +909,29 @@ namespace Ayra
       this.openWindow = openWindow;
       this.hideMe = hideMe;
       using (var g = Graphics.FromHwnd(IntPtr.Zero)) scale = g.DpiX / 96f;
-      body = (int)(52 * scale);
-      pad = (int)(12 * scale);
-      Size = new Size(body + 2 * pad, body + 2 * pad);
-      face = LoadFace(config.Icon);
+      // Her figure (the owner, 2026-10-18: "exactly her figure"), else the round icon.
+      figH = (int)(136 * scale);
+      figW = figH * 400 / 440;
+      frames = LoadFrames(Path.Combine(Path.GetDirectoryName(config.Exe), "figure"), figW, figH);
+      if (frames != null)
+      {
+        pad = (int)(14 * scale);
+        Size = new Size(figW + 2 * pad, figH + 2 * pad);
+      }
+      else
+      {
+        body = (int)(52 * scale);
+        pad = (int)(12 * scale);
+        Size = new Size(body + 2 * pad, body + 2 * pad);
+      }
+      face = frames == null ? LoadFace(config.Icon) : null;
       place = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AYRA", "bubble.txt");
       Location = Restore();
       caption = new Caption(scale);
 
       menu = new ContextMenuStrip();
       handsFreeItem = new ToolStripMenuItem("Hands-free: say AYRA", null, delegate { switchHearing(); });
-      menu.Items.Add(handsFreeItem);
+      if (config.HandsFree) menu.Items.Add(handsFreeItem);
       menu.Items.Add("Open AYRA's window", null, delegate { openWindow(); });
       menu.Items.Add(new ToolStripSeparator());
       menu.Items.Add("Hide the bubble", null, delegate { hideMe(); });
@@ -922,7 +941,9 @@ namespace Ayra
       anim.Tick += delegate
       {
         // 30 frames a second while something is happening; 4 when she is resting.
-        if (!Busy(phase) && DateTime.Now > flashUntil && (DateTime.Now - lastDraw).TotalMilliseconds < 250) return;
+        // (Her figure bobs gently at standby: 15 frames a second then.)
+        var rest = frames != null && phase == "dormant" ? 66 : 250;
+        if (!Busy(phase) && DateTime.Now > flashUntil && (DateTime.Now - lastDraw).TotalMilliseconds < rest) return;
         Draw();
       };
       anim.Start();
@@ -934,6 +955,81 @@ namespace Ayra
     }
 
     public bool Wanted { get { return wanted; } }
+
+    // Every pose's picture, scaled once to the size she is shown at; null if any is missing.
+    static Dictionary<string, Bitmap> LoadFrames(string dir, int w, int h)
+    {
+      try
+      {
+        var all = new Dictionary<string, Bitmap>();
+        foreach (var name in FrameNames)
+        {
+          var path = Path.Combine(dir, name + ".png");
+          if (!File.Exists(path)) return null;
+          using (var src = Image.FromFile(path))
+          {
+            var b = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(b))
+            {
+              g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+              g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+              g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+              g.DrawImage(src, 0, 0, w, h);
+            }
+            all[name] = b;
+          }
+        }
+        return all;
+      }
+      catch { return null; }
+    }
+
+    // Her figure in the pose that fits the phase, a glow behind her in its colour.
+    void DrawFigure(Color ring, float glow, bool flash, double t)
+    {
+      string frame;
+      if (flash) frame = "listen";
+      else if (phase == "offline" || phase == "boot") frame = "sleep";
+      else if (phase == "listening" || phase == "waking") frame = "listen";
+      else if (phase == "thinking") frame = "think";
+      else if (phase == "tooling") frame = "magic";
+      // Talking: her mouth opens and shuts about seven times a second.
+      else if (phase == "speaking") frame = ((int)(t * 7)) % 2 == 0 ? "talk-open" : "talk-shut";
+      else frame = "idle";
+      var img = frames[frame];
+      using (var bmp = new Bitmap(Width, Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+      using (var g = Graphics.FromImage(bmp))
+      {
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        var halo = new Rectangle(pad / 3, pad / 2, Width - 2 * (pad / 3), (int)(figH * 0.95));
+        using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+        {
+          path.AddEllipse(halo);
+          using (var brush = new System.Drawing.Drawing2D.PathGradientBrush(path))
+          {
+            brush.CenterColor = Color.FromArgb((int)(Math.Min(1f, glow) * 170), ring);
+            brush.SurroundColors = new[] { Color.FromArgb(0, ring) };
+            g.FillEllipse(brush, halo);
+          }
+        }
+        // A gentle bob while she waits.
+        var bob = phase == "dormant" ? (int)Math.Round(Math.Sin(t * 1.6) * 2 * scale) : 0;
+        var at = new Rectangle(pad, pad + bob, figW, figH);
+        if (phase == "offline" || phase == "boot")
+        {
+          // Her window is closed: asleep, and a little faded.
+          var cm = new System.Drawing.Imaging.ColorMatrix();
+          cm.Matrix33 = 0.6f;
+          using (var ia = new System.Drawing.Imaging.ImageAttributes())
+          {
+            ia.SetColorMatrix(cm);
+            g.DrawImage(img, at, 0, 0, img.Width, img.Height, GraphicsUnit.Pixel, ia);
+          }
+        }
+        else g.DrawImage(img, at);
+        Present(bmp);
+      }
+    }
 
     // Her face from ayra.ico, its largest picture. scripts/icon.mjs stores every
     // size as PNG, which .NET Framework's Icon.ToBitmap turns into static (seen
@@ -1107,6 +1203,7 @@ namespace Ayra
       else { ring = Color.FromArgb(45, 212, 191); glow = 0.2f; }
       var flash = DateTime.Now < flashUntil;
       if (flash) { ring = Color.White; glow = 1f; }
+      if (frames != null) { DrawFigure(ring, glow, flash, t); return; }
 
       var w = Width;
       using (var bmp = new Bitmap(w, Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
@@ -1161,9 +1258,14 @@ namespace Ayra
         var parts = File.ReadAllText(place).Trim().Split(' ');
         var p = new Point(int.Parse(parts[0]), int.Parse(parts[1]));
         if (parts.Length > 2) wanted = parts[2] != "hidden";
-        // Still on a screen that is plugged in?
+        // Still on a screen that is plugged in? Then wholly on it — she may be
+        // bigger than when the place was saved.
         foreach (var s in Screen.AllScreens)
-          if (s.WorkingArea.IntersectsWith(new Rectangle(p, Size))) return p;
+        {
+          var wa = s.WorkingArea;
+          if (!wa.IntersectsWith(new Rectangle(p, Size))) continue;
+          return new Point(Math.Max(wa.Left, Math.Min(p.X, wa.Right - Width)), Math.Max(wa.Top, Math.Min(p.Y, wa.Bottom - Height)));
+        }
       }
       catch { }
       return fallback;

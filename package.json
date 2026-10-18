@@ -13,6 +13,7 @@
     "start:dev": "node scripts/start.mjs --dev",
     "shortcuts": "node scripts/shortcuts.mjs",
     "icon": "node scripts/icon.mjs",
+    "figure": "node scripts/figure.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",

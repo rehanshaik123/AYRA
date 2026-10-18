@@ -21,7 +21,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -84,6 +84,12 @@ if (wasRunning) {
 
 renameSync(NEXT, EXE)
 copyFileSync(join(ROOT, 'desktop', 'ayra.ico'), join(HOME, 'ayra.ico'))
+// Her figure for the bubble (npm run figure draws it from her face), one picture per pose.
+const FIGURE = join(ROOT, 'desktop', 'figure')
+if (existsSync(FIGURE)) {
+  mkdirSync(join(HOME, 'figure'), { recursive: true })
+  for (const f of readdirSync(FIGURE).filter((n) => n.endsWith('.png'))) copyFileSync(join(FIGURE, f), join(HOME, 'figure', f))
+}
 console.log(`built ${EXE}`)
 
 const chrome = chromePath()
@@ -96,7 +102,8 @@ const ini = [
   `health=http://127.0.0.1:${env('BRIDGE_PORT', '8787')}/health`,
   `title=${identity.wordmark}`,
   `hotkey=${env('HOTKEY', 'ctrl+alt+a')}`,
-  `handsfree=${env('HANDSFREE_HOTKEY', 'ctrl+alt+w')}`,
+  // Hands-free is off unless AYRA_HANDSFREE=on (the owner, 2026-10-18): no hotkey, no menu item.
+  `handsfree=${env('HANDSFREE', 'off') === 'on' ? env('HANDSFREE_HOTKEY', 'ctrl+alt+w') : 'off'}`,
   `talk=${env('TALK_HOTKEY', 'alt+space')}`,
   `bubble=${env('BUBBLE', 'on')}`,
 ]
