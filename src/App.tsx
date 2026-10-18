@@ -30,7 +30,7 @@ import {
 import { inputLevel } from './lib/listen'
 import { glance, sameGlance, type Glance } from './lib/glance'
 import { caps, probeCapabilities } from './lib/capabilities'
-import { BARE_NAME, LEADING_NAME, addressed, afterWake, onlyName } from './lib/wake'
+import { BARE_NAME, LEADING_NAME, addressed, afterWake, followUpVerdict, onlyName } from './lib/wake'
 import { withHonorific } from './identity'
 
 /**
@@ -77,7 +77,12 @@ const SEND_GRACE_MS = 1500
  * listening this long for a follow-up without her name before going back to
  * waiting for it. Short on purpose: a video playing nearby can't hold her.
  */
-const FOLLOW_UP_MS = 15000
+/**
+ * After every answer she listens this long for more (the owner, 2026-10-18:
+ * "wait for 1 min after finishing the task to see if I want more things
+ * done"), and in that minute only a sentence that starts with her name counts.
+ */
+const FOLLOW_UP_MS = 60_000
 
 /** A follow-up that only ends the conversation — no question for the model. */
 const DISMISS = /^(that'?s (all|it)|thanks?|thank you|nothing|no thanks|never ?mind|stop|bye|okay,? thanks?)[\s.!]*$/i
@@ -166,6 +171,8 @@ export default function App() {
   const wokeByName = useRef(false)
   /** This listening window is the hands-free follow-up after an answer. */
   const followUp = useRef(false)
+  /** When the minute after an answer ends (Date.now() ms). */
+  const followUntil = useRef(0)
   /**
    * Music paused for listening (the owner, 2026-10-11: she was answering
    * Spotify's lyrics). Resumed only once she is really back on standby — a
@@ -184,7 +191,7 @@ export default function App() {
     if (!mediaPaused.current || mediaTimer.current) return
     mediaTimer.current = setTimeout(() => {
       mediaTimer.current = null
-      if (store.getState().phase !== 'dormant') return
+      if (store.getState().phase !== 'dormant' && !followUp.current) return
       mediaPaused.current = false
       media('resume')
     }, 800)
@@ -216,6 +223,7 @@ export default function App() {
     const s = store.getState()
     s.setCaption('')
     s.setActiveTool(null)
+    s.setFollowing(false)
     sfx.duck(false)
     s.setPhase('dormant')
     resumeMediaSoon()
@@ -224,12 +232,20 @@ export default function App() {
   /** Open the mic and wait. `window` is how long before she gives up.
    *  `from: 'name'` — the spotter heard her name: listening starts from just
    *  before it (the microphone is already open), with no cue to wait for. */
-  const listen = (window: number, from: 'press' | 'name' = 'press') => {
+  const listen = (window: number, from: 'press' | 'name' | 'follow' = 'press') => {
     clearIdle()
     heard.current = false
     const s = store.getState()
     s.setCaption('')
     s.setPhase('listening')
+    s.setFollowing(from === 'follow')
+    // The minute after an answer: quiet — no cue, the music plays on, and the
+    // brain wakes only if she is really spoken to.
+    if (from === 'follow') {
+      void voice.current?.open()
+      idleTimer.current = setTimeout(stopListening, window)
+      return
+    }
     pauseMedia()
     // Wake a napping brain now, not when speech is first heard: its ~3.7 s
     // start-up then overlaps the whole question (free when it is awake).
@@ -343,12 +359,10 @@ export default function App() {
         sfx.duck(false)
         store.getState().setActiveTool(null)
         goDormant()
-        // Hands-free: she stays for a follow-up without her name, then goes
-        // back to waiting for it. Push-to-talk: closed until Space.
-        if (store.getState().hearing === 'hands-free') {
-          followUp.current = true
-          listen(FOLLOW_UP_MS)
-        }
+        // A minute more, for "AYRA, …" only (the owner, 2026-10-18).
+        followUp.current = true
+        followUntil.current = Date.now() + FOLLOW_UP_MS
+        listen(FOLLOW_UP_MS, 'follow')
       }
     }
   }
@@ -467,6 +481,26 @@ export default function App() {
       if (SAID_YES.test(said)) answer(waiting.id, true)
       else if (SAID_NO.test(said)) answer(waiting.id, false)
       stopListening()
+      return
+    }
+
+    // The minute after an answer: only "AYRA …" counts. The TV, other people
+    // and noise are ignored, and the minute goes on.
+    const verdict = following ? followUpVerdict(text) : null
+    if (verdict === 'ignore') {
+      const left = followUntil.current - Date.now()
+      if (left > 1500) {
+        followUp.current = true
+        listen(left, 'follow')
+      } else goDormant()
+      return
+    }
+    // Just her name in that minute: "Yes?", and she listens for the rest.
+    if (verdict === 'name') {
+      const line = createSpeaker()
+      line.say('Yes?')
+      void line.end()
+      listen(AWAIT_SPEECH_MS)
       return
     }
 
@@ -592,6 +626,8 @@ export default function App() {
   }
 
   const onPartial = (text: string) => {
+    // In the minute after an answer, words that aren't for her stay off screen.
+    if (followUp.current && followUpVerdict(text) === 'ignore') return
     store.getState().setCaption(text)
   }
 
@@ -724,7 +760,8 @@ export default function App() {
     let timer = 0
     const report = () => {
       timer = 0
-      const g = glance(store.getState(), wokeByName.current ? 'name' : 'press')
+      const st = store.getState()
+      const g = glance(st, st.following ? 'follow' : wokeByName.current ? 'name' : 'press')
       if (sameGlance(sent, g)) return
       sent = g
       reportFace(g)
@@ -886,6 +923,11 @@ export default function App() {
         void powerOn()
       } else if (phase === 'boot') {
         /* ignore — the boot sequence owns the phase until it finishes */
+      } else if (phase === 'listening' && store.getState().following) {
+        // A press in the quiet minute after an answer: she listens properly
+        // now, the chime and all, and no name is needed.
+        followUp.current = false
+        listen(AWAIT_SPEECH_MS)
       } else if (phase === 'listening' || phase === 'waking') {
         // Finished talking: send it now rather than waiting for quiet — which,
         // with a video playing nearby, might never come.

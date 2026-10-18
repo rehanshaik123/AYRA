@@ -71,3 +71,14 @@ test('her name alone, however often, is not a question', async () => {
   for (const said of ['AYRA. AYRA.', 'Hey, Aira. Aira.', 'ayra']) assert.equal(onlyName(said), true, said)
   for (const said of ['AYRA, what time is it', 'hello', '']) assert.equal(onlyName(said), false, said)
 })
+
+test('the minute after an answer: only a sentence that starts with her name is for her', async () => {
+  const { followUpVerdict } = await import('../src/lib/wake.ts')
+  for (const t of ['AYRA, open notepad', 'Hey AYRA, what time is it?', 'Aira create a folder called notes', 'okay AYRA, close it']) {
+    assert.equal(followUpVerdict(t), 'command', t)
+  }
+  for (const t of ['AYRA', 'Hey, AYRA.', 'AYRA. AYRA.']) assert.equal(followUpVerdict(t), 'name', t)
+  for (const t of ['open notepad', 'and then I told him AYRA was busy', 'the weather today is sunny', '[background noise]', 'Ira went to the market']) {
+    assert.equal(followUpVerdict(t), 'ignore', t)
+  }
+})

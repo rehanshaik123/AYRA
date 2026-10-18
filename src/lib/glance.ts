@@ -14,8 +14,8 @@ export type Glance = {
   text: string
   /** Whose words: 'you' while listening and thinking, 'her' while she answers. */
   who: '' | 'you' | 'her'
-  /** How the listening began: her name (the bubble flashes) or a press. */
-  by: '' | 'name' | 'press'
+  /** How the listening began: her name (the bubble flashes), a press, or the quiet minute after an answer. */
+  by: '' | 'name' | 'press' | 'follow'
 }
 
 /** Longest line handed to the bubble; it shows the tail. */

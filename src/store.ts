@@ -119,6 +119,8 @@ export function askFrame(
 type State = {
   phase: Phase
   hearing: Hearing
+  /** The minute after an answer: listening, but only for "AYRA …". */
+  following: boolean
   /** Normal, or researcher mode (R). */
   mode: Mode
   /** 0..1 loudness — the mic, or AYRA's own voice while she speaks. */
@@ -159,6 +161,7 @@ type State = {
   clearApprovals: () => void
   setPhase: (p: Phase) => void
   setHearing: (h: Hearing) => void
+  setFollowing: (on: boolean) => void
   setMode: (m: Mode) => void
   setLevel: (l: number) => void
   setCaption: (c: string) => void
@@ -268,6 +271,7 @@ export function bladeLife(blade: Blade): number | null {
 export const useStore = create<State>((set) => ({
   phase: 'offline',
   hearing: 'push',
+  following: false,
   mode: 'normal',
   level: 0,
   caption: '',
@@ -345,6 +349,7 @@ export const useStore = create<State>((set) => ({
   clearApprovals: () => set({ approvals: [] }),
   setPhase: (phase) => set({ phase }),
   setHearing: (hearing) => set({ hearing }),
+  setFollowing: (following) => set({ following }),
   setMode: (mode) => set({ mode: parseMode(mode) }),
   setLevel: (level) => set({ level }),
   setCaption: (caption) => set({ caption }),

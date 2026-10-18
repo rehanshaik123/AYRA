@@ -75,6 +75,18 @@ export function onlyName(text: string): boolean {
   return rest.length === 0 && WAKE.test(text)
 }
 
+/**
+ * The minute after an answer (the owner, 2026-10-18): only a sentence that
+ * STARTS with her name is for her. 'ignore' — the TV, someone else, noise;
+ * 'name' — just her name, so she says "Yes?" and listens; 'command' — her name
+ * and what they want.
+ */
+export function followUpVerdict(text: string): 'ignore' | 'name' | 'command' {
+  const t = text.trim()
+  if (BARE_NAME.test(t) || onlyName(t)) return 'name'
+  return LEADING_NAME.test(t) ? 'command' : 'ignore'
+}
+
 /** Everything after the wake phrase, which is usually the actual command. */
 export function afterWake(text: string): string {
   const m = WAKE.exec(text)

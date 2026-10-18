@@ -990,6 +990,7 @@ namespace Ayra
       string frame;
       if (flash) frame = "listen";
       else if (phase == "offline" || phase == "boot") frame = "sleep";
+      else if (phase == "listening" && by == "follow") frame = "idle";
       else if (phase == "listening" || phase == "waking") frame = "listen";
       else if (phase == "thinking") frame = "think";
       else if (phase == "tooling") frame = "magic";
@@ -1013,7 +1014,7 @@ namespace Ayra
           }
         }
         // A gentle bob while she waits.
-        var bob = phase == "dormant" ? (int)Math.Round(Math.Sin(t * 1.6) * 2 * scale) : 0;
+        var bob = phase == "dormant" || by == "follow" ? (int)Math.Round(Math.Sin(t * 1.6) * 2 * scale) : 0;
         var at = new Rectangle(pad, pad + bob, figW, figH);
         if (phase == "offline" || phase == "boot")
         {
@@ -1183,7 +1184,7 @@ namespace Ayra
       // The last answer stays a few seconds after she finishes, then fades.
       var recent = (DateTime.Now - lastBusy).TotalSeconds < 5;
       var line = show && text.Length > 0 && (Busy(phase) || (phase == "dormant" && recent)) ? text : "";
-      if (line.Length == 0 && show && phase == "listening") line = by == "name" ? "Yes? I'm listening." : "Listening...";
+      if (line.Length == 0 && show && phase == "listening" && by != "follow") line = by == "name" ? "Yes? I'm listening." : "Listening...";
       caption.Say(line, who == "you", Bounds);
     }
 
@@ -1196,6 +1197,8 @@ namespace Ayra
       Color ring;
       float glow, sweep = 0;
       if (phase == "offline" || phase == "boot") { ring = Color.FromArgb(110, 120, 130); glow = 0.15f; }
+      // The quiet minute after an answer: waiting for "AYRA ...", calm.
+      else if (phase == "listening" && by == "follow") { ring = Color.FromArgb(56, 189, 248); glow = 0.28f + 0.1f * (float)Math.Abs(Math.Sin(t * 1.5)); }
       else if (phase == "listening" || phase == "waking") { ring = Color.FromArgb(56, 189, 248); glow = 0.55f + 0.35f * (float)Math.Abs(Math.Sin(t * 4)); }
       else if (phase == "thinking" || phase == "tooling") { ring = Color.FromArgb(245, 158, 11); glow = 0.45f; sweep = (float)(t * 360 % 360); }
       else if (phase == "speaking") { ring = Color.FromArgb(244, 114, 182); glow = 0.45f + 0.35f * (float)Math.Abs(Math.Sin(t * 6)); }

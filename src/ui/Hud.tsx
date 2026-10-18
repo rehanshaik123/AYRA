@@ -224,6 +224,7 @@ function ApproveCard() {
 export function Hud() {
   const phase = useStore((s) => s.phase)
   const hearing = useStore((s) => s.hearing)
+  const following = useStore((s) => s.following)
   const mode = useStore((s) => s.mode)
   const researching = mode === 'research'
   const caption = useStore((s) => s.caption)
@@ -261,7 +262,9 @@ export function Hud() {
               ? HANDS_FREE_STANDBY
               : researching && (phase === 'thinking' || phase === 'tooling')
                 ? 'RESEARCHING'
-                : statusText[phase]}
+                : phase === 'listening' && following
+                  ? 'SAY “AYRA …” FOR MORE'
+                  : statusText[phase]}
           </span>
           {/* Researcher mode (R): every question goes to the researcher. */}
           {researching && (
