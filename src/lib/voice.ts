@@ -91,6 +91,8 @@ const RELEASE_MS = 30000
 const SEND_WAIT_MS = 3000
 /** The browser recogniser's last words trail the speaker by about this much. */
 const BROWSER_SEND_MS = 700
+/** Live hearing is tried again this long after a fall back to the browser recogniser. */
+const RETRY_LIVE_MS = 2 * 60_000
 
 // ---------------------------------------------------------------------------
 // Endpointing
@@ -138,7 +140,7 @@ const CONTINUES =
   /\b(and|or|but|so|because|since|if|when|while|that|which|who|whose|to|of|in|on|at|by|for|with|from|about|into|onto|over|under|between|through|the|a|an|my|your|his|her|its|our|their|is|are|was|were|be|been|do|does|did|have|has|had|can|could|would|should|will|shall|might|must|like|than|then|as|very|really|just|some|any|all|both|either|neither)$/i
 
 /** Trailing punctuation a transcriber emits mid-thought. */
-const TRAILS = /[,;:–—-]$/
+const TRAILS = /[,;:–—\-+*/=&]$/
 
 /**
  * A barge-in this soon after he starts a sentence is him, not you.
@@ -157,22 +159,28 @@ const SELF_GUARD_MS = 350
 /**
  * A quiet gap this long with a finished-looking sentence ends the turn.
  *
- * Small on purpose: by the time a transcript reaches the assembler the detector
- * has already sat through SILENCE_MS of quiet and the transcriber has taken its
- * own few hundred milliseconds, so roughly a second of real silence has passed
- * already. All this window has to catch is someone drawing breath to add one
- * more clause. Making it generous here is what would make every ordinary
- * question feel slow.
+ * By the time a transcript reaches the assembler the detector has already sat
+ * through SILENCE_MS of quiet and the transcriber has taken its own few hundred
+ * milliseconds. It was 250 ms; the owner's log (2026-10-18) showed commands
+ * cut in the middle — "hey close the Tab with", "calculate me something so
+ * 2:30 + 1000 +" — people pause to think mid-command. Space (or Alt+Space,
+ * or a click on her figure) still sends at once.
  */
-const SETTLE_MS = 250
-/** ...and this long when the sentence is plainly unfinished. */
-const CONTINUE_MS = 1600
+const SETTLE_MS = 600
+/**
+ * After a full stop the transcriber added. Not 0: a realtime transcriber puts
+ * a full stop on every pause, mid-thought included ("Open YouTube." … "and play
+ * lo-fi"). A question mark or an exclamation is taken as the end.
+ */
+const STOP_MS = 500
+/** ...and this long when the sentence is plainly unfinished ("…the tab with"). */
+const CONTINUE_MS = 2500
 /**
  * Nothing is held longer than this in total. A ceiling rather than a timer:
  * without it, someone who ends every clause on "and" could hold a turn open
  * for ever, and the assistant would look like it had stopped listening.
  */
-const MAX_HOLD_MS = 6000
+const MAX_HOLD_MS = 9000
 
 /**
  * How long to keep waiting, given what has been said so far.
@@ -181,9 +189,12 @@ const MAX_HOLD_MS = 6000
 function holdFor(text: string): number {
   const words = text.trim().split(/\s+/).filter(Boolean)
   if (!words.length) return CONTINUE_MS
-  // An explicit terminator is the speaker telling us they are done.
-  if (/[.!?]$/.test(text)) return 0
+  // A question or an exclamation is the speaker telling us they are done.
+  if (/[!?]["'”’)\]]?$/.test(text.trim())) return 0
   if (TRAILS.test(text.trim())) return CONTINUE_MS
+  if (CONTINUES.test(words[words.length - 1].replace(/[.,]+$/, ''))) return CONTINUE_MS
+  // A full stop the transcriber put on a pause: a short wait for a next clause.
+  if (/[.]["'”’)\]]?$/.test(text.trim())) return STOP_MS
   if (CONTINUES.test(words[words.length - 1])) return CONTINUE_MS
   // One or two words is usually the start of something, not the whole of it —
   // except for the short commands that genuinely are complete.
@@ -472,6 +483,8 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
   let discard = 0
   /** Hands-free: the microphone stays, streaming to the offline spotter. */
   let hands = false
+  /** When she last fell back to the browser recogniser (see recover). */
+  let fellBackAt = 0
   /** What the last name check heard — the burst a wake replays from. */
   let lastBurst = ''
 
@@ -562,15 +575,32 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
 
   const fallBack = (why: string) => {
     if (fallback) return
-    clearInterval(guardPoll)
     listener?.stop()
     listener = null
     assemble.cancel()
     diag.engine = 'browser'
     diag.lastError = why
+    fellBackAt = Date.now()
     h.onError(`Live hearing is unavailable (${why}) — switched to the browser's recogniser.`)
     fallback = startBrowserVoice(h)
     if (armed) void fallback.open()
+  }
+
+  /**
+   * Back to live hearing after a while on the browser's recogniser. It used to
+   * be for the rest of the session: once the ElevenLabs credits ran out (and
+   * again with a key missing its speech-to-text permission) she stayed on the
+   * far weaker browser recogniser — the one that cut the owner off mid-command
+   * — until her window was reloaded, even after the key was fixed
+   * (2026-10-18). Tried again on the next press after RETRY_LIVE_MS; if it
+   * still fails, she falls back again at once, mid-turn and all.
+   */
+  const recover = () => {
+    if (!fallback || Date.now() - fellBackAt < RETRY_LIVE_MS || !caps().stt) return
+    fallback.stop()
+    fallback = null
+    diag.engine = 'elevenlabs'
+    diag.lastError = ''
   }
 
   const guardPoll = setInterval(() => {
@@ -725,6 +755,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
       armed = true
       if (releaseTimer) clearTimeout(releaseTimer)
       releaseTimer = null
+      recover()
       if (fallback) return fallback.open()
       const l = await ensure()
       // Closed again while the microphone was still opening.
@@ -887,7 +918,7 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     clearSilence()
     // Endpoint on a short quiet gap; the ElevenLabs path tunes this more
     // finely, but a fixed window is plenty for the fallback.
-    silenceTimer = setTimeout(emit, 900)
+    silenceTimer = setTimeout(emit, 1400)
   }
 
   const onResult = (e: any) => {

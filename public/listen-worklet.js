@@ -50,7 +50,7 @@ const RELEASE_RATIO = 0.6
 /** Sustained energy for this long confirms speech rather than a knock or click. */
 const START_MS = 120
 /** Quiet this long ends the segment. Whether the thought is over is decided on the words, in voice.ts. */
-const SILENCE_MS = 600
+const SILENCE_MS = 700
 /** Nobody speaks one segment this long; end it and transcribe what there is. */
 const MAX_MS = 20000
 /** Audio kept from before the confirmation, so the first syllable reaches the transcriber. */
