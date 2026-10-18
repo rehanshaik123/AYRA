@@ -415,7 +415,8 @@ hotkey becomes Alt+Space.
 - [x] B.4 Speaker filter: the owner talking over a video is kept (much louder than the speakers explain),
       unless the match is strong (≥ 0.70).
 - [x] B.5 Talk hotkey Alt+Space (AYRA_TALK_HOTKEY); AYRA_BUBBLE=off turns the bubble off.
-- [ ] B.6 🧑 A day of normal use, then tune hands-free from the hearing log.
+- [x] B.6 Hands-free switched off at the owner's word (2026-10-18: "not working efficiently; Space in her window, Alt+Space elsewhere"): AYRA_HANDSFREE=on brings it back.
+- [x] B.7 The bubble is her figure (the owner: "exactly her figure"): scripts/figure.mjs photographs the avatar in each pose (sleep, idle, listen, think, magic, talk open/shut) on a transparent background; the tray shows the pose for her phase, her mouth moving while she talks.
 
 ## Phase 7 — Apps, one at a time · branch `phase-7-apps`
 

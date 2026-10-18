@@ -63,6 +63,7 @@ npm start              # daily use, light: builds the face if needed, one proces
 npm run start:dev      # working on the face: bridge + Vite dev server (hot reload)
 npm run shortcuts      # builds AYRA.exe (tray, starts with Windows, hotkey) + Desktop/Start/Startup shortcuts
 npm run icon           # redraws desktop/ayra.ico from public/favicon.svg (only after changing the icon)
+npm run figure         # redraws her figure for the bubble (desktop/figure/*.png) from her running face
 npm run bridge         # brain only                       npm run dev   # face only (Vite)
 npm run build          # type-check + production build (must pass)
 npm run lint           # oxlint (must stay at 0 warnings)
@@ -129,7 +130,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `src/store.ts` · `src/index.css` | App state · all styles incl. the `.hud-*` design system blades use |
 | `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` · `bench.mjs` · `demo.mjs` · `bridge-copy.mjs` · `research.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test · `npm run bench` speed table · `npm run demo` what she can do, live · `npm run bridge:test` · `npm run research` |
 | `desktop/ayra.cs` · `desktop/ayra.ico` | **AYRA.exe**, the tray app: starts with Windows, keeps the bridge running hidden, opens her window, Ctrl+Alt+A to talk, Alt+Space talk from any app, and **the bubble** — AYRA on top of every app (click = Space, glow by phase, one caption line; polls `GET /face`) · her icon. C# 5 (the compiler that ships with Windows) |
-| `scripts/shortcuts.mjs` · `icon.mjs` | `npm run shortcuts`: builds AYRA.exe into `desktop/bin/` (gitignored) with `ayra.ini`, makes the shortcuts · `npm run icon` |
+| `scripts/shortcuts.mjs` · `icon.mjs` · `figure.mjs` | `npm run shortcuts`: builds AYRA.exe into `desktop/bin/` (gitignored) with `ayra.ini`, makes the shortcuts · `npm run icon` · `npm run figure`: her figure for the bubble, one PNG per pose in `desktop/figure/` (needs her face running) |
 | `test/*.test.mjs` | Unit tests, run by `npm test` |
 | `index.html` · `vite.config.ts` | Page shell + strict CSP · dev server, `%AYRA_WORDMARK%` title |
 | `data/` | AYRA's runtime data (logs, state; later memory) — gitignored, never committed |
@@ -168,7 +169,7 @@ will live in `bridge/link.mjs` (Phase 10), and the same rule applies.
   laptop control off, `CHROME_PORT` 9222, `CHROME_PATH`, `HOTKEY` — AYRA.exe's, default `ctrl+alt+a`, `TRUSTED_SITES` — sites she may grant mic /
   camera herself, `TELEGRAM_TOKEN`,
   `TELEGRAM_OWNER_ID`, `TELEGRAM` — `off` disables it, `CONNECTORS` — default `none`,
-  `RESEARCH_MODEL` — the research agent's workers, default `claude-sonnet-5-5`, `HANDSFREE_HOTKEY` —
+  `RESEARCH_MODEL` — the research agent's workers, default `claude-sonnet-5-5`, `HANDSFREE` — `on` brings hands-free back (default off), `HANDSFREE_HOTKEY` —
   AYRA.exe's hands-free switch, default `ctrl+alt+w`, `TALK_HOTKEY` — Space from any app, default
   `alt+space`, `BUBBLE` — `off` hides the bubble, `WAKE_CHECKS_PER_HOUR` — the name-check cap, default 120) plus
   `ELEVENLABS_API_KEY`. Writes are off in code (`ALLOW_WRITES = false` in server.mjs) until the
