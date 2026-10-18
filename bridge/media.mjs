@@ -67,6 +67,18 @@ export function createMedia({ run = runScript, enabled = process.platform === 'w
         paused = []
         await run('resume', ids)
       }),
+    /** The laptop's volume keys (fastpath.mjs): up or down a few steps, or mute. True when pressed. */
+    volume: (action) =>
+      queue(async () => {
+        if (!enabled) return false
+        return (await run({ up: 'volup', down: 'voldown', mute: 'mute' }[action] ?? 'none')).length > 0
+      }),
+    /** Is an app whose media id matches `re` playing right now? */
+    playing: (re) =>
+      queue(async () => {
+        if (!enabled) return false
+        return (await run('list')).some((s) => re.test(s) && /=Playing$/.test(s))
+      }),
     /**
      * The owner's own command (fastpath.mjs). By the time they have said
      * "pause the music" she has already paused it to listen, so a pause only

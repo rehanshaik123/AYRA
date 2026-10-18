@@ -28,7 +28,6 @@ test('apps by name, with a web fallback for the ones that live on both', () => {
 test('anything that needs thinking goes to the brain', () => {
   for (const text of [
     'open the file I downloaded yesterday',
-    'open youtube and play lofi',
     'open my last email',
     'start a timer for ten minutes',
     'run diagnostics',
@@ -40,7 +39,7 @@ test('anything that needs thinking goes to the brain', () => {
 })
 
 test('what the review caught: conversation words, files and folders that are not folders', () => {
-  for (const text of ['next one', 'next', 'continue', 'stop', 'skip this', 'start the video', 'launch my music', 'open music',
+  for (const text of ['next one', 'next', 'continue', 'skip this', 'start the video', 'launch my music', 'open music',
     'open report.pdf', 'open node.js', 'open readme.md', 'open budget.xlsx']) {
     assert.equal(parseFast(text), null, text)
   }
@@ -55,7 +54,7 @@ test('music commands', () => {
   assert.equal(parseFast('next song').action, 'next')
   assert.equal(parseFast('skip this song').action, 'next')
   assert.equal(parseFast('previous track').action, 'prev')
-  assert.equal(parseFast('play despacito'), null)
+  assert.deepEqual(parseFast('play despacito'), { kind: 'youtube', query: 'despacito' })
 })
 
 const hands = (over = {}) => {
@@ -99,4 +98,50 @@ test('nothing to pause → she says so; nothing to play → the brain (it can op
 test('the note tells the brain what was done', () => {
   assert.equal(noteFor([]), '')
   assert.match(noteFor(['opened the Notepad app']), /^\[Done just now without you.*Notepad.*\]\n$/)
+})
+
+test('the new shapes: stop, volume, play, search, close, several at once (2026-10-18)', () => {
+  assert.deepEqual(parseFast('stop it'), { kind: 'media', action: 'pause', said: 'Paused.', soft: true })
+  assert.deepEqual(parseFast('make it louder'), { kind: 'volume', action: 'up' })
+  assert.deepEqual(parseFast('turn the volume down'), { kind: 'volume', action: 'down' })
+  assert.deepEqual(parseFast('mute'), { kind: 'volume', action: 'mute' })
+  assert.deepEqual(parseFast('play me believer'), { kind: 'youtube', query: 'believer' })
+  assert.deepEqual(parseFast('hey open Spotify and play me teenage dirtbag'), { kind: 'spotify', query: 'teenage dirtbag' })
+  assert.deepEqual(parseFast('open YouTube and play lofi'), { kind: 'youtube', query: 'lofi' })
+  assert.equal(parseFast('search lofi beats on YouTube').url, 'https://www.youtube.com/results?search_query=lofi%20beats')
+  assert.equal(parseFast('look up gold price on google').url, 'https://www.google.com/search?q=gold%20price')
+  assert.deepEqual(parseFast('close notepad'), { kind: 'close', name: 'notepad' })
+  assert.equal(parseFast('open the browser and open YouTube').name, 'YouTube')
+  assert.equal(parseFast('open GitHub and LinkedIn').steps.length, 2)
+  // Not for the fast path.
+  for (const t of ['close chrome', 'close the tab', 'close everything', 'play it', 'open notepad and write me a poem']) {
+    assert.equal(parseFast(t), null, t)
+  }
+})
+
+test('runFast: the new hands, and the brain when they can\'t', async () => {
+  const did = []
+  const h = {
+    openApp: async (n) => (did.push(['app', n]), { app: n }),
+    openFolder: async () => {},
+    openSite: async (u) => void did.push(['site', u]),
+    media: { command: async (a) => (did.push(['media', a]), a === 'pause') },
+    volume: async (a) => (did.push(['volume', a]), true),
+    youtube: async (q) => (did.push(['youtube', q]), { title: 'Believer' }),
+    spotify: async (q) => (did.push(['spotify', q]), { played: false }),
+    closeApp: async (n) => (did.push(['close', n]), { app: 'Notepad', waiting: false }),
+  }
+  assert.equal((await runFast(parseFast('play believer'), h)).said, 'Playing.')
+  assert.equal((await runFast(parseFast('volume up'), h)).said, 'Done.')
+  assert.equal((await runFast(parseFast('close notepad'), h)).said, 'Closed.')
+  assert.equal((await runFast(parseFast('play teenage dirtbag on spotify'), h)).said, 'Opened.')
+  assert.equal((await runFast(parseFast('open GitHub and LinkedIn'), h)).said, 'Opened.')
+  assert.equal((await runFast(parseFast('stop it'), h)).said, 'Paused.')
+  // "Stop it" with nothing playing, "play some music" with nothing to resume: the brain.
+  const quiet = { ...h, media: { command: async () => false } }
+  assert.equal(await runFast(parseFast('stop it'), quiet), null)
+  assert.equal(await runFast(parseFast('play some music'), quiet), null)
+  // A close that asks a question first says so.
+  const asking = { ...h, closeApp: async () => ({ app: 'Notepad', waiting: true }) }
+  assert.equal((await runFast(parseFast('close notepad'), asking)).said, 'Notepad is asking something before it closes.')
 })

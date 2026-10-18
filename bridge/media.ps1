@@ -4,6 +4,18 @@ param([string]$Action = 'list', [string]$Ids = '', [string]$Skip = '')
 # (the ones behind the volume flyout), so Spotify, browsers and video apps alike.
 # ASCII only: Windows PowerShell 5.1 reads scripts in the system code page.
 $ErrorActionPreference = 'Stop'
+# The volume keys, before anything slow loads: up or down five steps, or mute.
+if ($Action -in @('volup', 'voldown', 'mute')) {
+  Add-Type -Namespace AyraMedia -Name Keys -MemberDefinition '[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, System.UIntPtr extra);'
+  $vk = switch ($Action) { 'volup' { 0xAF } 'voldown' { 0xAE } 'mute' { 0xAD } }
+  $times = if ($Action -eq 'mute') { 1 } else { 5 }
+  for ($i = 0; $i -lt $times; $i++) {
+    [AyraMedia.Keys]::keybd_event([byte]$vk, 0, 0, [System.UIntPtr]::Zero)
+    [AyraMedia.Keys]::keybd_event([byte]$vk, 0, 2, [System.UIntPtr]::Zero)
+  }
+  $Action
+  exit
+}
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
   $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1

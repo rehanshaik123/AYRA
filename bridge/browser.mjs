@@ -170,6 +170,54 @@ export async function openInChrome(url) {
 }
 
 /**
+ * "Play believer": YouTube's first real result, playing, in a new tab of her
+ * Chrome — in code, no model turn (the fast path, fastpath.mjs). The brain took
+ * 13 s for "play me some songs" (open, read, click); this is the search page
+ * and one navigation. Adverts and shorts are skipped; the video starts with a
+ * real key press if the page held it back.
+ *
+ * @returns {Promise<{ title: string }>}
+ */
+export async function playOnYouTube(query) {
+  const b = await connect()
+  const page = await b.newPage()
+  await page.goto(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, { waitUntil: 'domcontentloaded', timeout: LOAD_TIMEOUT_MS })
+  await page.bringToFront().catch(() => {})
+  await page.waitForSelector('ytd-video-renderer a#video-title', { timeout: 8000 })
+  const first = await page.evaluate(() => {
+    for (const a of document.querySelectorAll('ytd-video-renderer a#video-title')) {
+      const href = a.getAttribute('href') || ''
+      if (href.startsWith('/watch')) return { href, title: (a.getAttribute('title') || a.textContent || '').trim() }
+    }
+    return null
+  })
+  if (!first) throw new Error('no video in the results')
+  // Clicked inside the page, YouTube changes view without loading a second
+  // page (measured: a full load of the watch page added ~4 s). The click is a
+  // real one, so Chrome lets the sound start too.
+  await page.click(`ytd-video-renderer a#video-title[href="${first.href.replace(/"/g, '\\"')}"]`).catch(() =>
+    page.goto(`https://www.youtube.com${first.href}`, { waitUntil: 'domcontentloaded', timeout: LOAD_TIMEOUT_MS }))
+  // The watch page, and its own player: the results page has hover-preview
+  // videos too, and pressing "k" against one of those paused the real song.
+  await page.waitForFunction(() => location.pathname === '/watch', { timeout: 6000 }).catch(() => {})
+  // Playing within a couple of seconds, or a press of "k" (YouTube's play key) starts it.
+  for (let i = 0; i < 10; i++) {
+    await wait(250)
+    const state = await page.evaluate(() => {
+      if (location.pathname !== '/watch') return 'none'
+      const v = document.querySelector('#movie_player video.html5-main-video') || document.querySelector('#movie_player video')
+      return v ? (v.paused ? 'paused' : 'playing') : 'none'
+    }).catch(() => 'none')
+    if (state === 'playing') break
+    if (state === 'paused' && i >= 4) {
+      await page.keyboard.press('k').catch(() => {})
+      break
+    }
+  }
+  return { title: first.title }
+}
+
+/**
  * Normal web tabs, in window order — never her own face, which shares this
  * Chrome: its Approve card must stay out of reach of her own clicks.
  */

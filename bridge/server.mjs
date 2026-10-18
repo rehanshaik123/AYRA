@@ -15,7 +15,7 @@
 // First, so .env.local is loaded before anything below reads the environment.
 import { IDENTITY, env } from './identity.mjs'
 import { SYSTEM_PROMPT, TEXT_PROMPT } from './persona.mjs'
-import { createGate } from './gate.mjs'
+import { createGate, isOwnWindow } from './gate.mjs'
 import { WebSocket, WebSocketServer } from 'ws'
 import { createBrain } from './brain.mjs'
 import { createOriginCheck } from './origin.mjs'
@@ -37,7 +37,7 @@ import { rulesServer } from './rules.mjs'
 import { watchPresence } from './presence.mjs'
 import { JOB_LIMITS, createJobs, jobsServer } from './jobs.mjs'
 import { createStore } from './state.mjs'
-import { browserServer, openInChrome } from './browser.mjs'
+import { browserServer, openInChrome, playOnYouTube } from './browser.mjs'
 import { appsCall, appsServer, warmApps } from './apps.mjs'
 import { createResearch, researchServer } from './research.mjs'
 import { createDeepResearch } from './deep.mjs'
@@ -952,7 +952,7 @@ const WAKE_PER_HOUR = Number(env('WAKE_CHECKS_PER_HOUR', PER_HOUR)) || PER_HOUR
 const MEDIA = createMedia({ log: (msg) => console.log(msg) })
 
 /** The fast path's hands (fastpath.mjs): her apps worker, her Chrome, the music. */
-const HANDS = createHands({ appsCall, openInChrome, media: MEDIA })
+const HANDS = createHands({ appsCall, openInChrome, playOnYouTube, media: MEDIA, isOwnWindow })
 
 /**
  * Sound from the laptop's own speakers is not the owner (echo.mjs): while any
