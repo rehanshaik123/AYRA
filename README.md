@@ -38,6 +38,13 @@ After answering she listens about 15 seconds for a follow-up. **Alt+Space** is S
 comes out of the laptop's own speakers — a video, another app saying her name — is recognised and
 ignored.
 
+## How she answers
+
+A task gets one word — "Done.", "Opened.", "Created." — or one short sentence when something went wrong
+or needs you; the details are in her log on screen. Questions get a real answer. After every answer she
+keeps listening for a minute, but only to sentences that start with "AYRA …" — the TV and other people
+are ignored.
+
 ## The bubble
 
 A small AYRA bubble sits on top of every app (drag it anywhere). Click it and she listens — your app

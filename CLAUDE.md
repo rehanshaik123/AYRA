@@ -108,7 +108,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/jobs.mjs` · `bridge/presence.mjs` | Background jobs — one at a time, 30 min / 60 steps, reported on Telegram; tool server `ayra_jobs` · "I'm back" on Telegram after the laptop was off or asleep |
 | `bridge/research.mjs` · `bridge/trust.mjs` | **The research agent**: `createResearch()` → `run / interrupt / busy / recent / report`; code runs plan → search → read → extract → cross-check → answer with one-shot Claude agents (readers get no tools), reports saved in `data/research/` for replay and offline; tool server `ayra_research` · pure: source trust, injection scan, quote check, confidence |
 | `bridge/deep.mjs` · `bridge/platforms.mjs` | **Researcher mode** (the R key): `createDeepResearch()` → `run / interrupt / busy / ready / report`; planner (high effort) → one lane per platform → rank (relevance + platform signal + trust + freshness) → final cited answer; tool `deep_research` on `ayra_research` · GitHub / Stack Exchange / Hacker News / arXiv public APIs through net.mjs, `signalScore` |
-| `bridge/spoken.mjs` | How much of her answer is said: a task in two sentences, a question in full, `<more>` details shown only |
+| `bridge/spoken.mjs` | How much of her answer is said: a task in one word ("Created.", "Opened.", "Done." — or her sentence when there is trouble), a question in full, `<more>` details shown only |
 | `bridge/fastpath.mjs` · `bridge/datatag.mjs` · `bridge/eleven.mjs` | "Open YouTube", "pause the music" done in code, no model turn · the answer's data card as a `<data>{…}</data>` tag after the spoken answer, cut from speech · a keep-alive ElevenLabs socket for her voice |
 | `bridge/echo.mjs` · `bridge/meter.ps1` | Hands-free ignores the laptop's own speakers: a Windows peak meter, and a burst whose loudness curve matches what was played is dropped before the name check |
 | `bridge/approvals.mjs` | The owner's Approve: holds each "ask" until the first answer (HUD, voice, Telegram) or 2 min → no; `halt()` is the kill switch |
@@ -141,7 +141,7 @@ Planned, with their phase: `db.mjs`, `memory.mjs` (8) · `core.mjs`, `deploy/`
 Hands-free (`/wake` WebSocket, loopback): face sends one binary burst (16 kHz PCM, ≤ 2.5 s) per stretch of
 speech that began after quiet; bridge sends `ready`, `heard {text}`, `error {code,message}` (`no_key`, `limit`).
 Hands-free also takes `note {event: skip|decision, why?, text?, woke?}` text frames from the face for the hearing log ("hearing" lines in the audit log).
-HUD socket: face sends `hearing {mode}` (push | hands-free), `media {action: pause|resume}` and `face {phase,text,who,by}` (the bubble, read by the tray at `GET /face`); bridge sends
+HUD socket: face sends `hearing {mode}` (push | hands-free), `media {action: pause|resume}` and `face {phase,text,who,by}` (`by`: name | press | follow — the quiet minute after an answer; the bubble, read by the tray at `GET /face`); bridge sends
 `hearing {mode, by}` and `talk {by}` from the tray (AYRA.exe → `GET/POST /hearing`, `POST /talk`, tray only:
 `x-ayra: tray`, no Origin).
 

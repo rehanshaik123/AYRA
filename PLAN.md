@@ -417,6 +417,13 @@ hotkey becomes Alt+Space.
 - [x] B.5 Talk hotkey Alt+Space (AYRA_TALK_HOTKEY); AYRA_BUBBLE=off turns the bubble off.
 - [x] B.6 Hands-free switched off at the owner's word (2026-10-18: "not working efficiently; Space in her window, Alt+Space elsewhere"): AYRA_HANDSFREE=on brings it back.
 - [x] B.7 The bubble is her figure (the owner: "exactly her figure"): scripts/figure.mjs photographs the avatar in each pose (sleep, idle, listen, think, magic, talk open/shut) on a transparent background; the tray shows the pose for her phase, her mouth moving while she talks.
+- [x] B.8 A task is answered with one word (the owner, 2026-10-18: "only yes, done, opened, created, and a small
+      message if there is trouble"): bridge/spoken.mjs holds a task's first sentence and says "Created." /
+      "Opened." / "Sent." / "Done." for it (her sentence goes to the log), unless it reports trouble or asks
+      something; the tool filler is just "Yes.", the fast path says "Opened.".
+- [x] B.9 The minute after every answer: she keeps listening 60 s, but only a sentence that starts with
+      "AYRA" counts (wake.ts followUpVerdict); anything else — TV, people, noise — is ignored and kept off
+      screen; just her name → "Yes?"; music isn't held paused; Space / Alt+Space / a click then is a normal turn.
 
 ## Phase 7 — Apps, one at a time · branch `phase-7-apps`
 
