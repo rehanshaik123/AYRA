@@ -153,7 +153,10 @@ const VOLUME = [
 ]
 
 /** "play X", "play me X on Spotify". */
-const PLAY = /^(?:play|put on)\s+(?:me\s+)?(.+?)(?:\s+(?:on|in|from)\s+(youtube|you tube|spotify))?$/i
+const PLAY = /^play\s+(?:me\s+)?(.+?)(?:\s+(?:on|in|from)\s+(youtube|you tube|spotify))?$/i
+/** "play it again", "play a game", "play devil's advocate": talk, not songs (the review, 2026-10-18). */
+const NOT_A_SONG =
+  /^(?:it|that|this|them|with|around|along|back|again|next|previous|the (?:video|next|last|first|second|previous|game|episode)|a game|games?|rock paper scissors|devil'?s advocate|dead|nice|fair|dumb|hard to get|safe|by the rules)\b|\bagain$/i
 /** Not a song: "play some music" resumes what was playing, or goes to the brain. */
 const GENERIC_PLAY = /^(?:(?:some|any|a|the|my)\s+)?(?:music|songs?|tracks?|something|anything|playlist|mix|beats)(?:\s+for me)?$/i
 
@@ -197,7 +200,7 @@ export function parseFast(text) {
     steps.push(step)
   }
   // "Open Spotify and play X": X plays on Spotify, which opens it anyway.
-  if (steps.some((x) => x.kind === 'app' && /^spotify$/i.test(x.name))) {
+  if (steps.some((x) => x.kind === 'app' && /^spotify$/i.test(x.name)) && steps.some((x) => x.kind === 'youtube')) {
     steps = steps.filter((x) => !(x.kind === 'app' && /^spotify$/i.test(x.name))).map((x) => (x.kind === 'youtube' ? { kind: 'spotify', query: x.query } : x))
   }
   // "Open YouTube and play lofi": the video's own tab is enough.
@@ -217,7 +220,7 @@ function parseOne(said) {
   if (p) {
     const query = p[1].trim()
     if (GENERIC_PLAY.test(query)) return /spotify/i.test(p[2] ?? '') ? null : { kind: 'media', action: 'play', said: 'Playing.', soft: true }
-    if (query.length < 2 || /^(?:it|that|this|the music|music)$/i.test(query)) return null
+    if (query.length < 2 || NOT_A_SONG.test(query)) return null
     return /spotify/i.test(p[2] ?? '') ? { kind: 'spotify', query } : { kind: 'youtube', query }
   }
 
@@ -295,8 +298,9 @@ export async function runFast(intent, hands) {
       const notes = []
       for (const step of intent.steps) {
         const did = await runFast(step, hands)
-        // A step that can't be done fast: the brain does the whole thing.
-        if (!did) return notes.length ? { said: 'Done, partly.', note: `${notes.join('; ')} — the rest wasn't done` } : null
+        // A step that can't be done fast ("open Notepad and type hello"): the
+        // brain gets the whole request, told what is already done.
+        if (!did) return notes.length ? { rest: true, note: notes.join('; ') } : null
         notes.push(did.note)
       }
       const last = intent.steps.at(-1)
@@ -378,12 +382,18 @@ export function createHands({ appsCall, openInChrome, playOnYouTube, media, isOw
   return {
     openApp: (name) => appsCall('open', { name, strict: true, wait: false }),
     volume: (action) => media.volume(action),
-    youtube: playOnYouTube,
+    // A new song: whatever played before stops for good first — otherwise it
+    // resumed beside the new one once she went back to standby (the review).
+    youtube: async (query) => {
+      await media.command('pause')
+      return playOnYouTube(query)
+    },
     spotify: async (query) => {
       // Spotify's own search (its spotify: link), then the song itself: a
       // "Play <song>" button when the app shows one, else its row selected and
       // Enter. Measured 2026-10-18: results are readable ~1.8 s after the link.
       // The brain took 49 s for the same, clicking its way through.
+      await media.command('pause')
       spawn('explorer.exe', [`spotify:search:${query}`], { detached: true, stdio: 'ignore' }).unref()
       const words = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2)
       const names = (x) => String(x.name ?? '').toLowerCase()
@@ -416,6 +426,14 @@ export function createHands({ appsCall, openInChrome, playOnYouTube, media, isOw
     closeApp: async (name) => {
       const { window } = await appsCall('describe', { window: name })
       if (!window || isOwnWindow(window.title)) throw new Error('not a window to close')
+      // Never a browser or File Explorer (a title like "Inbox - Gmail - Google
+      // Chrome" matched "close Gmail" and took every tab with it), and only a
+      // window that is really that app's: its program, or its title's last part.
+      const app = String(window.app ?? '').toLowerCase()
+      if (/^(?:chrome|msedge|firefox|brave|opera|vivaldi|explorer|applicationframehost)$/.test(app)) throw new Error('a browser — the brain closes tabs')
+      const want = name.toLowerCase().replace(/\s+/g, '')
+      const last = String(window.title ?? '').split(/\s[-–—|]\s/).pop().toLowerCase().replace(/\s+/g, '')
+      if (!(app.includes(want) || want.includes(app) || last === want || last.startsWith(want))) throw new Error('not that app')
       const { window: w, waiting } = await appsCall('close', { window: String(window.id) })
       return { app: w.app || name, waiting }
     },

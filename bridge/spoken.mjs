@@ -30,14 +30,29 @@ export const MORE_CLOSE = '</more>'
 export const TASK_CHARS = 320
 
 const QUESTION =
-  /^(?:what|what's|whats|why|how|how's|who|who's|whom|whose|when|where|which|is|are|am|was|were|do|does|did|can|could|should|would|will|shall|may|might|have|has|had|explain|tell me|describe|teach me|walk me through|compare|define|what if|find|search|look up|look for|check|research|summari[sz]e|analy[sz]e|list|show me|give me|recommend|suggest|translate|calculate|convert)\b/i
+  /^(?:what|what's|whats|why|how|how's|who|who's|whom|whose|when|where|which|is|are|am|was|were|do|does|did|can|could|should|would|will|shall|may|might|have|has|had|explain|tell me|describe|teach me|walk me through|compare|define|what if|find|search|look up|look for|check|research|summari[sz]e|analy[sz]e|list|show me|give me|recommend|suggest|translate|calculate|convert|read|remind me|let me know)\b/i
 
 /**
  * A task's report that is more than "done": something went wrong, is missing,
  * waits on the owner, or asks them something. Said as she wrote it.
  */
 const TROUBLE =
-  /\b(?:can't|cannot|couldn't|could not|unable|failed|fail|error|didn't|did not|wasn't|isn't|aren't|won't|doesn't|does not|not found|no such|need|needs|approve|approval|permission|blocked|which|should i|do you want|want me to|problem|sorry|instead|but|already|missing|denied|declined|waiting|careful|warning)\b/i
+  /\b(?:can't|cannot|couldn't|could not|unable|failed|fail|error|didn't|did not|wasn't|isn't|aren't|won't|doesn't|does not|not found|no such|need|needs|approve|approval|permission|blocked|which|should i|do you want|want me to|problem|sorry|instead|but|already|missing|denied|declined|waiting|careful|warning|expired|locked|bounced|undeliverable|booked|log in|sign in|login|requires?|required|unavailable|offline|timed out|timeout|invalid|wrong|empty|full)\b/i
+
+/** A later sentence worth saying: something failed, or it needs the owner. */
+const LATER = /\b(?:couldn't|could not|can't|cannot|unable|failed|error|need your|needs your|approve|approval|permission|blocked)\b/i
+
+/** A plain "no" in the report: "nothing was removed", "there's no report". */
+const NEGATION = /\b(?:no|not|nothing|none|never|without|neither|nor)\b|n't\b/i
+
+/**
+ * A report that plainly says it worked. Only then is it swapped for the one
+ * word — the review (2026-10-18) found "Priya's email bounced back" spoken as
+ * "Sent." and "nothing was removed" as "Deleted." when any sentence without a
+ * trouble word was swapped.
+ */
+const SUCCESS =
+  /\b(?:done|opened|open|created|made|sent|saved|deleted|removed|closed|playing|started|moved|added|ready|set|turned|renamed|copied|installed|launched|up and running|on screen|finished|completed|cleared|emptied|muted|paused)\b/i
 
 /** The one word for a task done, by what the owner asked for. */
 const ACKS = [
@@ -98,6 +113,8 @@ export function createSpokenFilter({ question = false, command = '' } = {}) {
   /** A task's first sentence, held until it ends so it can be judged whole. */
   let first = ''
   let decided = false
+  /** After it, the rest — judged a sentence at a time (quietRest). */
+  let after = ''
 
   /**
    * A question's words are all spoken. A task's first sentence is held until it
@@ -127,22 +144,45 @@ export function createSpokenFilter({ question = false, command = '' } = {}) {
     if (rest) quietRest(rest, out)
   }
 
+  /** Said as written, or swapped for the one word — see SUCCESS. */
+  const plainSuccess = (t) => SUCCESS.test(t) && !TROUBLE.test(t) && !NEGATION.test(t) && !/\?["'”’)\]]?$/.test(t)
+
   const decide = (sentence, out) => {
     decided = true
     const t = sentence.trim()
     if (!t) return
-    const words = t.split(/\s+/).length
-    if (TROUBLE.test(t) || /\?["'”’)\]]?$/.test(t) || words <= 3) {
+    const word = ackFor(command)
+    // A command with no known verb ("weather in Hyderabad", "tidy my desktop")
+    // gets its answer as written — "Done." would hide what was asked for.
+    if (t.split(/\s+/).length <= 3 || word === 'Done.' || !plainSuccess(t)) {
       out.push({ text: sentence, quiet: false })
       return
     }
-    out.push({ text: `${ackFor(command)} `, quiet: false })
+    out.push({ text: `${word} `, quiet: false })
     out.push({ text: sentence, quiet: true })
   }
 
-  /** Past the cap: shown in her log, never said — not even that there is more. */
+  /**
+   * Past the first sentence: shown in her log, not said — except a later
+   * sentence that asks the owner something or reports a failure ("…Which
+   * one?", "…but the second one failed.").
+   */
   const quietRest = (text, out) => {
-    out.push({ text, quiet: true })
+    after += text
+    for (;;) {
+      ENDS.lastIndex = 0
+      const m = ENDS.exec(after)
+      if (!m) return
+      const sentence = after.slice(0, m.index + m[0].length)
+      after = after.slice(m.index + m[0].length)
+      judgeLater(sentence, out)
+    }
+  }
+
+  const judgeLater = (sentence, out) => {
+    const t = sentence.trim()
+    const matters = t && (/\?["'”’)\]]?$/.test(t) || LATER.test(t))
+    out.push({ text: sentence, quiet: !matters })
   }
 
   return {
@@ -191,6 +231,11 @@ export function createSpokenFilter({ question = false, command = '' } = {}) {
       if (!question && !decided && first) {
         decide(first, out)
         first = ''
+      }
+      // The last sentence after a one-word "Done.", with no space after it.
+      if (after) {
+        judgeLater(after, out)
+        after = ''
       }
       inMore = false
       return out.map(({ text, quiet }) => ({ text, quiet }))

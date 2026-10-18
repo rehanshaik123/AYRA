@@ -1056,6 +1056,10 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
       stopped = true
       clearInterval(health)
       clearSilence()
+      // Its pending microphone release must not fire later and cut the live
+      // listener's stream after recover() hands over (the review, 2026-10-18).
+      if (releaseTimer) clearTimeout(releaseTimer)
+      releaseTimer = null
       assemble.cancel()
       diag.running = false
       try {

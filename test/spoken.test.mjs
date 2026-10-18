@@ -18,7 +18,26 @@ test('a task done: one word for what was asked; what she wrote goes to her log, 
   assert.equal(run(['Spotify is now open and playing your mix.'], { command: 'Hey AYRA, open Spotify' }).spoken, 'Opened. ')
   assert.equal(run(['I have sent the email to Priya just now.'], { command: 'send the email to Priya' }).spoken, 'Sent. ')
   assert.equal(run(['All of the tabs in that window are closed now.'], { command: 'close those tabs' }).spoken, 'Closed. ')
-  assert.equal(run(['I tidied things up for you on the desktop.'], { command: 'tidy my desktop' }).spoken, 'Done. ')
+  // No known verb in the command: the answer as written ("Done." would hide it).
+  assert.equal(run(['I tidied things up for you on the desktop.'], { command: 'tidy my desktop' }).spoken, 'I tidied things up for you on the desktop.')
+  assert.equal(run(["It's 31 degrees and sunny in Hyderabad."], { command: 'weather in Hyderabad' }).spoken, "It's 31 degrees and sunny in Hyderabad.")
+})
+
+test('the review\'s cases (2026-10-18): only a plain success becomes the one word', () => {
+  for (const [command, said] of [
+    ['send the report to Priya', "Priya's email bounced back as undeliverable."],
+    ['delete the temp files', 'They are locked by another program, so nothing was removed.'],
+    ['download the invoice', 'The site wants you to log in first.'],
+    ['open the report', "There's no report in Downloads or Documents."],
+  ]) {
+    assert.equal(run([said], { command }).spoken, said, said)
+  }
+  // A question after a first sentence is said too, a remark is not.
+  const r = run(['I found three reports in Documents. ', 'They are all from October. ', 'Which one should I open?'], { command: 'open the report' })
+  assert.match(r.spoken, /I found three reports in Documents\. Which one should I open\?/)
+  assert.ok(!r.spoken.includes('October'))
+  const ok = run(['I opened the report in Word. ', 'But the second copy failed to open.'], { command: 'open the reports' })
+  assert.equal(ok.spoken, 'Opened. But the second copy failed to open.')
 })
 
 test('trouble, a question back, or something important: said as she wrote it', () => {
@@ -48,7 +67,7 @@ test('a sentence end split across deltas is seen', () => {
 test('one runaway sentence: judged at TASK_CHARS, the rest in the log', () => {
   const long = `${'word '.repeat(120)}end`
   const r = run([long], { command: 'organise my files' })
-  assert.equal(r.spoken, 'Done. ')
+  assert.ok(r.spoken.length <= 320, String(r.spoken.length))
   assert.ok(r.shown.endsWith('end'))
 })
 

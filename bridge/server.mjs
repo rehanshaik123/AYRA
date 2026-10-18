@@ -1198,6 +1198,12 @@ wss.on('connection', (socket, req) => {
       return
     }
     if (!did) return askBrain(text, id)
+    // Part done in code, the rest needs thinking: the brain gets the whole
+    // request, with a note of what is already done.
+    if (did.rest) {
+      done.push(did.note)
+      return askBrain(text, id)
+    }
     done.push(did.note)
     send({ type: 'text', delta: did.said, ask: id ?? undefined })
     send({ type: 'done', text: did.said, ask: id ?? undefined })

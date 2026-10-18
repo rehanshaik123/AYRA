@@ -85,7 +85,9 @@ const SEND_GRACE_MS = 1500
 const FOLLOW_UP_MS = 60_000
 
 /** A follow-up that only ends the conversation — no question for the model. */
-const DISMISS = /^(that'?s (all|it)|thanks?|thank you|nothing|no thanks|never ?mind|stop|bye|okay,? thanks?)[\s.!]*$/i
+// Not "stop": with the music playing again in the minute after an answer,
+// "AYRA, stop" means the music — the bridge's fast path pauses it.
+const DISMISS = /^(that'?s (all|it)|thanks?|thank you|nothing|no thanks|never ?mind|bye|okay,? thanks?)[\s.!]*$/i
 
 /** Push-to-talk or hands-free, remembered per browser. */
 const HEARING_KEY = 'ayra.hearing'
@@ -473,6 +475,20 @@ export default function App() {
       return
     }
 
+    // The minute after an answer: only "AYRA …" counts. The TV, other people
+    // and noise are ignored, and the minute goes on. Checked BEFORE the Approve
+    // card below: a lyric's "yeah" or the TV's "okay" must never answer one —
+    // in that minute only "AYRA, yes" does (the review, 2026-10-18).
+    const verdict = following ? followUpVerdict(text) : null
+    if (verdict === 'ignore') {
+      const left = followUntil.current - Date.now()
+      if (left > 1500) {
+        followUp.current = true
+        listen(left, 'follow')
+      } else goDormant()
+      return
+    }
+
     // A spoken answer to the oldest Approve card. Anything else is ignored
     // while one is waiting — it must be a clear yes or no.
     const waiting = store.getState().approvals[0]
@@ -481,18 +497,6 @@ export default function App() {
       if (SAID_YES.test(said)) answer(waiting.id, true)
       else if (SAID_NO.test(said)) answer(waiting.id, false)
       stopListening()
-      return
-    }
-
-    // The minute after an answer: only "AYRA …" counts. The TV, other people
-    // and noise are ignored, and the minute goes on.
-    const verdict = following ? followUpVerdict(text) : null
-    if (verdict === 'ignore') {
-      const left = followUntil.current - Date.now()
-      if (left > 1500) {
-        followUp.current = true
-        listen(left, 'follow')
-      } else goDormant()
       return
     }
     // Just her name in that minute: "Yes?", and she listens for the rest.
@@ -925,8 +929,11 @@ export default function App() {
         /* ignore — the boot sequence owns the phase until it finishes */
       } else if (phase === 'listening' && store.getState().following) {
         // A press in the quiet minute after an answer: she listens properly
-        // now, the chime and all, and no name is needed.
+        // now, the chime and all, and no name is needed. What the minute had
+        // half-heard (a lyric, the TV) is thrown away first, so it can't
+        // become the owner's command.
         followUp.current = false
+        voice.current?.close()
         listen(AWAIT_SPEECH_MS)
       } else if (phase === 'listening' || phase === 'waking') {
         // Finished talking: send it now rather than waiting for quiet — which,
