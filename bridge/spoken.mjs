@@ -9,9 +9,11 @@
  *
  *   <more>…</more>  details she wrote for the screen (steps, lists, figures):
  *                   shown in her log, never spoken
- *   the cap         for a task (anything that isn't a question), at most
- *                   TASK_SENTENCES are spoken; the rest goes to the log and she
- *                   says, once, that it is on screen
+ *   the cap         for a task (anything that isn't a question), only the first
+ *                   sentence is spoken — "Done.", "Opened.", or one line about a
+ *                   problem; the rest goes to her log, silently (the owner,
+ *                   2026-10-18: "only say yes, done, opened, created, and a small
+ *                   message if there is some trouble")
  *
  * A question — the owner's words end with "?" or open with what / why / how /
  * explain / tell me … — has no cap: an answer they asked for is theirs to hear.
@@ -24,15 +26,37 @@ import { bare } from './fastpath.mjs'
 
 export const MORE_OPEN = '<more>'
 export const MORE_CLOSE = '</more>'
-/** Spoken sentences for a task before the rest goes to the screen. */
-export const TASK_SENTENCES = 2
 /** …or this many characters, whichever comes first (one very long sentence). */
 export const TASK_CHARS = 320
-/** Said once when a task's answer was cut short. */
-export const REST_ON_SCREEN = ' The rest is on screen.'
 
 const QUESTION =
-  /^(?:what|what's|whats|why|how|how's|who|who's|whom|whose|when|where|which|is|are|am|was|were|do|does|did|can|could|should|would|will|shall|may|might|have|has|had|explain|tell me|describe|teach me|walk me through|compare|define|what if)\b/i
+  /^(?:what|what's|whats|why|how|how's|who|who's|whom|whose|when|where|which|is|are|am|was|were|do|does|did|can|could|should|would|will|shall|may|might|have|has|had|explain|tell me|describe|teach me|walk me through|compare|define|what if|find|search|look up|look for|check|research|summari[sz]e|analy[sz]e|list|show me|give me|recommend|suggest|translate|calculate|convert)\b/i
+
+/**
+ * A task's report that is more than "done": something went wrong, is missing,
+ * waits on the owner, or asks them something. Said as she wrote it.
+ */
+const TROUBLE =
+  /\b(?:can't|cannot|couldn't|could not|unable|failed|fail|error|didn't|did not|wasn't|isn't|aren't|won't|doesn't|does not|not found|no such|need|needs|approve|approval|permission|blocked|which|should i|do you want|want me to|problem|sorry|instead|but|already|missing|denied|declined|waiting|careful|warning)\b/i
+
+/** The one word for a task done, by what the owner asked for. */
+const ACKS = [
+  [/^(?:create|make|add|new|write|draft|generate|build|set up|setup)\b/i, 'Created.'],
+  [/^(?:open|launch|start|run|show|bring up|pull up|go to)\b/i, 'Opened.'],
+  [/^(?:send|email|mail|message|text|post|reply|forward|share)\b/i, 'Sent.'],
+  [/^(?:save|download|export|backup|back up)\b/i, 'Saved.'],
+  [/^(?:delete|remove|trash|clear|empty|uninstall)\b/i, 'Deleted.'],
+  [/^(?:close|quit|exit|kill|end)\b/i, 'Closed.'],
+  [/^(?:play|resume)\b/i, 'Playing.'],
+  [/^(?:pause|stop)\b/i, 'Stopped.'],
+]
+
+/** What she says when a task is done: "Created.", "Opened.", … or "Done." */
+export function ackFor(command) {
+  const said = bare(command)
+  for (const [re, word] of ACKS) if (re.test(said)) return word
+  return 'Done.'
+}
 
 /**
  * Is this, in the owner's own words, a question — or a request to explain?
@@ -40,6 +64,9 @@ const QUESTION =
  */
 export function isQuestion(words) {
   const said = bare(words)
+  // "Can you open Notepad?" is a task said politely; "can you explain it?" is a
+  // question. bare() has already dropped the "can you" (and her name before it).
+  if (/^(?:\S+[\s,]+){0,2}(?:can|could|would|will) you\b/i.test(String(words ?? '').trim())) return QUESTION.test(said)
   return /\?\s*$/.test(String(words ?? '').trim()) || QUESTION.test(said)
 }
 
@@ -60,69 +87,61 @@ const ENDS = /[.!?]["'”’)\]]?\s/g
 /**
  * One turn's text stream, after the data tag is gone.
  *
- * @param {{ question?: boolean }} [options] — question: the owner asked, so nothing is capped
+ * @param {{ question?: boolean, command?: string }} [options]
+ *   question — the owner asked, so nothing is capped
+ *   command  — the owner's words, for the one word a task is answered with
  * @returns {{ push: (delta: string) => { text: string, quiet: boolean }[], end: () => { text: string, quiet: boolean }[] }}
  */
-export function createSpokenFilter({ question = false } = {}) {
+export function createSpokenFilter({ question = false, command = '' } = {}) {
   let held = ''
   let inMore = false
-  let spoken = ''
-  let sentences = 0
-  let capped = false
-  let told = false
+  /** A task's first sentence, held until it ends so it can be judged whole. */
+  let first = ''
+  let decided = false
 
-  /** Spoken text, unless the task's cap has been reached — then shown only. */
+  /**
+   * A question's words are all spoken. A task's first sentence is held until it
+   * ends, then judged: trouble, a question back, or already a word or three —
+   * said as written; anything else — "I made the ayra-test folder in your
+   * Documents." — becomes the one word ("Created.") with the sentence itself
+   * in her log. After it, everything goes to the log, unsaid.
+   */
   const say = (text, out) => {
     if (!text) return
-    if (capped) {
-      quietRest(text, out)
-      return
-    }
     if (question) {
       out.push({ text, quiet: false })
       return
     }
-    // Cut at the end of the TASK_SENTENCES-th sentence, or at TASK_CHARS. The
-    // last two spoken characters ride along, so an end split across two
-    // deltas ("done." + " Next") is still seen — and never counted twice.
-    let cut = -1
-    const prev = spoken.slice(-2)
-    const scan = prev + text
-    ENDS.lastIndex = 0
-    let m
-    while ((m = ENDS.exec(scan))) {
-      const at = m.index + m[0].length - prev.length
-      if (at <= 0) continue
-      sentences++
-      if (sentences >= TASK_SENTENCES) {
-        cut = at
-        break
-      }
-    }
-    if (cut < 0 && spoken.length + text.length > TASK_CHARS) {
-      const room = Math.max(0, TASK_CHARS - spoken.length)
-      const space = text.lastIndexOf(' ', room)
-      cut = space > 0 ? space + 1 : room
-    }
-    if (cut < 0) {
-      spoken += text
-      out.push({ text, quiet: false })
+    if (decided) {
+      quietRest(text, out)
       return
     }
-    const head = text.slice(0, cut)
-    const rest = text.slice(cut)
-    spoken += head
-    if (head) out.push({ text: head, quiet: false })
-    capped = true
+    first += text
+    ENDS.lastIndex = 0
+    const m = ENDS.exec(first)
+    const cut = m ? m.index + m[0].length : first.length > TASK_CHARS ? TASK_CHARS : -1
+    if (cut < 0) return
+    decide(first.slice(0, cut), out)
+    const rest = first.slice(cut)
+    first = ''
     if (rest) quietRest(rest, out)
   }
 
-  /** The first words past the cap: she says, once, that the rest is on screen. */
-  const quietRest = (text, out) => {
-    if (!told && text.trim()) {
-      told = true
-      out.push({ text: REST_ON_SCREEN.trimStart(), quiet: false, note: true })
+  const decide = (sentence, out) => {
+    decided = true
+    const t = sentence.trim()
+    if (!t) return
+    const words = t.split(/\s+/).length
+    if (TROUBLE.test(t) || /\?["'”’)\]]?$/.test(t) || words <= 3) {
+      out.push({ text: sentence, quiet: false })
+      return
     }
+    out.push({ text: `${ackFor(command)} `, quiet: false })
+    out.push({ text: sentence, quiet: true })
+  }
+
+  /** Past the cap: shown in her log, never said — not even that there is more. */
+  const quietRest = (text, out) => {
     out.push({ text, quiet: true })
   }
 
@@ -167,6 +186,11 @@ export function createSpokenFilter({ question = false } = {}) {
       if (rest) {
         if (inMore) out.push({ text: rest, quiet: true })
         else say(rest, out)
+      }
+      // A task's only sentence, never ended with a full stop and a space.
+      if (!question && !decided && first) {
+        decide(first, out)
+        first = ''
       }
       inMore = false
       return out.map(({ text, quiet }) => ({ text, quiet }))

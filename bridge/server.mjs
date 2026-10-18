@@ -1058,7 +1058,7 @@ wss.on('connection', (socket, req) => {
         ask,
         // How much of it is said out loud (spoken.mjs): a task in a line or two,
         // a question in full; <more> details are shown, never spoken.
-        spoken: createSpokenFilter({ question: isQuestion(turnOf()?.text ?? '') }),
+        spoken: createSpokenFilter({ question: isQuestion(turnOf()?.text ?? ''), command: turnOf()?.text ?? '' }),
         filter: createTagFilter((json) => {
           const args = parseCard(json)
           const verdict = args ? checkData(args, cards.evidence()) : { ok: false, error: 'the card was not JSON' }
@@ -1265,7 +1265,7 @@ wss.on('connection', (socket, req) => {
       FACE.phase = msg.phase
       FACE.text = typeof msg.text === 'string' ? msg.text.replace(/\s+/g, ' ').slice(-160) : ''
       FACE.who = msg.who === 'you' || msg.who === 'her' ? msg.who : ''
-      FACE.by = msg.by === 'name' || msg.by === 'press' ? msg.by : ''
+      FACE.by = ['name', 'press', 'follow'].includes(msg.by) ? msg.by : ''
       FACE.at = Date.now()
     }
 

@@ -72,9 +72,9 @@ const hands = (over = {}) => {
 
 test('runFast does it and says one short line', async () => {
   const h = hands()
-  assert.equal((await runFast(parseFast('open notepad'), h)).said, 'Opening Notepad.')
-  assert.equal((await runFast(parseFast('open youtube'), h)).said, 'Opening YouTube.')
-  assert.equal((await runFast(parseFast('next song'), h)).said, 'Next track.')
+  assert.equal((await runFast(parseFast('open notepad'), h)).said, 'Opened.')
+  assert.equal((await runFast(parseFast('open youtube'), h)).said, 'Opened.')
+  assert.equal((await runFast(parseFast('next song'), h)).said, 'Next.')
   assert.deepEqual(h.did, [['app', 'notepad'], ['site', 'https://www.youtube.com/'], ['media', 'next']])
 })
 
@@ -84,7 +84,7 @@ test('an app that is not installed opens its site, else falls to the brain', asy
   }
   const h = hands({ openApp: missing })
   const r = await runFast(parseFast('open spotify'), h)
-  assert.equal(r.said, 'Opening Spotify.')
+  assert.equal(r.said, 'Opened.')
   assert.deepEqual(h.did, [['site', 'https://open.spotify.com/']])
   assert.equal(await runFast(parseFast('open notepad'), hands({ openApp: missing })), null)
 })

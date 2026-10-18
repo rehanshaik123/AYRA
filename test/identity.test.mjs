@@ -78,7 +78,8 @@ test('the voice persona: the ranker decides research, a web answer is said first
 
 test('the voice persona: a task in a line, a question answered, details in <more> (the owner, 2026-10-13)', () => {
   assert.ok(SYSTEM_PROMPT.includes('only the minimum — status, progress and anything'))
-  assert.ok(SYSTEM_PROMPT.includes('A task — open, play, send, write, fix, move, set up, find and do: one short sentence.'))
+  assert.ok(SYSTEM_PROMPT.includes('"Done.", "Opened.", "Created.", "Sent.", "Saved." — and\n  nothing more'))
+  assert.ok(SYSTEM_PROMPT.includes('only to sentences that start\n  with your name'))
   assert.ok(SYSTEM_PROMPT.includes('Go into\n  depth only when they ask you to explain'))
   assert.ok(SYSTEM_PROMPT.includes('inside <more>…</more>'))
   assert.ok(!SYSTEM_PROMPT.includes('Length is licensed only when reading out data'))

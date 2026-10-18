@@ -118,8 +118,8 @@ const DOMAIN = /^(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,})(\/\S*)?$/i
 const MEDIA = [
   [/^pause$|^(?:pause|stop)(?: the| my)? (?:music|song|track|spotify|playback|audio)$/i, 'pause', 'Paused.'],
   [/^(?:play|resume|unpause|continue)(?: the| my)? (?:music|song|track|spotify|playback)$/i, 'play', 'Playing.'],
-  [/^(?:next|skip)(?: the| this)? (?:song|track)$/i, 'next', 'Next track.'],
-  [/^(?:previous|go back a|last) (?:song|track)$/i, 'prev', 'Previous track.'],
+  [/^(?:next|skip)(?: the| this)? (?:song|track)$/i, 'next', 'Next.'],
+  [/^(?:previous|go back a|last) (?:song|track)$/i, 'prev', 'Previous.'],
 ]
 
 /** "open report.pdf" is a file, not a website called report.pdf. */
@@ -205,20 +205,20 @@ export async function runFast(intent, hands) {
     }
     if (intent.kind === 'site') {
       await hands.openSite(intent.url)
-      return { said: `Opening ${intent.name}.`, note: `opened ${intent.name} (${intent.url}) in a new tab of her Chrome` }
+      return { said: 'Opened.', note: `opened ${intent.name} (${intent.url}) in a new tab of her Chrome` }
     }
     if (intent.kind === 'folder') {
       await hands.openFolder(intent.folder)
-      return { said: `Opening ${intent.name}.`, note: `opened ${intent.name} in File Explorer` }
+      return { said: 'Opened.', note: `opened ${intent.name} in File Explorer` }
     }
     if (intent.kind === 'app') {
       try {
         const { app } = await hands.openApp(intent.name)
-        return { said: `Opening ${app}.`, note: `opened the ${app} app` }
+        return { said: 'Opened.', note: `opened the ${app} app` }
       } catch (err) {
         if (!intent.site) throw err
         await hands.openSite(intent.site.url)
-        return { said: `Opening ${intent.site.name}.`, note: `opened ${intent.site.name} on the web (${intent.site.url}) — the app isn't installed` }
+        return { said: 'Opened.', note: `opened ${intent.site.name} on the web (${intent.site.url}) — the app isn't installed` }
       }
     }
   } catch {
