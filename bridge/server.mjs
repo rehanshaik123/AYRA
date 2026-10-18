@@ -383,6 +383,7 @@ const handleRequest = async (req, res) => {
     }
     const mode = want === 'toggle' ? (HEARING.mode === 'hands-free' ? 'push' : 'hands-free') : want
     if (!HEARING_MODES.has(mode)) return reply(400, { error: 'mode is push, hands-free or toggle' })
+    if (mode === 'hands-free' && !HANDS_FREE) return reply(403, { error: 'hands-free is switched off (AYRA_HANDSFREE)', mode: 'push' })
     if (!HEARING.faces.size) return reply(409, { error: "her window isn't open", mode: HEARING.mode })
     for (const send of HEARING.faces) send({ type: 'hearing', mode, by: 'tray' })
     HEARING.mode = mode
@@ -397,7 +398,7 @@ const handleRequest = async (req, res) => {
     // student with nothing configured still has a working assistant.
     const eleven = Boolean(elevenKey())
     res.writeHead(200, { ...cors, 'content-type': 'application/json' })
-    return res.end(JSON.stringify({ ok: true, tts: eleven, stt: eleven }))
+    return res.end(JSON.stringify({ ok: true, tts: eleven, stt: eleven, handsFree: HANDS_FREE }))
   }
 
   // Remote images, fetched here so the page never talks to the wider web. The
@@ -972,6 +973,14 @@ const HEARING = { mode: 'push', faces: new Set() }
 const HEARING_MODES = new Set(['push', 'hands-free'])
 
 /**
+ * Hands-free ("say AYRA") is switched off unless AYRA_HANDSFREE=on — the
+ * owner, 2026-10-18: "it's not working efficiently; I'll use Space in her
+ * window and Alt+Space in other apps". The face hears this from /health and
+ * the tray from ayra.ini; the code stays for the day it comes back.
+ */
+const HANDS_FREE = env('HANDSFREE', 'off') === 'on'
+
+/**
  * Her window as the bubble shows it (AYRA.exe, GET /face): the phase, one line
  * of caption (what she heard, or what she is saying), whose words they are,
  * and whether the last listen began with her name. Reported by the face.
@@ -984,6 +993,10 @@ wss.on('connection', (socket, req) => {
   const path = (req.url ?? '/').split('?')[0]
   if (path === '/listen') return listen(socket)
   if (path === '/wake') {
+    if (!HANDS_FREE) {
+      socket.send(JSON.stringify({ type: 'error', code: 'off', message: 'hands-free is switched off' }))
+      return socket.close()
+    }
     // The meter runs exactly while some face is streaming for hands-free.
     WAKE_SOCKETS.add(socket)
     SPEAKERS.start()

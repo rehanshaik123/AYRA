@@ -29,7 +29,7 @@ import {
 } from './lib/bridge'
 import { inputLevel } from './lib/listen'
 import { glance, sameGlance, type Glance } from './lib/glance'
-import { probeCapabilities } from './lib/capabilities'
+import { caps, probeCapabilities } from './lib/capabilities'
 import { BARE_NAME, LEADING_NAME, addressed, afterWake, onlyName } from './lib/wake'
 import { withHonorific } from './identity'
 
@@ -527,6 +527,24 @@ export default function App() {
   const setHearing = async (want: Hearing, say = true) => {
     const v = voice.current
     if (!v) return
+    // Switched off in the bridge (the owner, 2026-10-18: Space in her window,
+    // Alt+Space everywhere else): push-to-talk, and W says so.
+    if (want === 'hands-free' && !caps().handsFree) {
+      await v.handsFree(false)
+      store.getState().setHearing('push')
+      reportHearing('push')
+      try {
+        localStorage.setItem(HEARING_KEY, 'push')
+      } catch {
+        /* not remembered this time */
+      }
+      if (say) {
+        const line = createSpeaker()
+        line.say(withHonorific('Hands-free is switched off. Press Space here, or Alt Space from any app.'))
+        void line.end()
+      }
+      return
+    }
     const ok = await v.handsFree(want === 'hands-free')
     const st = store.getState()
     const mode: Hearing = want === 'hands-free' && ok ? 'hands-free' : 'push'

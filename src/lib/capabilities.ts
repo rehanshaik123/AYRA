@@ -20,10 +20,12 @@ export type Capabilities = {
   stt: boolean
   /** ElevenLabs text-to-speech is reachable via the bridge. */
   tts: boolean
+  /** Hands-free ("say AYRA") is switched on in the bridge (AYRA_HANDSFREE=on). */
+  handsFree: boolean
 }
 
 /** Browser-only until the probe says otherwise. Safe default: the app works. */
-let current: Capabilities = { stt: false, tts: false }
+let current: Capabilities = { stt: false, tts: false, handsFree: false }
 let probed = false
 
 /** The last known capabilities. Read synchronously by the voice and speech
@@ -48,8 +50,8 @@ export async function probeCapabilities(): Promise<Capabilities> {
       signal: AbortSignal.timeout(3000),
     })
     if (res.ok) {
-      const h = (await res.json()) as { stt?: boolean; tts?: boolean }
-      current = { stt: Boolean(h.stt), tts: Boolean(h.tts) }
+      const h = (await res.json()) as { stt?: boolean; tts?: boolean; handsFree?: boolean }
+      current = { stt: Boolean(h.stt), tts: Boolean(h.tts), handsFree: Boolean(h.handsFree) }
     }
   } catch {
     // Bridge down or slow — stay on the browser engines rather than blocking

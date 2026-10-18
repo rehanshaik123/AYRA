@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useStore, accentFor, type Phase } from '../store'
 import { answerApproval } from '../lib/bridge'
+import { caps } from '../lib/capabilities'
 import { Suggestions } from './Suggestions'
 import { BladeSweep, Blades } from './Blades'
 import { IDENTITY } from '../identity'
@@ -368,7 +369,16 @@ export function Hud() {
       <footer className="hud-bottom">
         <span className="hint">
           <kbd>Space</kbd> talk · <kbd>Space</kbd> again send · <kbd>Space</kbd><kbd>Space</kbd> stop ·{' '}
-          <kbd>W</kbd> hands-free {hearing === 'hands-free' ? 'on' : 'off'} · <kbd>R</kbd> researcher{' '}
+          {caps().handsFree ? (
+            <>
+              <kbd>W</kbd> hands-free {hearing === 'hands-free' ? 'on' : 'off'} ·{' '}
+            </>
+          ) : (
+            <>
+              <kbd>Alt</kbd><kbd>Space</kbd> from any app ·{' '}
+            </>
+          )}
+          <kbd>R</kbd> researcher{' '}
           {researching ? 'on' : 'off'} · <kbd>L</kbd> still
           {voice && (
             <>
