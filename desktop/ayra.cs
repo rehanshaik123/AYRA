@@ -152,7 +152,7 @@ namespace Ayra
     // AYRA on top of every app: click to talk (Bubble).
     readonly Bubble bubble;
     readonly ToolStripMenuItem bubbleItem;
-    int switching;
+    int switching, waitingToTalk;
     readonly SynchronizationContext ui;
     readonly System.Threading.Timer watch;
     readonly EventWaitHandle quitSignal, openSignal;
@@ -238,12 +238,21 @@ namespace Ayra
     {
       ThreadPool.QueueUserWorkItem(delegate
       {
+        // Her window is still opening for an earlier press: that one talks once
+        // it is up. A second would land in the same moment — listen-then-send at
+        // once, or the double press that stops everything.
+        if (Interlocked.CompareExchange(ref waitingToTalk, 0, 0) == 1) return;
         if (Hearing.Talk(config) == 409)
         {
-          int faces = 0;
-          Open(false);
-          for (int i = 0; i < 40 && faces == 0; i++) { Thread.Sleep(500); Hearing.Get(config, out faces); }
-          if (faces > 0) Hearing.Talk(config);
+          if (Interlocked.Exchange(ref waitingToTalk, 1) == 1) return;
+          try
+          {
+            int faces = 0;
+            Open(false);
+            for (int i = 0; i < 40 && faces == 0; i++) { Thread.Sleep(500); Hearing.Get(config, out faces); }
+            if (faces > 0) Hearing.Talk(config);
+          }
+          finally { Interlocked.Exchange(ref waitingToTalk, 0); }
         }
       });
     }
@@ -893,11 +902,14 @@ namespace Ayra
     static readonly string[] FrameNames = { "sleep", "idle", "listen", "think", "magic", "talk-open", "talk-shut" };
     readonly float scale;
     readonly string place;
-    string phase = "offline", text = "", who = "", by = "", hearing = "push";
+    // said: her last spoken line, kept for the few seconds it stays after she finishes.
+    string phase = "offline", text = "", who = "", by = "", hearing = "push", said = "";
     int faces;
     DateTime flashUntil = DateTime.MinValue, lastBusy = DateTime.MinValue, lastDraw = DateTime.MinValue;
     readonly DateTime started = DateTime.Now;
-    bool dragging, down, fullscreen, wanted = true;
+    bool dragging, down, fullscreen;
+    // Read by the poll thread too.
+    volatile bool wanted = true;
     Point grab;
     volatile bool closing;
 
@@ -1138,7 +1150,8 @@ namespace Ayra
           if (!closing && IsHandleCreated) BeginInvoke((Action)delegate { Take(body, full); });
         }
         catch { }
-        Thread.Sleep(200);
+        // Hidden from the menu: nothing to show, so look less often.
+        Thread.Sleep(wanted ? 200 : 1000);
       }
     }
 
@@ -1150,7 +1163,7 @@ namespace Ayra
       catch { return m.Groups[1].Value; }
     }
 
-    void Take(string body, bool full)
+    void Take(string body, Rectangle full)
     {
       var was = phase;
       var wasBy = by;
@@ -1166,10 +1179,17 @@ namespace Ayra
         faces = f.Success ? int.Parse(f.Groups[1].Value) : 0;
         if (faces == 0) phase = "offline";
       }
-      if (Busy(phase)) lastBusy = DateTime.Now;
+      // The quiet minute after an answer is rest, not work: counting it would
+      // bring her last answer back for a few seconds once the minute is over.
+      if (Busy(phase) && by != "follow") lastBusy = DateTime.Now;
+      // A new question clears the old answer, so a reply too short to be seen
+      // speaking never brings back the one before it.
+      if (phase == "thinking" || phase == "tooling") said = "";
+      else if ((phase == "speaking" || phase == "dormant") && who == "her") said = text;
       // Her name heard: a flash, so the owner knows at once that she heard.
       if (phase == "listening" && by == "name" && (was != "listening" || wasBy != "name")) flashUntil = DateTime.Now.AddMilliseconds(700);
-      fullscreen = full;
+      // Only a full-screen app on her own screen; another monitor's video leaves her be.
+      fullscreen = !full.IsEmpty && full.IntersectsWith(Bounds);
       Arrange();
     }
 
@@ -1181,9 +1201,11 @@ namespace Ayra
       var show = wanted && !fullscreen;
       if (show && !Visible) { Show(); Draw(); }
       if (!show && Visible) Hide();
-      // The last answer stays a few seconds after she finishes, then fades.
+      // The last answer stays a few seconds after she finishes, then fades —
+      // at standby, and in the quiet minute after an answer until "AYRA …" is heard.
       var recent = (DateTime.Now - lastBusy).TotalSeconds < 5;
-      var line = show && text.Length > 0 && (Busy(phase) || (phase == "dormant" && recent)) ? text : "";
+      var calm = phase == "dormant" || (phase == "listening" && by == "follow");
+      var line = !show ? "" : text.Length > 0 && Busy(phase) ? text : calm && recent ? said : "";
       if (line.Length == 0 && show && phase == "listening" && by != "follow") line = by == "name" ? "Yes? I'm listening." : "Listening...";
       caption.Say(line, who == "you", Bounds);
     }
@@ -1284,23 +1306,27 @@ namespace Ayra
       catch { }
     }
 
-    // A full-screen app in front (a video, a game, a slideshow): stay out of its way.
-    bool Fullscreen()
+    // A full-screen app in front (a video, a game, a slideshow): the screen it
+    // fills, so she stays out of its way there; empty when there is none.
+    static Rectangle Fullscreen()
     {
       try
       {
         var h = Native.GetForegroundWindow();
-        if (h == IntPtr.Zero) return false;
+        if (h == IntPtr.Zero) return Rectangle.Empty;
         var cls = new StringBuilder(64);
         Native.GetClassName(h, cls, cls.Capacity);
         var c = cls.ToString();
-        if (c == "Progman" || c == "WorkerW" || c == "Shell_TrayWnd") return false;
+        if (c == "Progman" || c == "WorkerW" || c == "Shell_TrayWnd") return Rectangle.Empty;
+        // A maximised window covers the whole screen too when the taskbar hides
+        // itself; that is the owner's everyday app, not a video.
+        if (Native.IsZoomed(h)) return Rectangle.Empty;
         Gdi.RECT r;
-        if (!Gdi.GetWindowRect(h, out r)) return false;
+        if (!Gdi.GetWindowRect(h, out r)) return Rectangle.Empty;
         var b = Screen.FromHandle(h).Bounds;
-        return r.Left <= b.Left && r.Top <= b.Top && r.Right >= b.Right && r.Bottom >= b.Bottom;
+        return r.Left <= b.Left && r.Top <= b.Top && r.Right >= b.Right && r.Bottom >= b.Bottom ? b : Rectangle.Empty;
       }
-      catch { return false; }
+      catch { return Rectangle.Empty; }
     }
   }
 
@@ -1540,6 +1566,7 @@ namespace Ayra
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder name, int max);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int max);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int cmd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
