@@ -70,6 +70,7 @@ npm run lint           # oxlint (must stay at 0 warnings)
 npm run setup          # preflight: login, SDK binary, identity, ElevenLabs key
 npm run smoke          # one real end-to-end turn; needs a running bridge
 npm run bench          # times five standard questions (first word, done); needs a running bridge
+npm run voicetest      # her ears to her voice, for real: a test bridge, her face and a Chrome whose mic plays recorded lines; timed from speech end (--only 1,3 · --show · --debug · --no-build)
 npm run demo           # eleven real tasks (web, Chrome, apps, files, asks, job) → data/demo/<time>/; acts on the laptop
 npm run bridge:test    # a test copy of the bridge: port 8788, Telegram off
 npm run research -- "question"   # the research agent in the terminal: stages live, cited answer; real Claude calls
@@ -120,15 +121,15 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `src/App.tsx` · `src/identity.ts` · `src/config.ts` | The face's conductor (boot, phases, voice loop, turns) · identity for the face · the bridge address |
 | `src/lib/bridge.ts` · `capabilities.ts` | WebSocket client to the bridge · `/health` probe (is ElevenLabs there?) |
 | `src/lib/glance.ts` | What the bubble shows: her phase and one line, reported to the bridge as `face` frames |
-| `src/lib/wake.ts` · `voice.ts` · `listen.ts` · `audio.ts` | Her name and its mishearings (stripped from what you say) · the voice loop: push-to-talk (`open / send / close`), echo, browser fallback · live hearing to the bridge · the one microphone stream |
+| `src/lib/wake.ts` · `voice.ts` · `endpoint.ts` · `listen.ts` · `audio.ts` | Her name and its mishearings (stripped from what you say; in the minute after an answer "Ira, …" counts too) · the voice loop: push-to-talk (`open / send / close`), echo, browser fallback · when the owner has finished speaking, read from the words (`holdFor`) · live hearing to the bridge · the one microphone stream |
 | `public/listen-worklet.js` | AYRA's ears on the audio thread: speech detection + 16 kHz PCM, never throttled in a background tab |
-| `src/lib/tts.ts` · `fillers.ts` · `vocative.ts` · `sfx.ts` | Speaking (ElevenLabs, browser voice as fallback) · short "On it!" lines · the comma before "boss" · synthesised interface beeps |
+| `src/lib/tts.ts` · `clause.ts` · `fillers.ts` · `vocative.ts` · `sfx.ts` | Speaking (ElevenLabs, browser voice as fallback) · the first clause said before its sentence ends · short "On it!" lines · the comma before "boss" · synthesised interface beeps |
 | `src/ui/Avatar.tsx` · `src/ui/avatar.css` · `src/lib/avatar.ts` | **The avatar face**: the SVG character · her poses and animations · which pose for which phase, lip-sync, blinking |
 | `src/ui/Hud.tsx` · `Blades.tsx` · `sanitise.ts` | The HUD chrome and transcript · the blades (the one surface for results) · the sanitiser for model-written HTML |
 | `src/ui/Research.tsx` · `src/lib/research.ts` | The research board — a full-screen `research` blade, updated live · its types (the board state) and pure helpers |
-| `src/ui/Boot.tsx` · `Ignition.tsx` · `Diagnostics.tsx` · `Suggestions.tsx` | Start-up sequence · INITIALISE button · diagnostics (D) · rotating example questions |
+| `src/ui/Boot.tsx` · `Diagnostics.tsx` · `Suggestions.tsx` | Start-up sequence (she boots by herself and listens at once — no INITIALISE) · diagnostics (D) · rotating example questions |
 | `src/store.ts` · `src/index.css` | App state · all styles incl. the `.hud-*` design system blades use |
-| `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` · `bench.mjs` · `demo.mjs` · `bridge-copy.mjs` · `research.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test · `npm run bench` speed table · `npm run demo` what she can do, live · `npm run bridge:test` · `npm run research` |
+| `scripts/start.mjs` · `setup.mjs` · `smoke.mjs` · `bench.mjs` · `voicetest.mjs` · `demo.mjs` · `bridge-copy.mjs` · `research.mjs` | `npm start` launcher · `npm run setup` preflight · `npm run smoke` end-to-end test · `npm run bench` speed table · `npm run voicetest` hearing-to-voice test and timings · `npm run demo` what she can do, live · `npm run bridge:test` · `npm run research` |
 | `desktop/ayra.cs` · `desktop/ayra.ico` | **AYRA.exe**, the tray app: starts with Windows, keeps the bridge running hidden, opens her window, Ctrl+Alt+A to talk, Alt+Space talk from any app, and **the bubble** — AYRA on top of every app (click = Space, glow by phase, one caption line; polls `GET /face`) · her icon. C# 5 (the compiler that ships with Windows) |
 | `scripts/shortcuts.mjs` · `icon.mjs` · `figure.mjs` | `npm run shortcuts`: builds AYRA.exe into `desktop/bin/` (gitignored) with `ayra.ini`, makes the shortcuts · `npm run icon` · `npm run figure`: her figure for the bubble, one PNG per pose in `desktop/figure/` (needs her face running) |
 | `test/*.test.mjs` | Unit tests, run by `npm test` |

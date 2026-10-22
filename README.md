@@ -20,7 +20,7 @@ desktop app or `claude` CLI, signed in once) and Chrome or Edge in a real window
 ```bash
 npm install
 npm run setup     # checks the machine, changes nothing
-npm start         # brain + face → open http://localhost:5173, click INITIALISE, press Space
+npm start         # brain + face → open http://localhost:5173: she listens at once; Space after that
 npm run shortcuts # Windows: AYRA.exe in the tray — starts with Windows, Ctrl+Alt+A to talk
 ```
 
