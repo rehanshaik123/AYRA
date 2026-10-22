@@ -47,19 +47,21 @@ const SPEAKER = 'EXAVITQu4vr4xnSDxMaL'
 /**
  * The lines, in order. `how` is how she is listening when it is said:
  *   start  — the window she opens by herself when her window opens
- *   follow — the minute after an answer, where only "AYRA …" counts
+ *   follow — the two minutes after an answer, where only "OK …" (or "AYRA …") counts
  *   space  — Space pressed first
  * `parts` builds one clip from pieces with pauses between them (ms), the way
  * people stop to think in the middle of a command.
  */
 const LINES = [
   { how: 'start', parts: ["What's two plus two?"], expect: 'answer' },
-  { how: 'follow', parts: ['AYRA, what is the capital of France?'], expect: 'answer' },
+  { how: 'follow', parts: ['OK, what is the capital of France?'], expect: 'answer' },
   { how: 'follow', parts: ['Ayra what is three times three?'], expect: 'answer' },
   { how: 'follow', parts: ['What time is it?'], expect: 'ignored' },
+  // "OK", a breath, then the command (2026-10-22): one turn, not a lost "OK".
+  { how: 'follow', parts: ['Okay.', 1200, 'what is seven plus one?'], expect: 'answer', whole: /seven|7/i },
   { how: 'space', parts: ['What is twelve times', 1300, 'eleven?'], expect: 'answer', whole: /eleven|11/i },
   { how: 'space', parts: ['Tell me one short fact about the moon.'], expect: 'answer' },
-  { how: 'follow', parts: ['Hey Ayra, how many legs does a spider have?'], expect: 'answer' },
+  { how: 'follow', parts: ['Okay, how many legs does a spider have?'], expect: 'answer' },
   // The owner says her name "eye-ra"; a transcriber may write Ira or Aira.
   { how: 'follow', parts: ['Eye-ra, what is five plus five?'], expect: 'answer' },
   // A thinking pause in the middle; nothing here may act on the laptop.

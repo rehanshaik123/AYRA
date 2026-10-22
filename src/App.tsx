@@ -30,7 +30,7 @@ import { inputLevel } from './lib/listen'
 import { glance, sameGlance, type Glance } from './lib/glance'
 import { caps, probeCapabilities } from './lib/capabilities'
 import { BARE_NAME, LEADING_NAME, addressed, afterWake, followUpCommand, followUpVerdict, onlyName } from './lib/wake'
-import { IDENTITY, withHonorific } from './identity'
+import { withHonorific } from './identity'
 
 /**
  * The conversation.
@@ -77,18 +77,22 @@ const SEND_GRACE_MS = 1500
  * waiting for it. Short on purpose: a video playing nearby can't hold her.
  */
 /**
- * After every answer she listens this long for more (the owner, 2026-10-18:
- * "wait for 1 min after finishing the task to see if I want more things
- * done"), and in that minute only a sentence that starts with her name counts.
+ * After every answer she listens this long for more, and a sentence counts only
+ * when it starts with "OK" (or her name). The owner, 2026-10-18: "wait for 1
+ * min after finishing the task"; 2026-10-22: "her name needed 2–3 times… keep
+ * listening and react only when I say a sentence starting with ok", 2 minutes.
+ * Whatever was playing stays paused until these minutes end (their choice), and
+ * a sentence that came from the laptop's speakers — a video's "okay, so…" —
+ * never counts (bridge/listen.mjs, the speaker meter).
  */
-const FOLLOW_UP_MS = 60_000
+const FOLLOW_UP_MS = 120_000
 
 /**
- * Said in the minute after an answer without her name: shown (her window and
- * the bubble) rather than dropped in silence — the owner, 2026-10-20: "for the
- * second command she keeps listening and doesn't respond".
+ * Said in those minutes without "OK": shown (her window and the bubble) rather
+ * than dropped in silence — the owner, 2026-10-20: "for the second command she
+ * keeps listening and doesn't respond".
  */
-const FOLLOW_HINT = `Start with "${IDENTITY.name}", or press Space`
+const FOLLOW_HINT = 'Start with "OK", or press Space'
 const FOLLOW_HINT_MS = 4000
 
 /** A follow-up that only ends the conversation — no question for the model. */
@@ -190,10 +194,12 @@ export default function App() {
    */
   const mediaPaused = useRef(false)
   const mediaTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pauseMedia = () => {
+  /** `again`: pause whatever plays now even if she already holds something paused —
+   *  the owner may have pressed play in the minutes after an answer. */
+  const pauseMedia = (again = false) => {
     if (mediaTimer.current) clearTimeout(mediaTimer.current)
     mediaTimer.current = null
-    if (mediaPaused.current) return
+    if (mediaPaused.current && !again) return
     mediaPaused.current = true
     media('pause')
   }
@@ -201,7 +207,9 @@ export default function App() {
     if (!mediaPaused.current || mediaTimer.current) return
     mediaTimer.current = setTimeout(() => {
       mediaTimer.current = null
-      if (store.getState().phase !== 'dormant' && !followUp.current) return
+      // Back on standby only: in the minutes after an answer it stays paused
+      // (the owner, 2026-10-22), and resumes when they end.
+      if (store.getState().phase !== 'dormant' || followUp.current) return
       mediaPaused.current = false
       media('resume')
     }, 800)
@@ -228,6 +236,7 @@ export default function App() {
     resumeTo.current = null
     wokeByName.current = false
     followUp.current = false
+    voice.current?.follow(false)
     voice.current?.close()
     turn.current++
     const s = store.getState()
@@ -249,8 +258,10 @@ export default function App() {
     s.setCaption('')
     s.setPhase('listening')
     s.setFollowing(from === 'follow')
-    // The minute after an answer: quiet — no cue, the music plays on, and the
-    // brain wakes only if she is really spoken to.
+    // The bridge checks words against the speakers only in those minutes.
+    voice.current?.follow(from === 'follow')
+    // The minutes after an answer: quiet — no cue, whatever she paused stays
+    // paused, and the brain wakes only if she is really spoken to.
     if (from === 'follow') {
       void voice.current?.open()
       idleTimer.current = setTimeout(stopListening, window)
@@ -369,7 +380,7 @@ export default function App() {
         sfx.duck(false)
         store.getState().setActiveTool(null)
         goDormant()
-        // A minute more, for "AYRA, …" only (the owner, 2026-10-18).
+        // Two minutes more, for "OK, …" (the owner, 2026-10-22).
         followUp.current = true
         followUntil.current = Date.now() + FOLLOW_UP_MS
         listen(FOLLOW_UP_MS, 'follow')
@@ -483,10 +494,10 @@ export default function App() {
       return
     }
 
-    // The minute after an answer: only "AYRA …" counts. The TV, other people
-    // and noise are ignored, and the minute goes on. Checked BEFORE the Approve
-    // card below: a lyric's "yeah" or the TV's "okay" must never answer one —
-    // in that minute only "AYRA, yes" does (the review, 2026-10-18).
+    // The minutes after an answer: only "OK …" (or "AYRA …") counts. The TV,
+    // other people and noise are ignored, and the minutes go on. Checked BEFORE
+    // the Approve card below: a lyric's "yeah" must never answer one — in those
+    // minutes only "OK, yes" does (the review, 2026-10-18).
     const verdict = following ? followUpVerdict(text) : null
     if (verdict === 'ignore') {
       const left = followUntil.current - Date.now()
@@ -508,7 +519,9 @@ export default function App() {
     // while one is waiting — it must be a clear yes or no.
     const waiting = store.getState().approvals[0]
     if (waiting) {
-      const said = text.replace(LEADING_NAME, '').trim()
+      // Without the "OK" in front: SAID_YES takes a bare "okay", so "OK, open
+      // Notepad" would otherwise approve the card.
+      const said = (following ? followUpCommand(text) : text.replace(LEADING_NAME, '')).trim()
       if (SAID_YES.test(said)) answer(waiting.id, true)
       else if (SAID_NO.test(said)) answer(waiting.id, false)
       stopListening()
@@ -533,7 +546,7 @@ export default function App() {
     // Woken mid-sentence ("okay so, AYRA, check the gold price"): the command
     // is what follows her name.
     const said = (woke ? afterWake(text) : following ? followUpCommand(text) : text.replace(LEADING_NAME, '')).trim()
-    // "That's all" after an answer: she goes back to waiting for her name.
+    // "That's all" after an answer: she goes back to standby.
     if (following && DISMISS.test(said)) {
       goDormant()
       return
@@ -542,6 +555,9 @@ export default function App() {
       listen(AWAIT_SPEECH_MS)
       return
     }
+    // A command in those minutes: if the owner pressed play again meanwhile,
+    // that pauses too while she answers, as a press would.
+    if (following) pauseMedia(true)
 
     void respond(said)
   }

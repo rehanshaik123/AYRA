@@ -33,3 +33,8 @@ test('one or two words wait, unless they are a complete command', () => {
   assert.equal(holdFor('stop'), SETTLE_MS)
   assert.equal(holdFor('never mind'), SETTLE_MS)
 })
+
+test('"OK." on its own waits for the command after it (2026-10-22)', () => {
+  for (const t of ['OK.', 'Okay.', 'ok', 'Okay!', 'O.K.']) assert.equal(holdFor(t), CONTINUE_MS, t)
+  assert.notEqual(holdFor('OK, open Notepad.'), CONTINUE_MS)
+})

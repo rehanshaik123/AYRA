@@ -46,6 +46,13 @@ export type Listener = {
   setGuard: (on: boolean) => void
   /** She is about to listen: open the transcription session now. */
   warm: () => void
+  /**
+   * The minutes after an answer, on or off: then the bridge drops words that
+   * came out of the laptop's speakers (bridge/listen.mjs) — a video's "okay,
+   * so…" is not the owner. Off otherwise: over her own voice, the owner
+   * interrupting her must never be mistaken for it.
+   */
+  follow: (on: boolean) => void
   /** Push-to-talk: hear speech (true) or nothing at all (false). */
   arm: (on: boolean) => void
   /** End the segment now — the owner pressed Space to send. */
@@ -97,6 +104,8 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
   let held: (ArrayBuffer | string)[] = []
   let meter = { energy: 0, floor: 0, threshold: 0, speaking: false }
 
+  /** The minutes after an answer (follow): remembered for a new connection. */
+  let following = false
   const send = (data: ArrayBuffer | string) => {
     if (socket?.readyState === WebSocket.OPEN) socket.send(data)
     else {
@@ -112,6 +121,8 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
     socket = ws
     ws.onopen = () => {
       attempt = 0
+      // A new connection starts with the bridge's speaker check off: say so again.
+      if (following) ws.send(JSON.stringify({ type: 'follow', on: true }))
       const queue = held
       held = []
       for (const d of queue) ws.send(d)
@@ -239,6 +250,11 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
     },
     setGuard: (on) => node.port.postMessage({ guard: on }),
     warm: () => send(JSON.stringify({ type: 'warm' })),
+    follow: (on) => {
+      if (on === following) return
+      following = on
+      send(JSON.stringify({ type: 'follow', on }))
+    },
     arm: (on) => node.port.postMessage({ armed: on }),
     finish: () => node.port.postMessage({ finish: true }),
     cut: () => node.port.postMessage({ cut: true }),

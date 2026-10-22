@@ -98,3 +98,25 @@ test('in the minute after an answer, "Ira, …" and "Arya, …" are her name too
   // No comma after it: a sentence about someone, or "the era of".
   for (const t of ['Ira went home early', 'Era of AI is here', 'Aria is a nice song']) assert.equal(followUpVerdict(t), 'ignore', t)
 })
+
+test('the minutes after an answer: a sentence that starts with "OK" is for her (2026-10-22)', async () => {
+  const { followUpVerdict, followUpCommand } = await import('../src/lib/wake.ts')
+  for (const [t, rest] of [
+    ['OK, open Notepad.', 'open Notepad.'],
+    ['Okay note this which is on screen', 'note this which is on screen'],
+    ['ok what is twelve times eleven?', 'what is twelve times eleven?'],
+    ['O.K. close the tab', 'close the tab'],
+    ['Okay AYRA, add this to my notes', 'add this to my notes'],
+    ['OK thanks', 'thanks'],
+  ]) {
+    assert.equal(followUpVerdict(t), 'command', t)
+    assert.equal(followUpCommand(t), rest, t)
+  }
+  // A bare "okay" is thanks, or "OK…" still waiting for its command: nothing to do.
+  for (const t of ['OK', 'Okay.', 'ok!', 'okay okay']) assert.notEqual(followUpVerdict(t), 'command', t)
+  assert.equal(followUpVerdict('Okay AYRA.'), 'name')
+  // Not "OK" at the start, or a word that only begins with it.
+  for (const t of ['open notepad', 'is it okay to open notepad', 'Okra is a vegetable', 'okayish, I guess']) {
+    assert.equal(followUpVerdict(t), 'ignore', t)
+  }
+})

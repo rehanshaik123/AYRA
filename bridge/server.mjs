@@ -968,6 +968,15 @@ function listen(socket) {
     socket.send(JSON.stringify({ type: 'error', code: 'no_key', message: 'no ElevenLabs key' }))
     return socket.close()
   }
+  // The speaker meter runs while her window listens: in the minutes after an
+  // answer "OK, …" is the owner's only if it didn't come out of the speakers
+  // (a tutorial's "okay, so now…" — 2026-10-22). ~1% CPU.
+  LISTEN_SOCKETS.add(socket)
+  SPEAKERS.start()
+  socket.on('close', () => {
+    LISTEN_SOCKETS.delete(socket)
+    if (!LISTEN_SOCKETS.size && !WAKE_SOCKETS.size) SPEAKERS.stop()
+  })
   relayListening(socket, {
     key,
     language: IDENTITY.language.split('-')[0] || 'en',
@@ -975,6 +984,8 @@ function listen(socket) {
     keyterms: [IDENTITY.name],
     connect: (url, k) => new WebSocket(url, { headers: { 'xi-api-key': k } }),
     log: (msg) => console.warn(msg),
+    judge: (pcm, at) => SPEAKERS.judge(pcm, at),
+    record: (entry) => AUDIT.log({ type: 'hearing', ...entry }),
   })
 }
 
@@ -1008,6 +1019,8 @@ HANDS.notes = async (what, asked) => {
  */
 const SPEAKERS = createSpeakerMeter({ log: (msg) => console.log(msg) })
 const WAKE_SOCKETS = new Set()
+/** Her window's live-hearing sockets: the meter also checks what they hear (listen.mjs). */
+const LISTEN_SOCKETS = new Set()
 
 /**
  * How the face is listening — 'push' (Space) or 'hands-free' (her name) — as it
@@ -1047,7 +1060,7 @@ wss.on('connection', (socket, req) => {
     SPEAKERS.start()
     socket.on('close', () => {
       WAKE_SOCKETS.delete(socket)
-      if (!WAKE_SOCKETS.size) SPEAKERS.stop()
+      if (!WAKE_SOCKETS.size && !LISTEN_SOCKETS.size) SPEAKERS.stop()
     })
     return relayWake(socket, {
       key: elevenKey(),

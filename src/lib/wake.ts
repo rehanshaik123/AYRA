@@ -76,13 +76,36 @@ export function onlyName(text: string): boolean {
 }
 
 /**
- * The minute after an answer (the owner, 2026-10-18): only a sentence that
- * STARTS with her name is for her. 'ignore' — the TV, someone else, noise;
- * 'name' — just her name, so she says "Yes?" and listens; 'command' — her name
- * and what they want.
+ * "OK" in front of a sentence: how the owner speaks to her in the minutes after
+ * an answer (2026-10-22: "react only when I say a sentence starting with ok" —
+ * her name took two or three tries to be heard). Transcribers write it OK,
+ * Okay, Ok, O.K.
+ */
+export const LEADING_OK = /^(?:okay|okey|ok|o\.\s?k\.?)(?=[\s,.:;!?-]|$)[\s,.:;!?-]*/i
+
+/** The sentence without the "OK"s in front ("okay okay, …" too). */
+const withoutOk = (t: string) => {
+  let rest = t
+  while (LEADING_OK.test(rest)) rest = rest.replace(LEADING_OK, '')
+  return rest.trim()
+}
+
+/**
+ * The minutes after an answer: only a sentence that STARTS with "OK" — or with
+ * her name, which still works — is for her. 'ignore' — the TV, someone else,
+ * noise, and a bare "okay" (said as thanks, or "OK…" still waiting for its
+ * command); 'name' — just her name, so she says "Yes?" and listens; 'command'
+ * — "OK" or her name, and what they want.
  */
 export function followUpVerdict(text: string): 'ignore' | 'name' | 'command' {
   const t = text.trim()
+  if (LEADING_OK.test(t)) {
+    const rest = withoutOk(t)
+    if (!rest.replace(/[\s,.!?]+/g, '')) return 'ignore'
+    // "OK AYRA" with nothing after it: her name, as before.
+    if (BARE_NAME.test(rest) || onlyName(rest)) return 'name'
+    return 'command'
+  }
   if (BARE_NAME.test(t) || onlyName(t)) return 'name'
   if (WEAK_ALONE?.test(t)) return 'name'
   return LEADING_NAME.test(t) || LEADING_WEAK?.test(t) ? 'command' : 'ignore'
@@ -98,9 +121,9 @@ export function followUpVerdict(text: string): 'ignore' | 'name' | 'command' {
 const LEADING_WEAK = WEAK ? new RegExp(`^(?:${WEAK})[,.:;!?]+\\s*`, 'i') : null
 const WEAK_ALONE = WEAK ? new RegExp(`^(?:${WEAK})[\\s,.!?]*$`, 'i') : null
 
-/** What the owner asked in that minute, without the name in front. */
+/** What the owner asked in those minutes, without the "OK" or the name in front ("OK AYRA, …" too). */
 export function followUpCommand(text: string): string {
-  const t = text.trim()
+  const t = withoutOk(text.trim())
   return (LEADING_NAME.test(t) ? t.replace(LEADING_NAME, '') : LEADING_WEAK ? t.replace(LEADING_WEAK, '') : t).trim()
 }
 

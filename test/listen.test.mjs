@@ -102,3 +102,79 @@ test('the face going away closes the upstream session', () => {
   client.emit('close')
   assert.equal(ups[0].closed, true)
 })
+
+test('words that came out of the laptop\'s speakers reach the face empty; the owner\'s pass (2026-10-22)', () => {
+  const client = new EventEmitter()
+  client.OPEN = 1
+  client.readyState = 1
+  client.sent = []
+  client.send = (s) => client.sent.push(JSON.parse(s))
+  const ups = []
+  const connect = () => {
+    const u = new EventEmitter()
+    u.sent = []
+    u.send = (s) => u.sent.push(JSON.parse(s))
+    u.close = () => {}
+    ups.push(u)
+    return u
+  }
+  const judged = []
+  const recorded = []
+  // The fake meter says a segment is from the speakers when its first byte is 9.
+  const judge = (pcm, at) => (judged.push({ bytes: pcm.length, at }), { fromSpeakers: pcm[0] === 9, corr: pcm[0] === 9 ? 0.8 : 0.1 })
+  relayListening(client, { key: 'k', connect, judge, record: (e) => recorded.push(e), now: () => 1000 })
+  const audio = (bytes) => client.emit('message', Buffer.from(bytes), true)
+  const commit = () => client.emit('message', Buffer.from(JSON.stringify({ type: 'commit' })), false)
+  const from = (msg) => ups[0].emit('message', Buffer.from(JSON.stringify(msg)))
+
+  // Outside the minutes after an answer nothing is checked — the owner may be talking over her.
+  audio([9, 9])
+  from({ message_type: 'session_started' })
+  commit()
+  from({ message_type: 'committed_transcript', text: 'stop' })
+  assert.equal(client.sent.filter((m) => m.type === 'final').at(-1).text, 'stop')
+  assert.equal(judged.length, 0)
+
+  client.emit('message', Buffer.from(JSON.stringify({ type: 'follow', on: true })), false)
+  audio([9, 9, 9, 9])
+  commit()
+  audio([1, 2, 3, 4])
+  commit()
+  from({ message_type: 'committed_transcript', text: 'Okay, so now open the terminal' })
+  from({ message_type: 'committed_transcript', text: 'OK, note this' })
+  const finals = client.sent.filter((m) => m.type === 'final').map((m) => m.text)
+  assert.deepEqual(finals, ['stop', '', 'OK, note this'])
+  assert.deepEqual(judged.map((j) => j.bytes), [4, 4])
+  assert.equal(recorded.length, 1)
+  assert.equal(recorded[0].result, 'speakers')
+  // A commit that came back with no words takes its audio with it: the next words get the next audio.
+  audio([9, 9])
+  commit()
+  audio([5, 5])
+  commit()
+  from({ message_type: 'insufficient_audio_activity' })
+  from({ message_type: 'committed_transcript', text: 'OK, add this' })
+  assert.equal(client.sent.filter((m) => m.type === 'final').at(-1).text, 'OK, add this')
+})
+
+test('without a meter, or when it fails, every word is the owner\'s', () => {
+  const client = new EventEmitter()
+  client.OPEN = 1
+  client.readyState = 1
+  client.sent = []
+  client.send = (s) => client.sent.push(JSON.parse(s))
+  const ups = []
+  const connect = () => {
+    const u = new EventEmitter()
+    u.send = () => {}
+    u.close = () => {}
+    ups.push(u)
+    return u
+  }
+  relayListening(client, { key: 'k', connect, judge: () => { throw new Error('meter down') } })
+  client.emit('message', Buffer.from(JSON.stringify({ type: 'follow', on: true })), false)
+  client.emit('message', Buffer.from([9, 9]), true)
+  client.emit('message', Buffer.from(JSON.stringify({ type: 'commit' })), false)
+  ups[0].emit('message', Buffer.from(JSON.stringify({ message_type: 'committed_transcript', text: 'OK, open Notepad' })))
+  assert.equal(client.sent.at(-1).text, 'OK, open Notepad')
+})

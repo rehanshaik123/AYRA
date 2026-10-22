@@ -81,6 +81,11 @@ export type Voice = {
   handsFree: (on: boolean) => Promise<boolean>
   /** Her name was heard: listen for one turn, starting just before the name. */
   wake: () => void
+  /**
+   * The minutes after an answer, on or off: the bridge then drops words that
+   * came out of the laptop's speakers (listen.ts `follow`). Live hearing only.
+   */
+  follow: (on: boolean) => void
 }
 
 /**
@@ -378,7 +383,7 @@ export async function startVoice(h: VoiceHandlers): Promise<Voice> {
         ? 'Microphone access denied — voice input is unavailable.'
         : 'No microphone available.',
     )
-    return { stop: () => {}, live: () => false, open: () => {}, send: () => {}, close: () => {}, handsFree: async () => false, wake: () => {} }
+    return { stop: () => {}, live: () => false, open: () => {}, send: () => {}, close: () => {}, handsFree: async () => false, wake: () => {}, follow: () => {} }
   }
   diag.engine = caps().stt ? 'elevenlabs-live' : 'browser'
   const v = caps().stt ? await startLiveVoice(h) : startBrowserVoice(h)
@@ -418,6 +423,8 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
   let discard = 0
   /** Hands-free: the microphone stays, streaming to the offline spotter. */
   let hands = false
+  /** The minutes after an answer: the bridge's speaker check is on (follow). */
+  let following = false
   /** When she last fell back to the browser recogniser (see recover). */
   let fellBackAt = 0
   /** What the last name check heard — the burst a wake replays from. */
@@ -669,6 +676,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
         listener = await startListening(await getMic(), handlers)
         // The worklet starts armed; it must not hear anything until asked.
         listener.arm(armed)
+        listener.follow(following)
       } catch (err) {
         listener = null
         fallBack(`could not start: ${(err as Error)?.message ?? err}`)
@@ -767,6 +775,10 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
       // bare name keeps the wait: the command may follow it.
       listener.armFromCandidate(Boolean(afterWake(lastBurst)))
     },
+    follow: (on) => {
+      following = on
+      listener?.follow(on)
+    },
   }
 }
 
@@ -789,7 +801,7 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
   if (!Ctor) {
     h.onError('This browser has no speech recognition — use Chrome or Edge, or add an ElevenLabs key.')
-    return { stop: () => {}, live: () => false, open: () => {}, send: () => {}, close: () => {}, handsFree: async (on) => !on, wake: () => {} }
+    return { stop: () => {}, live: () => false, open: () => {}, send: () => {}, close: () => {}, handsFree: async (on) => !on, wake: () => {}, follow: () => {} }
   }
 
   let stopped = false
@@ -1024,6 +1036,8 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     // through it is what hands-free exists to avoid: push-to-talk only.
     handsFree: async (on) => !on,
     wake: () => {},
+    // No bridge in the way here, so no speaker check: "OK, …" is taken as heard.
+    follow: () => {},
     open: () => {
       armed = true
       if (releaseTimer) clearTimeout(releaseTimer)

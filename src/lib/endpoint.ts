@@ -86,6 +86,10 @@ export function holdFor(text: string): number {
   const t = text.trim()
   const words = t.split(/\s+/).filter(Boolean)
   if (!words.length) return CONTINUE_MS
+  // "OK." on its own is how a command starts in the minutes after an answer
+  // (wake.ts LEADING_OK): the transcriber's full stop on the pause after it
+  // must not send it without the command.
+  if (/^(?:okay|okey|ok|o\.\s?k)[\s,.!?]*$/i.test(t)) return CONTINUE_MS
   // Stopped on a word no sentence ends on: more is coming, whatever the
   // punctuation says ("What is 12 times?" is a pause, not a question).
   if (NEVER_LAST.test(lastWord(words))) return CONTINUE_MS
