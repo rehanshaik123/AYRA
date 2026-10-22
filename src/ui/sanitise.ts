@@ -160,8 +160,8 @@ function hardenMedia(root: Element) {
  * The whole design-system vocabulary, and the only class names allowed to
  * survive. This has to be an allowlist rather than a `hud-` prefix test, and it
  * has to exist at all: `class` carries no URI, so DOMPurify never looks at its
- * value, and this stylesheet contains full-screen classes — `.ignition` and
- * `.boot` are both position:fixed, inset:0, opaque, above everything — so one
+ * value, and this stylesheet contains full-screen classes — `.boot` and the
+ * old `.ignition` were position:fixed, inset:0, opaque, above everything — so one
  * stray class token in model output blacks out the entire interface. `.hud-top`
  * and `.hud-bottom` are the same trap with a matching prefix, which is the
  * second reason a prefix test would not do.

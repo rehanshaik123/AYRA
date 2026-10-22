@@ -84,7 +84,24 @@ export function onlyName(text: string): boolean {
 export function followUpVerdict(text: string): 'ignore' | 'name' | 'command' {
   const t = text.trim()
   if (BARE_NAME.test(t) || onlyName(t)) return 'name'
-  return LEADING_NAME.test(t) ? 'command' : 'ignore'
+  if (WEAK_ALONE?.test(t)) return 'name'
+  return LEADING_NAME.test(t) || LEADING_WEAK?.test(t) ? 'command' : 'ignore'
+}
+
+/**
+ * In that minute only, her name as a transcriber often writes the owner's
+ * "eye-ra" — Ira, Era, Arya — counts too when it opens the sentence and is set
+ * off by punctuation: "Ira, open Notepad." (the owner, 2026-10-20: "for the
+ * second command she keeps listening and doesn't respond"). Everywhere else
+ * these stay greeting-only, for a friend called Ira and "the era of AI".
+ */
+const LEADING_WEAK = WEAK ? new RegExp(`^(?:${WEAK})[,.:;!?]+\\s*`, 'i') : null
+const WEAK_ALONE = WEAK ? new RegExp(`^(?:${WEAK})[\\s,.!?]*$`, 'i') : null
+
+/** What the owner asked in that minute, without the name in front. */
+export function followUpCommand(text: string): string {
+  const t = text.trim()
+  return (LEADING_NAME.test(t) ? t.replace(LEADING_NAME, '') : LEADING_WEAK ? t.replace(LEADING_WEAK, '') : t).trim()
 }
 
 /** Everything after the wake phrase, which is usually the actual command. */

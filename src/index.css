@@ -681,55 +681,6 @@ kbd {
   opacity: 0.45;
 }
 
-/* --------------------------------------------------------------- ignition */
-
-.ignition {
-  position: fixed;
-  inset: 0;
-  z-index: 7;
-  display: grid;
-  place-items: center;
-  background: radial-gradient(ellipse at center, #04121c 0%, #01060c 70%);
-  border: 0;
-  cursor: pointer;
-  font-family: inherit;
-  color: #4fd6ff;
-}
-
-.ignition-ring {
-  position: absolute;
-  width: 240px;
-  height: 240px;
-  border: 1px solid rgba(79, 214, 255, 0.28);
-  border-top-color: rgba(79, 214, 255, 0.9);
-  border-radius: 50%;
-}
-
-.ignition-label {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-
-.ignition-word {
-  font-size: 15px;
-  letter-spacing: 0.52em;
-  text-indent: 0.52em; /* balance the trailing letter-space */
-  text-shadow: 0 0 30px rgba(79, 214, 255, 0.7);
-}
-
-.ignition-sub {
-  font-size: 9px;
-  letter-spacing: 0.28em;
-  opacity: 0.4;
-  text-transform: uppercase;
-}
-
-.ignition:hover .ignition-word {
-  text-shadow: 0 0 44px rgba(79, 214, 255, 1);
-}
-
 /* ------------------------------------------------------------------- boot */
 
 .boot {
@@ -1358,22 +1309,6 @@ kbd {
   z-index: 2;
 }
 .bl-grip:hover { opacity: 1 }
-
-/* Spun in CSS, deliberately. Under framer this was an infinitely repeating
-   animation, and AnimatePresence will not unmount a subtree whose animations
-   never end — which left the whole ignition overlay on top of the interface
-   for the entire session, swallowing every click. */
-.ignition-ring { animation: ignitionSpin 18s linear infinite }
-
-@keyframes ignitionSpin {
-  from { transform: rotate(0deg) }
-  to   { transform: rotate(360deg) }
-}
-
-
-@media (prefers-reduced-motion: reduce) {
-  .ignition-ring { animation: none }
-}
 
 /* ---------------------------------------------------------------- still mode */
 

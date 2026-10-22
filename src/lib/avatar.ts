@@ -11,7 +11,7 @@
 import type { Phase } from '../store'
 
 export type Pose =
-  | 'sleep' // before INITIALISE — dozing
+  | 'sleep' // before she is up — dozing
   | 'idle' // standing by for the wake word
   | 'wave' // booting up, or just heard her name
   | 'listen' // hand to ear while you talk
