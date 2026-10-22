@@ -129,3 +129,19 @@ test('other MCP servers: read verbs pass, effectful verbs need writes', () => {
   assert.equal(readOnly.decide('mcp__twilio__make_outbound_call'), false)
   assert.equal(readOnly.decide('mcp__openrouter__send-message'), true)
 })
+
+test('the notes server: reading always, saving and changing only with writes, nothing unnamed', () => {
+  for (const t of ['notes_search', 'notes_read']) {
+    assert.equal(readOnly.decide(`mcp__ayra_notes__${t}`), true, t)
+    assert.equal(writes.decide(`mcp__ayra_notes__${t}`), true, t)
+  }
+  for (const t of ['notes_capture', 'notes_save', 'notes_add', 'notes_edit', 'notes_picture', 'notes_open']) {
+    assert.equal(readOnly.decide(`mcp__ayra_notes__${t}`), false, t)
+    assert.equal(writes.decide(`mcp__ayra_notes__${t}`), true, t)
+    // None of them deletes or sends, so none waits for Approve.
+    assert.deepEqual(writes.review(`mcp__ayra_notes__${t}`, { note: 'ml/x.md' }), { verdict: 'allow' }, t)
+  }
+  // A tool added later and not named in the gate is refused, writes or not.
+  assert.equal(writes.decide('mcp__ayra_notes__notes_delete'), false)
+  assert.equal(writes.decide('mcp__ayra_notes__notes_list'), false)
+})

@@ -145,3 +145,32 @@ test('runFast: the new hands, and the brain when they can\'t', async () => {
   const asking = { ...h, closeApp: async () => ({ app: 'Notepad', waiting: true }) }
   assert.equal((await runFast(parseFast('close notepad'), asking)).said, 'Notepad is asking something before it closes.')
 })
+
+test('"prepare notes on this video": the note writer straight away, for whole commands only', async () => {
+  for (const [said, what] of [
+    ['Hey AYRA, prepare overall notes of this video', 'video'],
+    ['make notes on this video please', 'video'],
+    ['notes of this video', 'video'],
+    ['create detailed notes for this lecture', 'video'],
+    ['take notes on this article', 'page'],
+    ['make a note of this page', 'page'],
+    ['give me study notes on the whole video', 'video'],
+  ]) {
+    const intent = parseFast(said)
+    assert.equal(intent?.kind, 'notes', said)
+    assert.equal(intent.what, what, said)
+  }
+  // More than the command, or a different command: the brain's.
+  for (const said of ['make notes on this video and send them to Priya', 'note this which is on screen', 'what are my notes on this video', 'open my notes']) {
+    assert.notEqual(parseFast(said)?.kind, 'notes', said)
+  }
+  const asked = []
+  const hands = { notes: async (what, words) => (asked.push([what, words]), 'Saved ml/gd.md: how networks learn') }
+  const did = await runFast(parseFast('prepare overall notes of this video'), hands)
+  assert.equal(did.said, 'Saved.')
+  assert.match(did.note, /notes on the video in front of them — Saved ml\/gd\.md/)
+  assert.deepEqual(asked, [['video', 'prepare overall notes of this video']])
+  // Anything but a clean save goes to the brain to explain.
+  assert.equal(await runFast(parseFast('notes of this video'), { notes: async () => null }), null)
+  assert.equal(await runFast(parseFast('notes of this video'), {}), null)
+})
