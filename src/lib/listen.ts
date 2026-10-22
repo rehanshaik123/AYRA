@@ -29,6 +29,8 @@ export type ListenHandlers = {
   onFinal: (text: string) => void
   /** 0..1 microphone level. */
   onLevel: (v: number) => void
+  /** A short quiet moment mid-segment (the worklet's PAUSE_MS): the segment may be cut here. */
+  onPause?: () => void
   /** Live hearing cannot work: `code` is ElevenLabs' (quota_exceeded, auth_error…)
    *  or 'unavailable' / 'no_key' / 'capture'. */
   onError: (code: string, message: string) => void
@@ -48,6 +50,8 @@ export type Listener = {
   arm: (on: boolean) => void
   /** End the segment now — the owner pressed Space to send. */
   finish: () => void
+  /** End the segment now and keep listening — the words so far read as finished. */
+  cut: () => void
   /** Hands-free: send bursts of speech for a name check (true) or stop (false). */
   stream: (on: boolean) => void
   /**
@@ -209,6 +213,8 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
       const end = ev as { empty?: boolean; dropped?: boolean }
       if (!end.empty) send(JSON.stringify({ type: 'commit' }))
       h.onEnd(Boolean(end.empty), Boolean(end.dropped))
+    } else if (ev.type === 'pause') {
+      h.onPause?.()
     } else if (ev.type === 'level') {
       meter = { energy: ev.energy, floor: ev.floor, threshold: ev.threshold, speaking: ev.speaking }
       level = ev.v ?? 0
@@ -235,6 +241,7 @@ export async function startListening(stream: MediaStream, h: ListenHandlers): Pr
     warm: () => send(JSON.stringify({ type: 'warm' })),
     arm: (on) => node.port.postMessage({ armed: on }),
     finish: () => node.port.postMessage({ finish: true }),
+    cut: () => node.port.postMessage({ cut: true }),
     stream: (on) => {
       if (on === streaming) return
       streaming = on

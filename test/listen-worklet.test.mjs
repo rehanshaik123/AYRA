@@ -38,7 +38,8 @@ test('speech starts, streams with its pre-roll, and ends after the silence', () 
   const during = feed(core, 1000, voice(0.2))
   assert.deepEqual(kinds(during), ['start'])
   const after = feed(core, 1000, noise(0.003))
-  assert.deepEqual(kinds(after), ['end'])
+  // A short quiet moment is reported first (PAUSE_MS), then the end (SILENCE_MS).
+  assert.deepEqual(kinds(after), ['pause', 'end'])
   const sent = samples([...during, ...after])
   // ~400 ms pre-roll + ~880 ms after confirmation + ~600 ms of tail, at 16 kHz
   assert.ok(sent > OUT_RATE * 1.5 && sent < OUT_RATE * 2.2, `sent ${sent} samples`)
@@ -219,4 +220,19 @@ test('while she speaks, nothing goes for a check', () => {
   core.guard = true
   feed(core, 2000, () => noise(0.002)())
   assert.equal([...feed(core, 800, voice(0.2)), ...feed(core, 1500, () => noise(0.002)())].filter((e) => e.type === 'candidate').length, 0)
+})
+
+test('a pause can end the segment at once (cut), and she keeps listening for the next', () => {
+  const core = new ListenCore(RATE)
+  feed(core, 2000, noise(0.003))
+  feed(core, 800, voice(0.2))
+  const quiet = feed(core, 450, noise(0.003))
+  assert.deepEqual(kinds(quiet), ['pause'])
+  // The words so far read as finished: the page cuts the segment here.
+  assert.deepEqual(kinds(core.cut()), ['end'])
+  // Still armed: the next sentence is a new segment.
+  assert.deepEqual(kinds(feed(core, 600, voice(0.2))), ['start'])
+  // A cut with nothing being said does nothing.
+  const idle = new ListenCore(RATE)
+  assert.deepEqual(idle.cut(), [])
 })

@@ -18,6 +18,8 @@
  * Messages to the page (port):
  *   { type: 'start' }              speech confirmed — the barge-in trigger
  *   { type: 'audio', pcm }         Int16Array, 16 kHz mono
+ *   { type: 'pause', ms }          quiet for PAUSE_MS mid-segment, once per quiet stretch —
+ *                                  the page may end the segment there ({ cut: true })
  *   { type: 'end', ms }            quiet for SILENCE_MS — the segment is over
  *   { type: 'level', v, energy, floor, threshold, speaking }  ~25 times a second
  *   { type: 'candidate', pcm }     hands-free only: a short burst of speech that began
@@ -26,6 +28,8 @@
  * unarmed, nothing is ever sent (the owner, 2026-10-06: listen only when I press
  * Space) · { finish: true } — the owner pressed Space again: end the segment now,
  * however loud the room (a video playing next door never goes quiet) ·
+ * { cut: true } — end the segment now but keep listening: the words before a
+ * pause already read as finished (voice.ts, 2026-10-20) ·
  * { stream: boolean } — hands-free (2026-10-11): listen for bursts that might be
  * her name — never the room itself, and nothing while sound hardly stops (music,
  * a video) · { armFrom: ms } / { armFromCandidate: true } — her name was heard:
@@ -51,6 +55,12 @@ const RELEASE_RATIO = 0.6
 const START_MS = 120
 /** Quiet this long ends the segment. Whether the thought is over is decided on the words, in voice.ts. */
 const SILENCE_MS = 700
+/**
+ * Quiet this long is reported (once per quiet stretch): when the words so far
+ * already read as finished — a question, a full stop — the page ends the
+ * segment here, ~0.4 s before SILENCE_MS would (the voice test, 2026-10-20).
+ */
+const PAUSE_MS = 300
 /** Nobody speaks one segment this long; end it and transcribe what there is. */
 const MAX_MS = 20000
 /** Audio kept from before the confirmation, so the first syllable reaches the transcriber. */
@@ -101,6 +111,8 @@ export class ListenCore {
     this.speaking = false
     this.startedAt = 0
     this.lastLoud = 0
+    /** This quiet stretch has been reported (PAUSE_MS). */
+    this.paused = false
     this.lastLevel = -LEVEL_MS
     this.preRoll = []
     this.pending = []
@@ -180,6 +192,7 @@ export class ListenCore {
           this.speaking = true
           this.startedAt = this.armedAt
           this.lastLoud = t
+          this.paused = false
           this.events.push({ type: 'start' })
           this.pending = this.preRoll
           this.preRoll = []
@@ -191,14 +204,23 @@ export class ListenCore {
       }
     } else {
       this.pending.push(pcm)
-      if (this.smooth > release) this.lastLoud = t
+      if (this.smooth > release) {
+        this.lastLoud = t
+        this.paused = false
+      }
       if (t - this.lastLoud >= SILENCE_MS || t - this.startedAt >= MAX_MS) {
         this.flush()
         this.speaking = false
         this.armedAt = -1
         this.events.push({ type: 'end', ms: t - this.startedAt })
-      } else if (this.pending.length * STEP_MS >= SEND_MS) {
-        this.flush()
+      } else {
+        if (this.pending.length * STEP_MS >= SEND_MS) this.flush()
+        if (!this.paused && t - this.lastLoud >= PAUSE_MS) {
+          this.paused = true
+          // What was said so far goes first, so the transcriber has all of it.
+          this.flush()
+          this.events.push({ type: 'pause', ms: t - this.lastLoud })
+        }
       }
     }
 
@@ -325,8 +347,21 @@ export class ListenCore {
       this.startedAt = this.t
       this.lastLoud = quietEnd && this.heardAt >= 0 ? Math.min(this.t, this.heardAt) : this.t
       this.armedAt = -1
+      this.paused = false
       this.events.push({ type: 'start', woken: true })
       this.flush()
+    }
+    return this.events
+  }
+
+  /** End the segment now, as if the room had gone quiet, and keep listening for the next. */
+  cut() {
+    this.events = []
+    if (this.speaking) {
+      this.flush()
+      this.speaking = false
+      this.armedAt = -1
+      this.events.push({ type: 'end', ms: this.t - this.startedAt })
     }
     return this.events
   }
@@ -376,8 +411,8 @@ if (typeof registerProcessor === 'function' && typeof AudioWorkletProcessor === 
             else this.port.postMessage(ev)
           }
         }
-        if (e.data && e.data.finish) {
-          for (const ev of this.core.finish()) {
+        if (e.data && (e.data.finish || e.data.cut)) {
+          for (const ev of e.data.finish ? this.core.finish() : this.core.cut()) {
             if (ev.type === 'audio') this.port.postMessage(ev, [ev.pcm.buffer])
             else this.port.postMessage(ev)
           }
