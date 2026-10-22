@@ -74,6 +74,10 @@ export const chromeArgs = (extra = []) => [
   '--disable-background-timer-throttling',
   '--disable-backgrounding-occluded-windows',
   '--disable-renderer-backgrounding',
+  // Her face speaks and listens the moment her window opens — no INITIALISE to
+  // click any more (the owner, 2026-10-20), and Chrome otherwise holds sound
+  // back until the page has been clicked.
+  '--autoplay-policy=no-user-gesture-required',
   ...extra,
 ]
 
