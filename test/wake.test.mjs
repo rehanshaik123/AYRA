@@ -82,3 +82,19 @@ test('the minute after an answer: only a sentence that starts with her name is f
     assert.equal(followUpVerdict(t), 'ignore', t)
   }
 })
+
+test('in the minute after an answer, "Ira, …" and "Arya, …" are her name too (2026-10-20)', async () => {
+  const { followUpVerdict, followUpCommand } = await import('../src/lib/wake.ts')
+  for (const [t, rest] of [
+    ['Ira, open Notepad.', 'open Notepad.'],
+    ['Arya, what is five plus five?', 'what is five plus five?'],
+    ['Era. Close the tab.', 'Close the tab.'],
+    ['AYRA, what time is it?', 'what time is it?'],
+  ]) {
+    assert.equal(followUpVerdict(t), 'command', t)
+    assert.equal(followUpCommand(t), rest, t)
+  }
+  assert.equal(followUpVerdict('Ira.'), 'name')
+  // No comma after it: a sentence about someone, or "the era of".
+  for (const t of ['Ira went home early', 'Era of AI is here', 'Aria is a nice song']) assert.equal(followUpVerdict(t), 'ignore', t)
+})

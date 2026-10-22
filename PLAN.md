@@ -431,6 +431,36 @@ hotkey becomes Alt+Space.
       "play X" (YouTube, first result playing), "play X on Spotify" (search + its Play button, confirmed by
       Windows' media controls), "search X on YouTube / Google", "close X", several in one breath.
 
+## Listening and latency, before the hands work · branch `researcher-mode` (2026-10-20)
+
+**Goal (the owner, 2026-10-20):** "after the first command, for the second she keeps listening and
+doesn't respond … test her overall, her listening and responding latency, and reduce it as much as
+possible … the bubble won't come back … remove INITIALISE: when AYRA opens she should come and
+listen … research today's voice agents and pick the pattern that suits AYRA."
+
+- [x] L.1 `npm run voicetest`: her ears to her voice, for real — a test bridge, her built face and a
+      Chrome of its own whose microphone plays recorded lines on cue; each line timed from the end of
+      speech (segment closed, words back, question sent, first words, voice, done) and checked (answered,
+      or ignored when it should be).
+- [x] L.2 No INITIALISE: she boots by herself (the boot animation, the bridge and the voice probe at once)
+      and listens as soon as she is up; her window plays sound without a click
+      (`--autoplay-policy=no-user-gesture-required`).
+- [x] L.3 The bubble always comes back: hiding it lasts until AYRA starts again or her window is opened,
+      and says how to bring it back.
+- [x] L.4 Not cut off mid-command: a question mark the transcriber puts on a pause after "times", "plus",
+      "the", "and" … no longer ends the turn (src/lib/endpoint.ts, tested).
+- [x] L.5 The minute after an answer: "Ira, …", "Arya, …", "Era, …" at the start count as her name there
+      (how "eye-ra" is often written), and something said without her name gets a hint on screen and on
+      the bubble ("Start with "AYRA", or press Space") instead of silence.
+- [x] L.6 Faster: the segment closes at a 0.3 s pause when the words already read as finished (not 0.7 s);
+      her first clause is spoken before its sentence ends. Measured and left alone: the model (Opus,
+      Sonnet and Haiku all ~1.5 s to the first word) and thinking (switched off it still shows a ~0.1 s
+      block) — the brain's wait is the API's own time to first token, 1.4–4.7 s from call to call.
+- [ ] L.7 Decide with the owner (research, 2026-10-20): a semantic end-of-turn model (Smart Turn v3,
+      open source, reads the voice's intonation) and preemptive generation (the brain starts on the held
+      words, its tools and voice held until the turn is confirmed); and whether the minute after an
+      answer keeps "AYRA …" only or gets a short no-name window first.
+
 ## Phase 7 — Apps, one at a time · branch `phase-7-apps`
 
 **Goal:** AYRA reads Gmail, Google Calendar and Google Drive again, then Notion — each added as its

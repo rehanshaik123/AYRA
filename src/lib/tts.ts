@@ -2,6 +2,7 @@ import { BRIDGE_HTTP_URL } from '../config'
 import { caps } from './capabilities'
 import { IDENTITY } from '../identity'
 import { setOffHonorific } from './vocative'
+import { FIRST_CLAUSE } from './clause'
 
 /**
  * Speech output.
@@ -159,6 +160,7 @@ const MAX_UNSPOKEN = 220
 
 /** A stream that stops on a full stop for this long has finished that sentence. */
 const END_PAUSE_MS = 200
+
 
 // ---------------------------------------------------------------------------
 // Voice selection
@@ -352,6 +354,8 @@ export function createSpeaker(): Speaker {
 
   let currentAudio: HTMLAudioElement | null = null
   let nativeInFlight = false
+  /** Something of the streamed answer has been queued (FIRST_CLAUSE is for before that). */
+  let pushedAny = false
   let drained: Array<() => void> = []
 
   const settleDrained = () => {
@@ -707,11 +711,23 @@ export function createSpeaker(): Speaker {
           const next = SENTENCE_END.exec(rest)!
           const wider = cut + next.index + next[0].length
           enqueue(buffer.slice(0, wider))
+          pushedAny = true
           buffer = buffer.slice(wider)
           continue
         }
         enqueue(candidate)
+        pushedAny = true
         buffer = buffer.slice(cut)
+      }
+
+      // Her first words as soon as there is a clause of them to say.
+      if (!pushedAny) {
+        const m = FIRST_CLAUSE.exec(buffer)
+        if (m) {
+          enqueue(m[0])
+          pushedAny = true
+          buffer = buffer.slice(m[0].length)
+        }
       }
 
       // Unpunctuated prose would otherwise sit here silently until the answer
@@ -720,6 +736,7 @@ export function createSpeaker(): Speaker {
         const cut = buffer.lastIndexOf(' ', MAX_UNSPOKEN)
         if (cut > 40) {
           enqueue(buffer.slice(0, cut))
+          pushedAny = true
           buffer = buffer.slice(cut)
         }
       }

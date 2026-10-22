@@ -130,14 +130,14 @@ if (dev) {
   run('face', process.execPath, ['node_modules/vite/bin/vite.js'], '35', {})
   console.log(
     '\nWhen it says the dev server is ready, open the URL it prints in Chrome,\n' +
-      `click INITIALISE, and say "Hey ${IDENTITY.name}". Ctrl-C stops everything.\n`,
+      'and she starts listening by herself. Space to talk after that. Ctrl-C stops everything.\n',
   )
 } else {
   buildFaceIfStale()
   console.log(`\n${IDENTITY.wordmark} starting.\n`)
   run('ayra', process.execPath, ['bridge/server.mjs', '--face'], '36', bridgeEnv)
   console.log(
-    `\nOpen http://localhost:${port || 5173} in Chrome, click INITIALISE and say ` +
-      `"Hey ${IDENTITY.name}". Ctrl-C stops everything.\n`,
+    `\nOpen http://localhost:${port || 5173} in Chrome: she starts listening by herself, ` +
+      'and Space talks to her after that. Ctrl-C stops everything.\n',
   )
 }

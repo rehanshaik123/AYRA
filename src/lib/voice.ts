@@ -3,6 +3,7 @@ import { speakingNow, speakingSince } from './tts'
 import { startListening, type Listener } from './listen'
 import { caps } from './capabilities'
 import { WAKE, afterWake } from './wake'
+import { MAX_HOLD_MS, OVERRIDE, STOP_MS, holdFor } from './endpoint'
 import { IDENTITY } from '../identity'
 
 /**
@@ -131,18 +132,6 @@ const WAKE_DEBOUNCE = 1500
  */
 
 /**
- * Ending on one of these means the sentence is not over, whatever the silence
- * says. Function words only: they are closed-class, so the list is complete in
- * a way a content-word list could never be, and none of them is a plausible
- * last word of a real request.
- */
-const CONTINUES =
-  /\b(and|or|but|so|because|since|if|when|while|that|which|who|whose|to|of|in|on|at|by|for|with|from|about|into|onto|over|under|between|through|the|a|an|my|your|his|her|its|our|their|is|are|was|were|be|been|do|does|did|have|has|had|can|could|would|should|will|shall|might|must|like|than|then|as|very|really|just|some|any|all|both|either|neither)$/i
-
-/** Trailing punctuation a transcriber emits mid-thought. */
-const TRAILS = /[,;:–—\-+*/=&]$/
-
-/**
  * A barge-in this soon after he starts a sentence is him, not you.
  *
  * Echo cancellation and the raised guard threshold stop most of his playback
@@ -155,52 +144,6 @@ const TRAILS = /[,;:–—\-+*/=&]$/
  * is also least likely: the user has not yet heard enough to want to stop him.
  */
 const SELF_GUARD_MS = 350
-
-/**
- * A quiet gap this long with a finished-looking sentence ends the turn.
- *
- * By the time a transcript reaches the assembler the detector has already sat
- * through SILENCE_MS of quiet and the transcriber has taken its own few hundred
- * milliseconds. It was 250 ms; the owner's log (2026-10-18) showed commands
- * cut in the middle — "hey close the Tab with", "calculate me something so
- * 2:30 + 1000 +" — people pause to think mid-command. Space (or Alt+Space,
- * or a click on her figure) still sends at once.
- */
-const SETTLE_MS = 600
-/**
- * After a full stop the transcriber added. Not 0: a realtime transcriber puts
- * a full stop on every pause, mid-thought included ("Open YouTube." … "and play
- * lo-fi"). A question mark or an exclamation is taken as the end.
- */
-const STOP_MS = 500
-/** ...and this long when the sentence is plainly unfinished ("…the tab with"). */
-const CONTINUE_MS = 2500
-/**
- * Nothing is held longer than this in total. A ceiling rather than a timer:
- * without it, someone who ends every clause on "and" could hold a turn open
- * for ever, and the assistant would look like it had stopped listening.
- */
-const MAX_HOLD_MS = 9000
-
-/**
- * How long to keep waiting, given what has been said so far.
- * 0 means "this is a complete thought, send it now".
- */
-function holdFor(text: string): number {
-  const words = text.trim().split(/\s+/).filter(Boolean)
-  if (!words.length) return CONTINUE_MS
-  // A question or an exclamation is the speaker telling us they are done.
-  if (/[!?]["'”’)\]]?$/.test(text.trim())) return 0
-  if (TRAILS.test(text.trim())) return CONTINUE_MS
-  if (CONTINUES.test(words[words.length - 1].replace(/[.,]+$/, ''))) return CONTINUE_MS
-  // A full stop the transcriber put on a pause: a short wait for a next clause.
-  if (/[.]["'”’)\]]?$/.test(text.trim())) return STOP_MS
-  if (CONTINUES.test(words[words.length - 1])) return CONTINUE_MS
-  // One or two words is usually the start of something, not the whole of it —
-  // except for the short commands that genuinely are complete.
-  if (words.length <= 2 && !OVERRIDE.test(text)) return CONTINUE_MS
-  return SETTLE_MS
-}
 
 type Assembler = {
   /** Add a transcript. `active` is true if the user is audibly still going. */
@@ -306,16 +249,6 @@ const norm = (s: string) =>
     .replace(/[^a-z0-9' ]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-
-/**
- * Short words that must always cut through, even when they collide with what
- * he happens to be saying. Suppressing "stop" because he just said "stop"
- * would be the single most infuriating failure this file could have.
- */
-const OVERRIDE = new RegExp(
-  `\\b(stop|wait|cancel|enough|quiet|hold on|shut up|never ?mind|forget it|no|${IDENTITY.wake.names.join('|')})\\b`,
-  'i',
-)
 
 /**
  * Words too common to be evidence of anything.
@@ -470,6 +403,8 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
   let lastMode: VoiceMode | '' = ''
   /** A partial has arrived for the segment being spoken — the caption has words. */
   let worded = false
+  /** The segment being spoken, as the transcriber has it so far. */
+  let lastPartial = ''
   /** Push-to-talk: listening for a turn right now. */
   let armed = false
   /** Space pressed to send: the next words end the turn at once. */
@@ -622,6 +557,7 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
         diag.mode = mode
         diag.sessions++
         worded = false
+        lastPartial = ''
         if (mode === 'deaf') return
         h.onHearing?.()
         // Standing down mid-thought throws the thought away with it.
@@ -648,10 +584,24 @@ async function startLiveVoice(h: VoiceHandlers): Promise<Voice> {
       onPartial: (text) => {
         if (h.mode() !== 'command' || !text.trim()) return
         worded = true
+        lastPartial = text.trim()
         const carried = assemble.held()
         h.onPartial(carried ? `${carried} ${text}` : text)
       },
+      /**
+       * A short pause after words that already read as finished — a question,
+       * a full stop: the segment ends now rather than SILENCE_MS later, about
+       * 0.4 s sooner (the voice test, 2026-10-20). The assembler still waits as
+       * long as the words ask (endpoint.ts): "Open YouTube." keeps its moment
+       * for an "and …", and a continuation is simply the next segment.
+       */
+      onPause: () => {
+        if (h.mode() !== 'command' || sending || !armed || !lastPartial) return
+        const wait = holdFor(`${assemble.held()} ${lastPartial}`)
+        if (wait === 0 || wait === STOP_MS) listener?.cut()
+      },
       onFinal: (text) => {
+        lastPartial = ''
         if (discard > 0) {
           discard--
           return

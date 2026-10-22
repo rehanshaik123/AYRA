@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react'
 import { Avatar } from './ui/Avatar'
 import { Hud } from './ui/Hud'
 import { Boot } from './ui/Boot'
-import { Ignition } from './ui/Ignition'
 import { Diagnostics } from './ui/Diagnostics'
 import { useStore, MODE_KEY, modeLine, parseMode, type Hearing, type Mode, type Phase } from './store'
 import { startVoice, type Voice, type VoiceMode } from './lib/voice'
@@ -30,8 +29,8 @@ import {
 import { inputLevel } from './lib/listen'
 import { glance, sameGlance, type Glance } from './lib/glance'
 import { caps, probeCapabilities } from './lib/capabilities'
-import { BARE_NAME, LEADING_NAME, addressed, afterWake, followUpVerdict, onlyName } from './lib/wake'
-import { withHonorific } from './identity'
+import { BARE_NAME, LEADING_NAME, addressed, afterWake, followUpCommand, followUpVerdict, onlyName } from './lib/wake'
+import { IDENTITY, withHonorific } from './identity'
 
 /**
  * The conversation.
@@ -84,6 +83,14 @@ const SEND_GRACE_MS = 1500
  */
 const FOLLOW_UP_MS = 60_000
 
+/**
+ * Said in the minute after an answer without her name: shown (her window and
+ * the bubble) rather than dropped in silence — the owner, 2026-10-20: "for the
+ * second command she keeps listening and doesn't respond".
+ */
+const FOLLOW_HINT = `Start with "${IDENTITY.name}", or press Space`
+const FOLLOW_HINT_MS = 4000
+
 /** A follow-up that only ends the conversation — no question for the model. */
 // Not "stop": with the music playing again in the minute after an answer,
 // "AYRA, stop" means the music — the bridge's fast path pauses it.
@@ -108,9 +115,10 @@ const savedMode = (): Mode => {
   }
 }
 
-/** How long the boot sequence (Boot.tsx) stays up. It only has to cover the
- *  bridge connecting and the voice probe; the old nine seconds were pure wait. */
-const BOOT_MS = 2400
+/** How long the boot sequence (Boot.tsx) stays up. The bridge connecting and
+ *  the voice probe run under it, not after it; the old nine seconds were pure
+ *  wait, and since 2026-10-20 she listens the moment it ends. */
+const BOOT_MS = 1800
 /** The bubble's report: at most this often while words stream (lib/glance.ts). */
 const GLANCE_MS = 150
 
@@ -485,6 +493,13 @@ export default function App() {
       if (left > 1500) {
         followUp.current = true
         listen(left, 'follow')
+        // Words, not a cough: say how to reach her, for a few seconds.
+        if (text.trim().split(/\s+/).length >= 2) {
+          store.getState().setCaption(FOLLOW_HINT)
+          window.setTimeout(() => {
+            if (store.getState().caption === FOLLOW_HINT) store.getState().setCaption('')
+          }, FOLLOW_HINT_MS)
+        }
       } else goDormant()
       return
     }
@@ -517,7 +532,7 @@ export default function App() {
     }
     // Woken mid-sentence ("okay so, AYRA, check the gold price"): the command
     // is what follows her name.
-    const said = (woke ? afterWake(text) : text.replace(LEADING_NAME, '')).trim()
+    const said = (woke ? afterWake(text) : following ? followUpCommand(text) : text.replace(LEADING_NAME, '')).trim()
     // "That's all" after an answer: she goes back to waiting for her name.
     if (following && DISMISS.test(said)) {
       goDormant()
@@ -642,20 +657,19 @@ export default function App() {
   // -- power on -------------------------------------------------------------
 
   const powerOn = async () => {
-    // The ignition button and the space bar can both land here, and the phase
-    // only moves after the first await — so without this a double press boots
-    // twice, arming two voice loops and two download polls.
+    // Opening her window and a Space pressed while she is still offline can
+    // both land here, and the phase only moves after the first await — so
+    // without this she would boot twice, arming two voice loops.
     if (booting.current) return
     booting.current = true
 
     try {
       await ignite()
     } catch (err) {
-      // The guard must not outlive a failed boot. Audio unlock can be refused,
-      // the microphone prompt dismissed, the bridge unreachable at the wrong
-      // moment — and with the flag still latched the ignition button was dead
-      // for the rest of the page, recoverable only by reloading. Reset it and
-      // put the button back so the user can simply press it again.
+      // The guard must not outlive a failed boot. The microphone prompt can be
+      // dismissed, the bridge unreachable at the wrong moment — and with the
+      // flag still latched Space was dead for the rest of the page,
+      // recoverable only by reloading. Reset it so Space simply tries again.
       booting.current = false
       console.error('[ayra] power-up failed:', err)
       store.getState().setPhase('offline')
@@ -663,8 +677,8 @@ export default function App() {
         .getState()
         .setError(
           err instanceof Error
-            ? `Power-up failed: ${err.message}`
-            : 'Power-up failed. Click to try again.',
+            ? `Power-up failed: ${err.message} Press Space to try again.`
+            : 'Power-up failed. Press Space to try again.',
         )
     }
   }
@@ -672,8 +686,10 @@ export default function App() {
   const ignite = async () => {
     const s = store.getState()
 
-    // Must happen inside the click handler — browsers won't start an
-    // AudioContext or speech synthesis without a user gesture.
+    // No click needed any more (the owner, 2026-10-20: "remove click to
+    // initialise… when opening AYRA let her come and listen"): her window is
+    // started with --autoplay-policy=no-user-gesture-required (npm run
+    // shortcuts). In a plain browser tab the first key or click unlocks sound.
     await sfx.unlockAudio()
     sfx.play('boot')
 
@@ -714,16 +730,12 @@ export default function App() {
     })
     const warming = warmBridge().catch((err: Error) => s.setError(err.message))
 
-    // Long enough for the start-up sequence in Boot.tsx to land the wordmark.
-    await new Promise((r) => setTimeout(r, BOOT_MS))
-    await warming
-    store.getState().setConnected(bridgeServers())
-    store.getState().setVoice(currentVoiceName())
-
-    // Ask the bridge which speech engines exist before the loop starts, so the
+    // The start-up sequence in Boot.tsx lands the wordmark while the bridge
+    // connects and the bridge is asked which speech engines exist — so the
     // first turn already uses ElevenLabs when a key is present and the browser
-    // fallback when it is not — no flag, no reload.
-    await probeCapabilities()
+    // fallback when it is not. All three at once: she is up when the slowest is.
+    await Promise.all([new Promise((r) => setTimeout(r, BOOT_MS)), warming, probeCapabilities()])
+    store.getState().setConnected(bridgeServers())
     // Again, now that the engines are known: set before the probe, the label named
     // the browser's voice while every sentence was spoken by ElevenLabs.
     store.getState().setVoice(currentVoiceName())
@@ -753,6 +765,8 @@ export default function App() {
     watchTalk(() => press.current())
     if (savedHearing() === 'hands-free') void setHearing('hands-free', false)
     else reportHearing('push')
+    // Her window is open because the owner opened it: she is listening.
+    listen(AWAIT_SPEECH_MS)
   }
 
   // -- level pump + keys ----------------------------------------------------
@@ -957,7 +971,18 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
 
+    // In a plain browser tab sound waits for a first gesture: the first key or
+    // click unlocks it (her own window doesn't need this — see ignite).
+    const unlock = () => void sfx.unlockAudio()
+    window.addEventListener('pointerdown', unlock, { once: true })
+    window.addEventListener('keydown', unlock, { once: true })
+
+    // She starts by herself — no INITIALISE to click any more.
+    void powerOn()
+
     return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
       cancelAnimationFrame(raf)
       window.removeEventListener('keydown', onKey)
       clearIdle()
@@ -973,7 +998,6 @@ export default function App() {
       <Hud />
       <Boot />
       <Diagnostics />
-      <Ignition onStart={() => void powerOn()} />
     </>
   )
 }

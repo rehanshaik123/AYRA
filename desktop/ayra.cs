@@ -222,6 +222,8 @@ namespace Ayra
     // Her window, off the UI thread: opening may wait for the bridge to start.
     void Open(bool talk)
     {
+      // Opening AYRA brings a hidden bubble back too.
+      if (bubble != null && !bubble.Wanted) ui.Post(delegate { ShowBubble(true); }, null);
       ThreadPool.QueueUserWorkItem(delegate
       {
         // One at a time: a second click while she is still opening would open a second window.
@@ -308,8 +310,10 @@ namespace Ayra
     void ShowBubble(bool on)
     {
       if (bubble == null) return;
+      if (bubble.Wanted == on) return;
       bubble.SetWanted(on);
       bubbleItem.Checked = on;
+      if (!on) Notify("The bubble is hidden. It comes back when you open AYRA, or from this tray icon: right-click, Show the bubble.");
     }
 
     void Notify(string message)
@@ -1282,7 +1286,9 @@ namespace Ayra
         if (!File.Exists(place)) return fallback;
         var parts = File.ReadAllText(place).Trim().Split(' ');
         var p = new Point(int.Parse(parts[0]), int.Parse(parts[1]));
-        if (parts.Length > 2) wanted = parts[2] != "hidden";
+        // Hidden is never remembered across a start: the owner hid her once and
+        // could not find how to bring her back (2026-10-20). She comes back when
+        // AYRA starts, when her window is opened, or from the tray menu.
         // Still on a screen that is plugged in? Then wholly on it — she may be
         // bigger than when the place was saved.
         foreach (var s in Screen.AllScreens)

@@ -23,6 +23,7 @@
     "setup": "node scripts/setup.mjs",
     "smoke": "node scripts/smoke.mjs",
     "bench": "node scripts/bench.mjs",
+    "voicetest": "node scripts/voicetest.mjs",
     "demo": "node scripts/demo.mjs",
     "research": "node scripts/research.mjs",
     "test": "node --import tsx --test"
