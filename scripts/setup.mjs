@@ -131,7 +131,7 @@ console.log(`To run ${identity.name}:`);
 console.log('  npm start             # brain + face together; open http://localhost:5173 in Chrome or Edge');
 console.log('  npm run smoke         # with the bridge running: one end-to-end test turn');
 console.log('');
-console.log(`Then click INITIALISE and press Space to talk — or W for hands-free, then just say "${identity.name}".`);
+console.log('She starts listening when her window opens; press Space to talk after that (Alt+Space from any app).');
 console.log(`${identity.name} can search the web and read pages; nothing on the laptop yet.`);
 console.log('');
 
