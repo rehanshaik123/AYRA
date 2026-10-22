@@ -390,6 +390,10 @@ const NAMED_TOOLS = new Map([
   ['ayra_research', new Set(['research', 'recent_research', 'deep_research'])],
 ])
 
+/** The notes server's tools (notes.mjs), by what they do. */
+const NOTES_READ = new Set(['notes_search', 'notes_read'])
+const NOTES_WRITE = new Set(['notes_capture', 'notes_save', 'notes_add', 'notes_edit', 'notes_picture', 'notes_open'])
+
 /**
  * The owner's claude.ai connectors — Gmail, Calendar, Drive, Figma and the
  * rest, attached to their Claude account rather than configured here. The
@@ -463,6 +467,15 @@ export function createGate({ allowWrites, laptop = false, connectors = DEFAULT_C
       // tools, each call reviewed by this gate as usual; starting one is only
       // offered with writes on.
       if (server === 'ayra_jobs') return true
+
+      // The owner's notes (notes.mjs), an Obsidian vault: reading always;
+      // saving, adding and pictures only with writes on. None of them can
+      // delete or overwrite — a note is only ever added to — so none asks.
+      // Anything else on this server is refused until it is named here.
+      if (server === 'ayra_notes') {
+        const op = mcpToolOf(name)
+        return NOTES_READ.has(op) || (NOTES_WRITE.has(op) && allowWrites)
+      }
 
       const tool = mcpToolOf(name)
       if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {

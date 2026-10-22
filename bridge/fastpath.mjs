@@ -12,6 +12,7 @@
  *   open <site> | <domain>          a new tab in her Chrome
  *   open <folder>                   File Explorer (Downloads, Documents, …)
  *   pause / play / next / previous  the music (Windows media controls)
+ *   notes on this video / page      the note writer (notes.mjs), "On it." first
  *
  * Deliberately narrow. The whole utterance must be the command — "open YouTube
  * and find lo-fi" or "open the file I downloaded yesterday" still go to the
@@ -167,6 +168,14 @@ const NOT_CLOSED = /^(?:chrome|google chrome|browser|the browser|edge|firefox|br
 /** "search X on YouTube", "open X on YouTube", "look up X on Google". */
 const SEARCH_ON = /^(?:search(?: for)?|find|look up|look for|open|show me)\s+(.+?)\s+(?:on|in)\s+(youtube|you tube|google)$/i
 
+/**
+ * "Prepare notes on this video", "make overall notes of this article": the
+ * note writer straight away (notes.mjs notes_capture). Through the brain the
+ * same writer sat between two model steps (~6 s, measured 2026-10-22).
+ */
+const NOTES_OF =
+  /^(?:(?:prepare|make|create|write|take|generate|do|give me|get me|i want|i need)\s+(?:me\s+)?)?(?:a\s+|the\s+|some\s+|my\s+)?(?:(?:full|overall|complete|detailed|proper|whole|study|good)\s+)*notes?\s+(?:of|on|for|from|about)\s+(?:this|the|that)\s+(?:(?:whole|entire|full|current|youtube)\s+)*(video|lecture|tutorial|lesson|talk|page|article|blog(?: post)?|post|website|site)$/i
+
 /** "open GitHub and LinkedIn", "open Spotify and play Shape of You". */
 const AND = /\s+(?:and then|then|and|,)\s+/i
 
@@ -180,6 +189,7 @@ const AND = /\s+(?:and then|then|and|,)\s+/i
  *   | { kind: 'volume', action: 'up'|'down'|'mute' }
  *   | { kind: 'youtube', query: string } | { kind: 'spotify', query: string }
  *   | { kind: 'close', name: string }
+ *   | { kind: 'notes', what: 'video' | 'page', asked: string }
  *   | { kind: 'many', steps: object[] } | null}
  */
 export function parseFast(text) {
@@ -212,6 +222,8 @@ export function parseFast(text) {
 
 /** One command, or null. */
 function parseOne(said) {
+  const notes = NOTES_OF.exec(said)
+  if (notes) return { kind: 'notes', what: /^(?:video|lecture|tutorial|lesson|talk)$/i.test(notes[1]) ? 'video' : 'page', asked: said }
   for (const [re, action, line] of MEDIA) if (re.test(said)) return { kind: 'media', action, said: line }
   if (SOFT_STOP.test(said)) return { kind: 'media', action: 'pause', said: 'Paused.', soft: true }
   for (const [re, action] of VOLUME) if (re.test(said)) return { kind: 'volume', action }
@@ -316,6 +328,12 @@ export async function runFast(intent, hands) {
       // reached for a PowerShell media key that waited two minutes on an
       // Approve nobody was there to give (2026-10-12).
       return { said: 'Nothing is playing right now.', note: `the music: ${intent.action} — nothing was playing` }
+    }
+    if (intent.kind === 'notes') {
+      // Anything but a clean save (no captions, notes there already, the
+      // writer failed) is the brain's to explain.
+      const saved = hands.notes ? await hands.notes(intent.what, intent.asked) : null
+      return saved ? { said: 'Saved.', note: `notes on the ${intent.what} in front of them — ${saved}` } : null
     }
     if (intent.kind === 'volume') {
       if (!hands.volume || !(await hands.volume(intent.action))) return null

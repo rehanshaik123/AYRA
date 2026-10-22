@@ -24,7 +24,8 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { env } from './identity.mjs'
+import { env, IDENTITY } from './identity.mjs'
+import { captionTextOf, clock } from './notes.mjs'
 import { isOwnPage, redactSecrets, riskOfPageAction, touchesSecrets } from './gate.mjs'
 import { SEND_WORDS } from './allowances.mjs'
 
@@ -215,6 +216,282 @@ export async function playOnYouTube(query) {
     }
   }
   return { title: first.title }
+}
+
+// ---------------------------------------------------------------------------
+// A YouTube video, for notes (notes.mjs): what it says, not just its title.
+// ---------------------------------------------------------------------------
+
+/** The most caption text handed over at once — about an hour and a half of talk. */
+const MAX_CAPTIONS = 90_000
+
+/** The video id of a YouTube address, or ''. */
+export function videoId(url) {
+  try {
+    const u = new URL(url)
+    const host = u.hostname.replace(/^(www|m|music)\./, '')
+    if (host === 'youtu.be') return u.pathname.slice(1).split('/')[0]
+    if (host !== 'youtube.com') return ''
+    return u.searchParams.get('v') ?? u.pathname.match(/^\/(?:shorts|live|embed)\/([\w-]+)/)?.[1] ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * The captions to read: the owner's language written by a person, then made
+ * by YouTube, then English, then whatever the video has (its own language).
+ *
+ * @param {{ lang: string, kind: string }[]} tracks
+ */
+export function pickTrack(tracks, language = 'en') {
+  const base = String(language).split('-')[0]
+  const human = (t) => t.kind !== 'asr'
+  const is = (l) => (t) => t.lang === l || t.lang?.startsWith(`${l}-`)
+  return (
+    tracks.find((t) => is(base)(t) && human(t)) ?? tracks.find(is(base)) ??
+    tracks.find((t) => is('en')(t) && human(t)) ?? tracks.find(is('en')) ??
+    tracks.find((t) => t.kind === 'asr') ?? tracks[0] ?? null
+  )
+}
+
+/** YouTube's json3 captions → [{ at: seconds, text }]. */
+export function captionLines(json3) {
+  const out = []
+  for (const e of json3?.events ?? []) {
+    const words = (e.segs ?? []).map((s) => s.utf8 ?? '').join('').replace(/\s+/g, ' ').trim()
+    if (words && words !== '[Music]') out.push({ at: Math.floor((e.tStartMs ?? 0) / 1000), text: words })
+  }
+  return out
+}
+
+/**
+ * Caption lines as paragraphs of about `every` seconds, each with its time —
+ * "[3:05] …" — short enough to cite a moment, few enough tokens to read whole.
+ */
+export function captionText(lines, every = 30, max = MAX_CAPTIONS) {
+  const all = captionTextOf(lines, every)
+  if (all.length <= max) return all
+  // Cut between paragraphs, and say where the read stopped.
+  const cut = all.lastIndexOf('\n[', max)
+  const next = all.slice(cut + 1).match(/^\[([\d:]+)\]/)?.[1] ?? ''
+  return `${all.slice(0, Math.max(0, cut))}\n[… the captions go on past ${next}; this is as much as one read takes]`
+}
+
+/**
+ * Captions already read, by video id — a screen note asks for the words around
+ * a moment, and reading them again would flash the subtitles on once more.
+ */
+const captionCache = new Map()
+const CACHED_VIDEOS = 6
+
+/**
+ * Turns the video's captions on through YouTube's own player and catches the
+ * captions it fetches. A direct fetch of the caption address comes back empty
+ * now (YouTube wants a token only its player adds — measured 2026-10-22), and
+ * the transcript panel never loaded for a page driven from outside. The
+ * owner's subtitles — and YouTube's remembered choice — are put back as they were.
+ */
+async function catchCaptions(page, track, before) {
+  const got = new Promise((resolveBody) => {
+    const timer = setTimeout(() => done(null), 8000)
+    const listen = async (res) => {
+      if (!res.url().includes('/api/timedtext')) return
+      const body = await res.text().catch(() => '')
+      if (body.includes('"events"')) done(body)
+    }
+    const done = (body) => {
+      clearTimeout(timer)
+      page.off('response', listen)
+      resolveBody(body)
+    }
+    page.on('response', listen)
+  })
+  const sticky = await page.evaluate((t, was) => {
+    // Turning captions on through the player makes YouTube remember them as on
+    // for every video ("yt-player-caption-persistence", "…-sticky-language" —
+    // found 2026-10-22, after it had happened): every such setting is kept
+    // as it was and put back.
+    const kept = Object.fromEntries(Object.keys(localStorage).filter((k) => /caption|subtitle/i.test(k)).map((k) => [k, localStorage.getItem(k)]))
+    const p = document.querySelector('#movie_player')
+    try {
+      p.loadModule('captions')
+    } catch {
+      /* already loaded */
+    }
+    // Already showing this track: off and on again, so the player fetches it once more.
+    if (was?.languageCode === t.lang) p.setOption('captions', 'track', {})
+    p.setOption('captions', 'track', { languageCode: t.lang, ...(t.kind ? { kind: t.kind } : {}) })
+    return kept
+  }, track, before)
+  const body = await got
+  await page.evaluate((was, kept) => {
+    const p = document.querySelector('#movie_player')
+    try {
+      if (was?.languageCode) p.setOption('captions', 'track', was)
+      else p.unloadModule('captions')
+    } catch {
+      /* the player went away */
+    }
+    for (const k of Object.keys(localStorage)) {
+      if (/caption|subtitle/i.test(k) && !(k in (kept ?? {}))) localStorage.removeItem(k)
+    }
+    for (const [k, v] of Object.entries(kept ?? {})) localStorage.setItem(k, v)
+  }, before, sticky).catch(() => {})
+  try {
+    return body ? captionLines(JSON.parse(body)) : null
+  } catch {
+    return null
+  }
+}
+
+/** The YouTube video in a tab: details, where the owner is in it, and its captions. */
+export async function readVideo(page) {
+  if (!videoId(page.url())) throw new Error('The tab is not a YouTube video.')
+  // The player only fetches captions for a tab that is in front (a background
+  // tab's request came back empty).
+  await page.bringToFront().catch(() => {})
+  await page.waitForSelector('#movie_player', { timeout: 8000 })
+  await page.waitForFunction(() => document.querySelector('#movie_player')?.getPlayerResponse?.()?.videoDetails, { timeout: 8000 }).catch(() => {})
+  const info = await page.evaluate(() => {
+    const p = document.querySelector('#movie_player')
+    const r = p?.getPlayerResponse?.() ?? {}
+    const d = r.videoDetails ?? {}
+    const tracks = (r.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? []).map((t) => ({
+      lang: t.languageCode ?? '', kind: t.kind ?? '', name: t.name?.simpleText ?? t.name?.runs?.[0]?.text ?? '',
+    }))
+    let on = {}
+    try {
+      on = p.getOption('captions', 'track') ?? {}
+    } catch {
+      /* captions module not loaded: none showing */
+    }
+    const v = p?.querySelector('video')
+    return {
+      id: d.videoId ?? '', title: d.title ?? document.title, author: d.author ?? '',
+      seconds: Number(d.lengthSeconds) || 0, description: d.shortDescription ?? '',
+      tracks, at: v ? Math.floor(v.currentTime) : 0, on,
+    }
+  })
+  const id = info.id || videoId(page.url())
+  let cached = captionCache.get(id)
+  if (!cached) {
+    const track = pickTrack(info.tracks, IDENTITY.language)
+    const lines = track ? await catchCaptions(page, track, info.on) : null
+    cached = { track, lines }
+    // Only a good read is kept: a miss is tried again next time.
+    if (lines?.length) {
+      captionCache.set(id, cached)
+      while (captionCache.size > CACHED_VIDEOS) captionCache.delete(captionCache.keys().next().value)
+    }
+  }
+  return { ...info, id, url: `https://www.youtube.com/watch?v=${id}`, ...cached }
+}
+
+/** The video as she reads it: a header, the captions with times, then the description. */
+export function videoReport(v) {
+  const head = `Video: ${v.title}${v.author ? ` — ${v.author}` : ''}${v.seconds ? ` (${clock(v.seconds)})` : ''} · ${v.url}`
+  const where = v.at > 5 ? `\nThe owner is at ${clock(v.at)}.` : ''
+  const caps = v.lines?.length
+    ? `\n\nCaptions (${v.track.name || v.track.lang}${v.track.kind === 'asr' ? ', made by YouTube — expect misheard words' : ''}):\n${captionText(v.lines)}`
+    : `\n\n${v.tracks?.length ? 'The captions could not be read this time.' : 'This video has no captions.'} Go by the title, the description and pictures of the screen, and say so in the note.`
+  const desc = v.description.trim() ? `\n\nDescription:\n${v.description.trim().slice(0, 4000)}` : ''
+  return redactSecrets(`${head}${where}${caps}${desc}`)
+}
+
+/** What was being said around a moment: from `before` seconds earlier to `after` later. */
+export function captionsNear(lines, at, before = 25, after = 10) {
+  return (lines ?? []).filter((l) => l.at >= at - before && l.at <= at + after).map((l) => l.text).join(' ')
+}
+
+/**
+ * The tab the owner means by "this": the one in the Chrome window they are
+ * using (it has the focus), else one showing in a window — a video first, as
+ * they mostly learn from videos — else the last opened. `prefer: 'video'`
+ * ("notes on the video") takes any video tab over a page.
+ */
+async function frontPage({ prefer } = {}) {
+  const all = await tabs()
+  if (!all.length) throw new Error('Nothing is open in her Chrome.')
+  const seen = await Promise.all(all.map((p) => Promise.race([
+    p.evaluate(() => [document.hasFocus(), document.visibilityState === 'visible']).catch(() => [false, false]),
+    // A frozen background tab may never answer.
+    wait(1000).then(() => [false, false]),
+  ])))
+  const focused = all.filter((_, i) => seen[i][0])
+  const visible = all.filter((_, i) => seen[i][1])
+  const isVideo = (p) => Boolean(videoId(p.url()))
+  if (prefer === 'video') return focused.find(isVideo) ?? visible.find(isVideo) ?? all.findLast(isVideo) ?? focused[0] ?? visible[0] ?? all.at(-1)
+  return focused[0] ?? visible.find(isVideo) ?? visible[0] ?? all.at(-1)
+}
+
+/** How much of a page goes into notes on it — a long article, whole. */
+const PAGE_TEXT = 60_000
+
+/**
+ * What is in front of the owner in her Chrome, whole, for notes on it: a
+ * YouTube video with all its captions, or a page's text (up to ~60,000
+ * characters — the reading tools stop at 6,000).
+ */
+export async function frontSource({ prefer } = {}) {
+  const page = await frontPage({ prefer })
+  if (videoId(page.url())) return { kind: 'video', ...(await readVideo(page)) }
+  const url = page.url()
+  if (!/^https?:/.test(url)) throw new Error('No web page or video is open in front.')
+  const raw = await page.evaluate(() => {
+    const main = document.querySelector('article') ?? document.querySelector('main') ?? document.body
+    return main?.innerText ?? ''
+  })
+  const text = redactSecrets(String(raw).replace(/\n{3,}/g, '\n\n').trim())
+  return { kind: 'page', title: await page.title(), url, text: text.slice(0, PAGE_TEXT), cut: text.length > PAGE_TEXT }
+}
+
+/**
+ * A picture of the tab in front of the owner, for their notes: only the player
+ * when it is a YouTube video (the slide, not the page around it), the moment it
+ * is at and what was being said then. A page that shows a key or a password is
+ * not pictured.
+ */
+export async function captureFront({ prefer } = {}) {
+  const page = await frontPage({ prefer })
+  const words = await page.evaluate(() => document.body?.innerText ?? '').catch(() => '')
+  if (touchesSecrets(page.url()) || redactSecrets(words) !== words) throw new Error('That page shows something like a key or a password, so it is not pictured.')
+  let at = null
+  let jpeg
+  let said = ''
+  if (videoId(page.url())) {
+    at = await page.evaluate(() => Math.floor(document.querySelector('#movie_player video')?.currentTime ?? 0)).catch(() => null)
+    const player = await page.$('#movie_player')
+    jpeg = await (player ?? page).screenshot({ type: 'jpeg', quality: 85 })
+    // The words around the moment, so the note can say what the picture is about.
+    // Captions not read yet and slow to come: the picture doesn't wait more than 4 s for them.
+    const v = await Promise.race([readVideo(page).catch(() => null), wait(4000).then(() => null)])
+    said = v?.lines ? captionsNear(v.lines, at ?? 0) : ''
+  } else {
+    jpeg = await page.screenshot({ type: 'jpeg', quality: 85 })
+  }
+  return { jpeg: Buffer.from(jpeg), url: page.url(), title: await page.title(), at, said: redactSecrets(said) }
+}
+
+/**
+ * Whether a YouTube video is showing in her Chrome — its tab in front in a
+ * window that isn't minimised or covered (Chrome reports a covered window as
+ * hidden). Then "note this on my screen" means the video, even with another
+ * app in front: the owner learns with notes or an editor beside the video.
+ */
+export async function videoInView() {
+  for (const p of await tabs()) {
+    if (!videoId(p.url())) continue
+    const shown = await Promise.race([p.evaluate(() => document.visibilityState === 'visible').catch(() => false), wait(1000).then(() => false)])
+    if (shown) return true
+  }
+  return false
+}
+
+/** The title of the tab in front of her Chrome — to tell whether a Chrome window in front is hers. */
+export async function frontTitle() {
+  const page = await frontPage()
+  return page.title()
 }
 
 /**
@@ -550,6 +827,19 @@ export function browserServer({ allowWrites, channel, approve, emitBlade, sendPh
         const page = await pick(me, tab)
         me.current = page
         return text(await read(page, me.attr))
+      }),
+    ),
+
+    tool(
+      'browser_video',
+      'Read the YouTube video in a tab (the one the owner is watching if left out): its title, channel, length, where the owner is in it, its full captions with times, and its description — for questions about what it says. For notes on it, notes_capture.',
+      { tab: z.number().int().optional() },
+      guard(async ({ tab }) => {
+        // "This video": the one they are watching, even when this conversation last worked in another tab.
+        const page = Number.isInteger(tab) ? await pick(me, tab) : await frontPage({ prefer: 'video' })
+        if (!videoId(page.url())) return fail('No YouTube video is open. Say so in one sentence.')
+        me.current = page
+        return text(videoReport(await readVideo(page)))
       }),
     ),
 

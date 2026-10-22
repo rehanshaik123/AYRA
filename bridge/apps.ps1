@@ -203,6 +203,14 @@ function ConvertTo-Keys([string]$text) {
   $sb.ToString()
 }
 
+# The window in front of the owner: what "this, on my screen" means for a note.
+function Op-Front {
+  $w = Win32
+  $h = $w::GetForegroundWindow()
+  if ($h -eq [IntPtr]::Zero) { throw 'No window is in front.' }
+  @{ window = (Describe-Window ([AutomationElement]::FromHandle($h))) }
+}
+
 function Op-List {
   $out = [System.Collections.Generic.List[object]]::new()
   foreach ($w in Get-TopWindows) {
@@ -453,6 +461,7 @@ while ($null -ne ($line = $stdin.ReadLine())) {
       'open' { Op-Open $req }
       'focus' { Op-Focus $req }
       'describe' { @{ window = (Describe-Window (Find-Window $req.window)) } }
+      'front' { Op-Front }
       'shot' { Op-Shot $req }
       'focused' { Op-Focused }
       'click' { Op-Click $req }

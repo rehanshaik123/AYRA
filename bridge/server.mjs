@@ -37,9 +37,11 @@ import { rulesServer } from './rules.mjs'
 import { watchPresence } from './presence.mjs'
 import { JOB_LIMITS, createJobs, jobsServer } from './jobs.mjs'
 import { createStore } from './state.mjs'
-import { browserServer, openInChrome, playOnYouTube } from './browser.mjs'
+import { browserServer, captureFront, frontSource, frontTitle, openInChrome, playOnYouTube, videoInView } from './browser.mjs'
+import { WRITER_SCHEMA, WRITER_SYSTEM, notesDir, notesServer, notesTools } from './notes.mjs'
+import { createScreenCapture } from './screen.mjs'
 import { appsCall, appsServer, warmApps } from './apps.mjs'
-import { createResearch, researchServer } from './research.mjs'
+import { createResearch, defaultRunAgent, researchServer } from './research.mjs'
 import { createDeepResearch } from './deep.mjs'
 import { createSpeakerMeter } from './echo.mjs'
 import { createHands, noteFor, parseFast, runFast } from './fastpath.mjs'
@@ -703,6 +705,7 @@ console.log(
   `[ayra] speech ${elevenKey() ? `via ElevenLabs, voice ${VOICE_ID}` : 'using browser fallback voice'}`,
 )
 console.log(`[ayra] model ${MODEL} · effort ${EFFORT} · research workers ${RESEARCH_MODEL}`)
+console.log(`[ayra] notes: ${notesDir()}`)
 console.log(
   ALLOW_WRITES
     ? '[ayra] tools: web, the HUD display, the laptop (PowerShell, files, her Chrome, Windows apps) · asks first: money, sending as you, deleting for good, passwords/security'
@@ -774,6 +777,37 @@ CONVERSATIONS.add({ interrupt: () => RESEARCH.interrupt() })
 const DEEP = createDeepResearch({ model: MODEL, workerModel: RESEARCH_MODEL, audit: AUDIT })
 CONVERSATIONS.add({ interrupt: () => DEEP.interrupt() })
 
+/**
+ * Her note taker (notes.mjs, Phase 7's first app): a picture of whatever is in
+ * front of the owner (screen.mjs), the video or page in front of her Chrome
+ * whole (browser.mjs), and the note writer — one agent with no tools, on the
+ * research workers' model, so a video's words can never make anything act.
+ * The kill switch stops a writer mid-way.
+ */
+const NOTES_MODEL = env('NOTES_MODEL', RESEARCH_MODEL)
+const NOTES_EFFORT = env('NOTES_EFFORT', 'low')
+const captureScreen = createScreenCapture({ windows: WINDOWS, appsCall, captureFront, frontTitle, videoInView })
+const writers = new Set()
+async function writeNotes({ prompt }) {
+  const controller = new AbortController()
+  writers.add(controller)
+  const t0 = Date.now()
+  try {
+    const { data, costUsd } = await defaultRunAgent({
+      stage: 'notes', system: WRITER_SYSTEM, schema: WRITER_SCHEMA, model: NOTES_MODEL, effort: NOTES_EFFORT,
+      maxTurns: 3, prompt, signal: controller.signal,
+    })
+    AUDIT.log({ type: 'notes', did: 'wrote', chars: prompt.length, ms: Date.now() - t0, costUsd })
+    return data
+  } finally {
+    writers.delete(controller)
+  }
+}
+CONVERSATIONS.add({ interrupt: () => { for (const c of writers) c.abort() } })
+const notesOptions = (emitBlade) => ({
+  allowWrites: ALLOW_WRITES, capture: captureScreen, source: frontSource, write: writeNotes, emitBlade,
+})
+
 /** How a researcher-mode question is put to the brain (the face sends `mode: 'research'`). */
 const RESEARCHER_ASK =
   '[Researcher mode is on: answer this with deep_research, passing the question made self-contained ' +
@@ -829,6 +863,8 @@ const JOBS = createJobs({
           }),
         }),
         ayra_rules: rulesServer({ allowances: ALLOWANCES }),
+        // The owner's notes, their Obsidian vault (notes.mjs); pictures come from her Chrome.
+        ayra_notes: notesServer(notesOptions()),
         // No screen in a job: the tool returns the report as text. `turn` is
         // the job's task in the owner's words, which the research tool ranks.
         ayra_research: researchServer({
@@ -890,6 +926,8 @@ if (env('TELEGRAM', 'on') === 'off') {
         }),
       }),
       ayra_rules: rulesServer({ allowances: ALLOWANCES }),
+      // The owner's notes, their Obsidian vault (notes.mjs); pictures come from her Chrome.
+      ayra_notes: notesServer(notesOptions()),
       ayra_jobs: jobsServer({ jobs: JOBS, allowWrites: ALLOW_WRITES }),
       // Research answers as a text report with numbered sources — no cards on a
       // phone. `turn` is the owner's own words and their rank (telegram.mjs),
@@ -953,6 +991,13 @@ const MEDIA = createMedia({ log: (msg) => console.log(msg) })
 
 /** The fast path's hands (fastpath.mjs): her apps worker, her Chrome, the music. */
 const HANDS = createHands({ appsCall, openInChrome, playOnYouTube, media: MEDIA, isOwnWindow })
+// "Prepare notes on this video", done in code: the same notes_capture the brain
+// would call, without the two model steps around it.
+const NOTES_FAST = Object.fromEntries(notesTools(notesOptions()).map((t) => [t.name, t.handler]))
+HANDS.notes = async (what, asked) => {
+  const r = await NOTES_FAST.notes_capture?.({ what, asked })
+  return r && !r.isError ? r.content.map((c) => c.text ?? '').join(' ').trim() : null
+}
 
 /**
  * Sound from the laptop's own speakers is not the owner (echo.mjs): while any
@@ -1132,6 +1177,8 @@ wss.on('connection', (socket, req) => {
       }),
       // What she may do without asking (rules.mjs).
       ayra_rules: rulesServer({ allowances: ALLOWANCES }),
+      // The owner's notes, their Obsidian vault (notes.mjs); pictures come from her Chrome.
+      ayra_notes: notesServer(notesOptions(sendBlade)),
       // Long tasks in the background (jobs.mjs); their reports go to Telegram when it is on.
       ayra_jobs: jobsServer({ jobs: JOBS, allowWrites: ALLOW_WRITES, reportsTo: phone ? 'Telegram' : null }),
       // The research agent: a small progress card while it works, then the
@@ -1189,6 +1236,9 @@ wss.on('connection', (socket, req) => {
   /** The fast path (fastpath.mjs): done and said in code, or the brain's after all. */
   const quick = async (intent, text, id) => {
     const t0 = Date.now()
+    // A fast command that takes a while (notes on a whole video, ~20 s) says so at once.
+    const first = intent.kind === 'notes' ? 'On it. ' : ''
+    if (first) send({ type: 'text', delta: first, ask: id ?? undefined })
     const did = await runFast(intent, HANDS)
     // The owner moved on while it ran (a new question, Esc): never hand the
     // old one to the brain now — its ask would relabel the newer turn's frames
@@ -1206,7 +1256,7 @@ wss.on('connection', (socket, req) => {
     }
     done.push(did.note)
     send({ type: 'text', delta: did.said, ask: id ?? undefined })
-    send({ type: 'done', text: did.said, ask: id ?? undefined })
+    send({ type: 'done', text: `${first}${did.said}`, ask: id ?? undefined })
     AUDIT.log({ type: 'fast', channel: 'hud', ask: id, text: clip(text), did: did.note, ms: Date.now() - t0 })
     console.log(`[ayra] fast: ${did.note} (${Date.now() - t0} ms)`)
   }
