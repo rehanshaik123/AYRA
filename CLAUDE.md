@@ -108,6 +108,7 @@ Planned — they arrive with their phase; don't call them working before they ex
 | `bridge/jobs.mjs` · `bridge/presence.mjs` | Background jobs — one at a time, 30 min / 60 steps, reported on Telegram; tool server `ayra_jobs` · "I'm back" on Telegram after the laptop was off or asleep |
 | `bridge/research.mjs` · `bridge/trust.mjs` | **The research agent**: `createResearch()` → `run / interrupt / busy / recent / report`; code runs plan → search → read → extract → cross-check → answer with one-shot Claude agents (readers get no tools), reports saved in `data/research/` for replay and offline; tool server `ayra_research` · pure: source trust, injection scan, quote check, confidence |
 | `bridge/deep.mjs` · `bridge/platforms.mjs` | **Researcher mode** (the R key): `createDeepResearch()` → `run / interrupt / busy / ready / report`; planner (high effort) → one lane per platform → rank (relevance + platform signal + trust + freshness) → final cited answer; tool `deep_research` on `ayra_research` · GitHub / Stack Exchange / Hacker News / arXiv public APIs through net.mjs, `signalScore` |
+| `bridge/notes.mjs` · `bridge/screen.mjs` | **Her notebook** — tool server `ayra_notes` on the owner's Obsidian vault (`AYRA_NOTES_DIR`, default `E:\notes`): notes on the whole video or page in front (`notes_capture`, a tool-less writer agent), screen pictures (`notes_picture`), save / add / edit (version before kept in `.ayra-history/`) / search / read / open; never deletes · which window "note this on my screen" pictures (a YouTube video in her Chrome wins) |
 | `bridge/spoken.mjs` | How much of her answer is said: a task in one word ("Created.", "Opened.", "Done." — or her sentence when there is trouble), a question in full, `<more>` details shown only |
 | `bridge/fastpath.mjs` · `bridge/datatag.mjs` · `bridge/eleven.mjs` | Commands done in code, no model turn — open apps / sites / folders, pause / play / next, volume, "play X" (YouTube or Spotify), search, close, several at once · the answer's data card as a `<data>{…}</data>` tag after the spoken answer, cut from speech · a keep-alive ElevenLabs socket for her voice |
 | `bridge/echo.mjs` · `bridge/meter.ps1` | Hands-free ignores the laptop's own speakers: a Windows peak meter, and a burst whose loudness curve matches what was played is dropped before the name check |
@@ -169,7 +170,9 @@ will live in `bridge/link.mjs` (Phase 10), and the same rule applies.
   laptop control off, `CHROME_PORT` 9222, `CHROME_PATH`, `HOTKEY` — AYRA.exe's, default `ctrl+alt+a`, `TRUSTED_SITES` — sites she may grant mic /
   camera herself, `TELEGRAM_TOKEN`,
   `TELEGRAM_OWNER_ID`, `TELEGRAM` — `off` disables it, `CONNECTORS` — default `none`,
-  `RESEARCH_MODEL` — the research agent's workers, default `claude-sonnet-5-5`, `HANDSFREE` — `on` brings hands-free back (default off), `HANDSFREE_HOTKEY` —
+  `RESEARCH_MODEL` — the research agent's workers, default `claude-sonnet-5-5`, `NOTES_DIR` — her
+  Obsidian vault, default `E:\notes`, `NOTES_MODEL` / `NOTES_EFFORT` — the note writer, default the
+  research workers' model at `low`, `HANDSFREE` — `on` brings hands-free back (default off), `HANDSFREE_HOTKEY` —
   AYRA.exe's hands-free switch, default `ctrl+alt+w`, `TALK_HOTKEY` — Space from any app, default
   `alt+space`, `BUBBLE` — `off` hides the bubble, `WAKE_CHECKS_PER_HOUR` — the name-check cap, default 120) plus
   `ELEVENLABS_API_KEY`. Writes are off in code (`ALLOW_WRITES = false` in server.mjs) until the

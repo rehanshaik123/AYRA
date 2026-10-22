@@ -444,13 +444,28 @@ rules) · what AYRA may do in Notion ("whatever it wants" — in its own pages, 
 
 **🧑 Owner steps:** connect Notion in claude.ai (a new integration).
 
+**First app — her notebook in Obsidian (the owner, 2026-10-22):** Notion would not open for them,
+so AYRA's notebook is the Obsidian vault on the laptop (`E:\notes`, AYRA_NOTES_DIR) — plain
+Markdown files she writes directly: no account, no API, no network. Chose at the intent check:
+learning in Chrome (AYRA) · study notes + screenshots · the whole video · notes searched and added
+to later. Their commands: "create a file for this, edit this, add this and that" · "note this,
+which is on screen" (a screenshot of it in the notes) · "prepare overall notes of the video" (all of it).
+
+- [x] 7.0 Obsidian notes (`bridge/notes.mjs`, `ayra_notes`; `bridge/screen.mjs`): notes_capture
+      (whole video by its captions, or a page, written up by a tool-less writer agent, filed, on the
+      home page; "notes on this video" also on the fast path), notes_picture (the video at its moment
+      or the window in front, into that video's note), notes_save / notes_add / notes_edit (the version
+      before kept in .ayra-history), notes_search / notes_read / notes_open. browser_video reads a
+      video's captions. Never deletes. Check: on a real video, all six commands — saved, pictured,
+      created, added, edited, answered from the notes.
 - [ ] 7.1 The "add a tool" recipe, written into CLAUDE.md: gate entry + test, one persona line, the
       HUD's SYSTEMS rail, a PROGRESS line, a demo question.
       Check: 7.2 follows it step by step.
 - [ ] 7.2 Gmail. Check: "anything important in my inbox today?" answered with cards.
 - [ ] 7.3 Google Calendar. Check: "what's on tomorrow?" is right.
 - [ ] 7.4 Google Drive. Check: "find my resume" opens the right file's details.
-- [ ] 7.5 🧑 Notion — AYRA's notebook, with the rules agreed at the intent check.
+- [ ] 7.5 🧑 Notion — optional now: Obsidian is her notebook (7.0). If Notion works for the owner
+      again, a copy of chosen notes there, with the rules agreed at its intent check.
       Check: AYRA writes a test note and finds it again.
 
 ## Phase 8 — Knows me: memory, and teach mode · branch `phase-8-memory`
